@@ -129,8 +129,10 @@ ur10e_sim bash`
 
     ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg
         ├── ClientNode.py                   <-- Note that there is dummy code with a known 
-                                            feasible trajectory for testing purposes (Not from
-                                            SISIFOS)
+                                            feasible trajectory (not from SISIFOS) for testing purposes. 
+                                            Also the scale factor and the values of p_B_I and q_I_B are placeholders. 
+                                            The real values will come from VICON.
+
         ├── Validate_trajServer.py          <-- Explaination of parameters below:
             SKIP_COLLISION=True turns off collision checking for debugging purposes. 
             USE_SEGMENT_FINDER=True turns on the ability to find feasible segments in a larger trajectory.
