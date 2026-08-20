@@ -46,7 +46,7 @@
 * Setup external driver to run the UR10e after a trajectory is validated
 
 
-## Set Up and Running Guide (See the demo video)
+## Set Up and Running Guide 
 #### In terminal #1
 1) Clone the workspace (ros2_ws) from GitHub
 2) Build the docker image from the DockerFile
@@ -112,7 +112,6 @@ ur10e_sim bash`
         ├── smoke_test.py                 <-- Use this to examine collisions reported from test_validation_local.py
         ├── VisualizeContact.py           <-- Use this to examine a configuration and contact point from smoke_test.py
         ├── contact_scene.png             <-- Example output of VisualizeContact.py
-        ├── src_old.zip                   <-- Old versions of local test script to fall back to if needed
         ├── src                           <-- Directory which contains the ROS architecture
         └── Dockerfile                    <-- Builds a docker image with all the needed dependancies to 
                                                 mount the Ros2 workspace on. Is also compatible with Gazebo (for future controls work)
@@ -131,7 +130,7 @@ ur10e_sim bash`
     ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg
         ├── ClientNode.py                   <-- Note that there is dummy code with a known 
                                             feasible trajectory for testing purposes (Not from
-                                            SISIFOS. See this trajectory in the demo video)
+                                            SISIFOS)
         ├── Validate_trajServer.py          <-- Explaination of parameters below:
             SKIP_COLLISION=True turns off collision checking for debugging purposes. 
             USE_SEGMENT_FINDER=True turns on the ability to find feasible segments in a larger trajectory.
