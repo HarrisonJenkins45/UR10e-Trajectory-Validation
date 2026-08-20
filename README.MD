@@ -1,10 +1,10 @@
 # ROS Trajectory Simulator for UR10e
 
 ## Table of Contents
-1. Current Features
-2. Features In Progress
-3. Set Up and Running Guide
-4. File Structure and notes to user
+1. Current Features                      <-- Current capability of the repo
+2. Features In Progress                  <-- Features that still need to be implmented
+3. Set Up and Running Guide              <-- How to set up and run the code
+4. File Structure and notes to user      <-- Important notes about assumptions in a few files for the user to note
 
 
 ## Current Features
