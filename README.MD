@@ -42,11 +42,14 @@
 
 ## Features In progress
 **<u>Base translation </u>**
-* Uses the full capability of our setup ad makes more trajectories feasible
+* Uses the full capability of our setup and makes more trajectories feasible
 
 **<u>Connecting to Hardware </u>**
 * Reading in true relative locations from VICON
 * Setup external driver to run the UR10e after a trajectory is validated
+
+**<u>Collision checking on transition </u>**
+* Current code does a 2-second transition period from the home configuration to the initial waypoint (to avoid instantaneous jumps making trajectories infeasible). This transition is currently not checked to be safe.
 
 
 ## Set Up and Running Guide 
