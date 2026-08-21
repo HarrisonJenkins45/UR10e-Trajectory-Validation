@@ -7,7 +7,7 @@ from ur10e_interfaces.srv import ValidateTrajectory
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 # Module-level debug toggles (easier to find/flip than buried in __init__)
-SKIP_COLLISION = False         # bypass collision checking for debugging
+SKIP_COLLISION = True         # bypass collision checking for debugging
 USE_SEGMENT_FINDER = True    # use find_feasible_segments + the 1st viable segment
                                # instead of process_matlab_validation's all-or-nothing
                                # validation, for REAL requests via validation_callback
@@ -121,6 +121,7 @@ class TrajectoryValidationNode(Node):
         # q_B_G.flatten().tolist(), so it unflattens back to (N, 4) here,
         # one [x, y, z, w] quaternion per (ee_x, ee_y, ee_z) waypoint.
         ee_quat = np.array(request.ee_quat).reshape(-1, 4)
+        simTime=np.array(request.sim_time)
 
         if USE_SEGMENT_FINDER:
             num_waypts = len(ee_x)
@@ -128,7 +129,8 @@ class TrajectoryValidationNode(Node):
             # (t_final - t_transition) / (num_waypts - 1), which simplifies
             # to t_traj / (num_waypts - 1); matched here since incoming
             # requests carry positions only, no explicit timing.
-            dt_waypoint = DEFAULT_T_TRAJ / (num_waypts - 1)
+            # dt_waypoint = DEFAULT_T_TRAJ / (num_waypts - 1)
+            dt_waypoint= simTime[1]-simTime[0]
             segments = self.validator.find_feasible_segments(
                 ee_x, ee_y, ee_z, ee_quat, q_start, min_length=MIN_SEGMENT_LENGTH,
                 dt_waypoint=dt_waypoint, verbose=True
@@ -138,16 +140,16 @@ class TrajectoryValidationNode(Node):
                 q_dot_matrix, q_interp = np.array([]), np.array([])
                 message = f'No feasible segment of length >= {MIN_SEGMENT_LENGTH} found across {num_waypts} waypoints'
             else:
-                segment = segments[0]  # 1st viable segment is used as the full trajectory
-                # segment= max(segments,key=lambda s: s['length'])
+                # segment = segments[0]  # 1st viable segment is used as the full trajectory
+                segment= max(segments,key=lambda s: s['length'])
                 is_valid = True
                 q_dot_matrix, q_interp = self.validator.process_feasible_segment(
                     segment, q_start, dt_waypoint, verbose=True
                 )
-                message = (f'Using 1st feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
-                           f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
-                # message = (f'Using largest feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
+                # message = (f'Using 1st feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
                 #            f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
+                message = (f'Using largest feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
+                           f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
         else:
             # Run validation and generate interpolated trajectory frames
             is_valid, q_dot_matrix, q_interp, message = self.validator.process_matlab_validation(
@@ -211,4 +213,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
