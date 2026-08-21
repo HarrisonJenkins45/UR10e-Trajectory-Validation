@@ -6,6 +6,8 @@ float64[] ee_positions_x
 float64[] ee_positions_y
 float64[] ee_positions_z
 float64[] ee_quat
+float64[] sim_time
+
 ---
 # 2. RESPONSE (Output sent back to the main script)
 bool success

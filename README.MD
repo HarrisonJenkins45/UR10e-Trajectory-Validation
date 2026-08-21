@@ -1,10 +1,13 @@
 # ROS Trajectory Simulator for UR10e
 
 ## Table of Contents
-1. Current Features
-2. Features In Progress
-3. Set Up and Running Guide
-4. File Structure and notes to user
+**1. Current Features**                     <-- Current capability of the repo
+
+**2. Features In Progress**                 <-- Features that still need to be implmented
+
+**3. Set Up and Running Guide**             <-- How to set up and run the code
+
+**4. File Structure and notes to user**     <-- Important notes about assumptions in a few files for the user to note
 
 
 ## Current Features
@@ -39,14 +42,17 @@
 
 ## Features In progress
 **<u>Base translation </u>**
-* Uses the full capability of our setup ad makes more trajectories feasible
+* Uses the full capability of our setup and makes more trajectories feasible
 
 **<u>Connecting to Hardware </u>**
 * Reading in true relative locations from VICON
 * Setup external driver to run the UR10e after a trajectory is validated
 
+**<u>Collision checking on transition </u>**
+* Current code does a 2-second transition period from the home configuration to the initial waypoint (to avoid instantaneous jumps making trajectories infeasible). This transition is currently not checked to be safe.
 
-## Set Up and Running Guide (See the demo video)
+
+## Set Up and Running Guide 
 #### In terminal #1
 1) Clone the workspace (ros2_ws) from GitHub
 2) Build the docker image from the DockerFile
@@ -112,7 +118,6 @@ ur10e_sim bash`
         ├── smoke_test.py                 <-- Use this to examine collisions reported from test_validation_local.py
         ├── VisualizeContact.py           <-- Use this to examine a configuration and contact point from smoke_test.py
         ├── contact_scene.png             <-- Example output of VisualizeContact.py
-        ├── src_old.zip                   <-- Old versions of local test script to fall back to if needed
         ├── src                           <-- Directory which contains the ROS architecture
         └── Dockerfile                    <-- Builds a docker image with all the needed dependancies to 
                                                 mount the Ros2 workspace on. Is also compatible with Gazebo (for future controls work)
@@ -130,8 +135,10 @@ ur10e_sim bash`
 
     ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg
         ├── ClientNode.py                   <-- Note that there is dummy code with a known 
-                                            feasible trajectory for testing purposes (Not from
-                                            SISIFOS. See this trajectory in the demo video)
+                                            feasible trajectory (not from SISIFOS) for testing purposes. 
+                                            Also the scale factor and the values of p_B_I and q_I_B are placeholders. 
+                                            The real values will come from VICON.
+
         ├── Validate_trajServer.py          <-- Explaination of parameters below:
             SKIP_COLLISION=True turns off collision checking for debugging purposes. 
             USE_SEGMENT_FINDER=True turns on the ability to find feasible segments in a larger trajectory.
