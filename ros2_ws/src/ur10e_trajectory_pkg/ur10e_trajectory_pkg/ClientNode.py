@@ -75,8 +75,10 @@ def main(args=None):
     # Slice trajectory for target/EE in ECI/arena world frame to match num_pts
     q_I_G = df[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(dtype=np.float64)[:num_pts]
 
-    # TODO(Harrison): Set this constant for now
-    p_G_I = df[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(dtype=np.float64)[:num_pts]
+    # TODO: Set this constant for now
+    p_G_I = df[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(dtype=np.float64)[0]
+    p_G_I = np.tile((p_G_I), (num_pts, 1)) #<--- Is this correct
+
 
 
     simTime = df['timestamp'].to_numpy(dtype=np.float64)[:num_pts]
@@ -97,7 +99,7 @@ def main(args=None):
 
     #Override SISFOS request with a know valid trajectory
     if TEST_VALID_TRAJ:
-        self.get_logger().info('Using a known valid trajectory')
+        client_node.get_logger().info('Using a known valid trajectory')
 
         # --- Simulation Timing Configuration ---
         t_traj = 10.0  # Time to follow the trajectory (seconds)
@@ -113,7 +115,11 @@ def main(args=None):
         x_pts = np.full(numWayPts, 0.2)
         y_pts = 0.0 + radius * np.cos(omega * t_rel)
         z_pts = 0.5 + radius * np.sin(omega * t_rel)
-        # q_B_G = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (numWayPts, 1))
+        q_B_G = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (numWayPts, 1))
+        # simTime must be re-generated at numWayPts length too -- the SISIFOS
+        # simTime above is 300 samples; sending it alongside these 100-sample
+        # position/quat arrays would send mismatched lengths to the server.
+        simTime = tWaypoints
 
     # Send positions to ROS service
     future = client_node.send_request(
