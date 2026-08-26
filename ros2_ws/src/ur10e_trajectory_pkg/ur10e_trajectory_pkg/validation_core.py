@@ -262,9 +262,10 @@ class TrajectoryValidator:
         if res['low_cond']:
             return f"Singularity: condition number {res['cond_num']:.2f} > {condition_number_threshold}{suffix}"
         if res['jump']:
-            bad = np.where(res['joint_vel'] > max_joint_vel_threshold)[0].tolist()
-            return (f"Joint jump: arm joint index(es) {bad} exceeded {max_joint_vel_threshold} "
-                    f"rad/s (max={res['joint_vel'].max():.3f}){suffix}")
+            bad_arm = np.where(res['joint_vel'][1:] > max_joint_vel_threshold)[0].tolist()
+            rail_bad = res['joint_vel'][0] > max_rail_vel_threshold
+            return (f"Joint/Rail velocity exceeded limits: Rail exceeded={rail_bad} "
+            f"(vel={res['joint_vel'][0]:.3f} m/s), Arm indices={bad_arm}{suffix}")
         if res['collide']:
             return f"Collision: q={np.round(res['q_full'], 3)}{suffix}"
         return f'Unknown failure{suffix}'
@@ -301,26 +302,34 @@ class TrajectoryValidator:
                         if singular_values[-1] > 1e-9 else np.inf)
             low_cond = cond_num > condition_number_threshold
 
-            #Rail Velocity Check
-            rail_velo=np.abs(rail - prev_rail) / dt_waypoint
-            rail_jump = np.any(rail_velo > max_rail_vel_threshold)
-
-
-
-
+            # Joint and Rail Velocity Checks
             if check_jump:
-                joint_vel = np.abs(q_arm - prev_arm) / dt_waypoint
-                jump = np.any(joint_vel > max_joint_vel_threshold)
+                # Check Arm Velocities
+                arm_vel = np.abs(q_arm - prev_arm) / dt_waypoint
+                arm_jump = np.any(arm_vel > max_joint_vel_threshold)
+                
+                # Check Rail Velocity (safeguard against prev_rail being None)
+                if prev_rail is not None:
+                    rail_vel = np.abs(rail - prev_rail) / dt_waypoint
+                    rail_jump = rail_vel > max_rail_vel_threshold
+                else:
+                    rail_vel = 0.0
+                    rail_jump = False
+
+                jump = arm_jump or rail_jump
+                
+                # Concatenate joint velocities for reporting: [rail_vel, arm_vel...]
+                joint_vel = np.concatenate(([rail_vel if prev_rail is not None else 0.0], arm_vel))
             else:
-                joint_vel = np.zeros(6)
+                joint_vel = np.zeros(7)
                 jump = False
+
             if len(q_full) != 7:
                 raise ValueError(f"Expected q_full length 7, got {len(q_full)}")
+                
             collide = self.check_all_collisions(q_full, verbose=verbose)
             return dict(q_full=q_full, cond_num=cond_num, low_cond=low_cond,
                         jump=jump, collide=collide, joint_vel=joint_vel)
-
-
 
         # True 7DOF rail solve
         search_radius = 0.05
