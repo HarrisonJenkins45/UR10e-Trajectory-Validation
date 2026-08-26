@@ -42,11 +42,13 @@
     * `VisualizeTraj_RvizPlayback.py`
     * `obstacle_markers.py`
 
-**<u>Base translation </u>**
-* Includes the rail as a 7th degree of freedom in all IK optimizations
+
 
 
 ## Features In progress
+**<u>Base translation </u>**
+* Includes the rail as a 7th degree of freedom in all IK optimizations
+
 
 **<u>Connecting to Hardware </u>**
 * Reading in true relative locations from VICON
@@ -59,6 +61,8 @@
 * Update ClientNode.py to clearly define each frame (with the A frame equal to the G frame for ow)
 * As an immediate goal want hold the translation of the A/G frame constant and simulate pure tumbling motion based on the quaterions
 
+**<u>Get accurate features for URDF </u>**
+* Need to update the rail with accurate specs based
 
 
 ## Set Up and Running Guide 

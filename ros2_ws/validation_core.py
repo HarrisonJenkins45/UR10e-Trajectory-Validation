@@ -442,6 +442,7 @@ class TrajectoryValidator:
         solve seeded from q_start's arm joints (see find_feasible_segments),
         so this only adds the initial physical approach from wherever the
         arm actually starts.
+        
         dt_waypoint: must match what was passed into find_feasible_segments
         for this segment, so the recovered timing lines up.
 
