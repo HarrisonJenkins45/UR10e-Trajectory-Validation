@@ -409,7 +409,8 @@
 
   <!-- Linear rail the arm is mounted on. PLACEHOLDER VALUES below: confirm
        against the real rig (axis direction, limit travel range); the
-       box sizes/mass/inertia are rough stand-ins, not measured. -->
+       box sizes/mass/inertia are rough stand-ins, not measured. 
+       TODO(Harrison): Get the real values, formally add the rail to the URDF-->
   <link name="rail_base_link">
     <visual>
       <geometry><box size="2.0 0.1 0.05"/></geometry>

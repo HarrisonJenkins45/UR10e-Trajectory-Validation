@@ -38,8 +38,7 @@ class TrajectoryClientNode(Node):
 
     @staticmethod
     def get_end_effector_in_base_frame(p_G_I, q_I_G, p_B_I, q_I_B, TARGET_BOUND_M):
-        """Converts camera position/orientation from inertial (I) frame to UR10e base (B) frame
-
+        """Converts target position/orientation from inertial (I) frame to UR10e base (B) frame
         with spatial scaling to bound maximum trajectory extent.
         """
         # 1. Spatial scaling
@@ -73,8 +72,10 @@ def main(args=None):
     df = pd.read_csv(csv_path)
     num_pts= 300# or p_G_I.shape[0]
 
-    # Slice trajectory to match num_pts
+    # Slice trajectory for target/EE in ECI/arena world frame to match num_pts
     q_I_G = df[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(dtype=np.float64)[:num_pts]
+
+    # TODO(Harrison): Set this constant for now
     p_G_I = df[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(dtype=np.float64)[:num_pts]
 
 
@@ -112,7 +113,7 @@ def main(args=None):
         x_pts = np.full(numWayPts, 0.2)
         y_pts = 0.0 + radius * np.cos(omega * t_rel)
         z_pts = 0.5 + radius * np.sin(omega * t_rel)
-        q_B_G = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (numWayPts, 1))
+        # q_B_G = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (numWayPts, 1))
 
     # Send positions to ROS service
     future = client_node.send_request(

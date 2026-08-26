@@ -217,7 +217,7 @@ class TrajectoryValidator:
         return (parent_cluster(anchor_i) == anchor_j or
                 parent_cluster(anchor_j) == anchor_i)
 
-    def solve_ik_lm(self, target_pos, target_quat, q_seed_arm, allow_rail=False, rail_seed=0.0):
+    def solve_ik_lm(self, target_pos, target_quat, q_seed_arm, allow_rail=True, rail_seed=0.0):
         """target_pos: [x, y, z]. target_quat: [x, y, z, w] (scipy/SE3 quat
         order, matching the rest of the pipeline -- get_end_effector_in_
         base_frame's q_B_G output is already in this order). q_seed_arm:
@@ -246,7 +246,7 @@ class TrajectoryValidator:
             q0 = np.concatenate(([rail_seed], q_seed_arm))
             sol = self.robot.ikine_LM(T_target, end=EE_LINK, q0=q0,
                                        mask=[1, 1, 1, 1, 1, 1], tol=1e-4)
-            return sol.q[1:], sol, sol.q[0]
+            return sol.q[0],sol.q[1:], sol
 
 
         # start='base_link' excludes the rail joint from the search entirely,
@@ -261,7 +261,7 @@ class TrajectoryValidator:
         # roll,pitch,yaw), not position-only.
         sol = self.robot.ikine_LM(T_target, end=EE_LINK, start='base_link', q0=q_seed_arm,
                                    mask=[1, 1, 1, 1, 1, 1], tol=1e-4)
-        return sol.q, sol, rail_seed
+        return rail_seed, sol.q, sol
 
     def compute_jacobian(self, q_arm):
         return self.robot.jacobe(q_arm, end=EE_LINK, start='base_link')
@@ -294,10 +294,10 @@ class TrajectoryValidator:
         main loop) and find_feasible_segments, so the recovery policy only
         lives in one place.
 
-        Stage 1 (always): up to max_attempts retries using ONLY the 6 arm
+        (REMOVED) Stage 1 (always): up to max_attempts retries using ONLY the 6 arm
         joints, rail held fixed at rail_pos.
 
-        Stage 2 (only if allow_rail_fallback and Stage 1 is fully
+        (DEFAULT)Stage 2 (only if allow_rail_fallback and Stage 1 is fully
         exhausted): up to max_rail_attempts further retries with the rail
         ALSO free to move, as a genuine last resort -- see solve_ik_lm's
         allow_rail docstring for why this isn't a first-class option.
@@ -329,17 +329,20 @@ class TrajectoryValidator:
             else:
                 joint_vel = np.zeros(6)
                 jump = False
+            if len(q_full) != 7:
+                raise ValueError(f"Expected q_full length 7, got {len(q_full)}")
             collide = self.check_all_collisions(q_full, verbose=verbose)
             return dict(q_full=q_full, cond_num=cond_num, low_cond=low_cond,
                         jump=jump, collide=collide, joint_vel=joint_vel)
 
+        """
         # Stage 1: arm-only, rail locked
         search_radius = 0.05
         last = (None, None, None)
         for attempt in range(max_attempts + 1):
             this_seed = seed_arm if attempt == 0 else (
                 seed_arm + (2 * np.random.rand(6) - 1) * search_radius)
-            q_arm, sol, _ = self.solve_ik_lm(target_pos, target_quat, this_seed,
+            _, q_arm, sol = self.solve_ik_lm(target_pos, target_quat, this_seed,
                                               allow_rail=False, rail_seed=rail_pos)
             res = evaluate(q_arm, sol, rail_pos)
             if res is not None and not (res['low_cond'] or res['jump'] or res['collide']):
@@ -361,15 +364,14 @@ class TrajectoryValidator:
                         rail_pos=rail_pos, cond_num=(res['cond_num'] if res else None),
                         joint_vel=(res['joint_vel'] if res else None),
                         attempts_used=max_attempts, rail_moved=False, reason=reason)
+        """
 
         # Stage 2: rail-assisted recovery, genuine last resort only
-        if verbose:
-            print(f'{label}arm-only attempts exhausted -- trying rail-assisted recovery...')
         search_radius = 0.05
         for attempt in range(max_rail_attempts + 1):
             this_seed = seed_arm if attempt == 0 else (
                 seed_arm + (2 * np.random.rand(6) - 1) * search_radius)
-            q_arm, sol, new_rail = self.solve_ik_lm(target_pos, target_quat, this_seed,
+            new_rail, q_arm, sol = self.solve_ik_lm(target_pos, target_quat, this_seed,
                                                      allow_rail=True, rail_seed=rail_pos)
             res = evaluate(q_arm, sol, new_rail)
             if res is not None and not (res['low_cond'] or res['jump'] or res['collide']):
@@ -629,9 +631,9 @@ class TrajectoryValidator:
             rail_pos = result['rail_pos']
         else:
             # Original unchecked behavior, untouched.
-            q_arm_transition, sol0, _ = self.solve_ik_lm(
+            _ ,q_arm_transition, sol0 = self.solve_ik_lm(
                 pos_waypoints[0, :], quat_waypoints[0, :], q_arm_start,
-                allow_rail=False, rail_seed=rail_pos)
+                allow_rail=True, rail_seed=rail_pos)
             if not sol0.success:
                 msg = f'IK did not converge on the approach/transition waypoint (target={np.round(pos_waypoints[0, :], 3)}, reason={sol0.reason})'
                 if verbose:
