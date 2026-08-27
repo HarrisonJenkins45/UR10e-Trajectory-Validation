@@ -7,7 +7,7 @@ from ur10e_interfaces.srv import ValidateTrajectory
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 # Module-level debug toggles (easier to find/flip than buried in __init__)
-SKIP_COLLISION = True         # bypass collision checking for debugging
+SKIP_COLLISION = False         # bypass collision checking for debugging
 USE_SEGMENT_FINDER = True    # use find_feasible_segments + the 1st viable segment
                                # instead of process_matlab_validation's all-or-nothing
                                # validation, for REAL requests via validation_callback
@@ -56,6 +56,7 @@ class TrajectoryValidationNode(Node):
         self.playback_frames = None
         self.current_frame_idx = 0
         self.framerate = 30
+        self.playbackFrameRate=60
 
         self.joint_names = [
             'linear_rail_joint',
@@ -177,7 +178,7 @@ class TrajectoryValidationNode(Node):
 
         self.playback_frames = q_interp
         self.current_frame_idx = 0
-        timer_period = 1.0 / self.framerate
+        timer_period = 1.0 / self.playbackFrameRate
 
         self.playback_timer = self.create_timer(timer_period, self.publish_next_frame)
         self.get_logger().info(f'Streaming {len(q_interp)} frames at {self.framerate} Hz...')

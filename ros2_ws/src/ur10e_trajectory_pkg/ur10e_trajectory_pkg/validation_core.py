@@ -41,7 +41,8 @@ class TrajectoryValidator:
         tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.urdf', delete=False, dir=urdf_dir)
         tmp.write(urdf_text)
         tmp.close()
-        self._resolved_urdf_path = tmp.name
+        self._resolved_urdf_path = tmp.name 
+
 
         try:
             self.robot = rtb.ERobot.URDF(self._resolved_urdf_path)
@@ -93,21 +94,21 @@ class TrajectoryValidator:
                 )
             self._rail_limits = (float(self.robot.qlim[0][0]), float(self.robot.qlim[1][0]))
 
-            # Kept for visualization/back-compat only (e.g. anything that
-            # still expects validator.env / validator.floor_box /
-            # validator.wall_box to exist) -- collision checking below no
-            # longer uses these.
-            self.floor_box = Cuboid(scale=[3.0, 0.05, 3.0], pose=SE3(0.0, 1.0, 0.0))
-            self.wall_box = Cuboid(scale=[3.0, 3.0, 0.05], pose=SE3(0.0, 0.0, -0.05))
+            # # Kept for visualization/back-compat only (e.g. anything that
+            # # still expects validator.env / validator.floor_box /
+            # # validator.wall_box to exist) -- collision checking below no
+            # # longer uses these.
+            # self.floor_box = Cuboid(scale=[3.0, 0.05, 3.0], pose=SE3(0.0, 1.0, 0.0))
+            # self.wall_box = Cuboid(scale=[3.0, 3.0, 0.05], pose=SE3(0.0, 0.0, -0.05))
 
             
-            # Matches rail_base_link's <collision><box size="2.0 0.1 0.05"/></collision>
-            # in the URDF (no <origin> offset there, so identity pose) -- for
-            # visualization only; the pybullet box built in
-            # _init_pybullet_collision_model is what's actually used for
-            # collision checking.
-            self.rail_box = Cuboid(scale=[2.0, 0.1, 0.05], pose=SE3())
-            self.env = [self.floor_box, self.wall_box, self.rail_box]
+            # # Matches rail_base_link's <collision><box size="2.0 0.1 0.05"/></collision>
+            # # in the URDF (no <origin> offset there, so identity pose) -- for
+            # # visualization only; the pybullet box built in
+            # # _init_pybullet_collision_model is what's actually used for
+            # # collision checking.
+            # self.rail_box = Cuboid(scale=[2.0, 0.1, 0.05], pose=SE3())
+            # self.env = [self.floor_box, self.wall_box, self.rail_box]
 
             self._init_pybullet_collision_model()
         finally:
@@ -254,7 +255,7 @@ class TrajectoryValidator:
     def compute_jacobian(self, q_arm):
         return self.robot.jacobe(q_arm, end=EE_LINK, start='base_link')
 
-    def _failure_reason(self, sol, res, condition_number_threshold,
+    def _failure_reason(self, sol, res, condition_number_threshold,max_rail_vel_threshold,
                          max_joint_vel_threshold, rail_fallback_exhausted):
         suffix = ' (rail-assisted recovery also exhausted)' if rail_fallback_exhausted else ''
         if res is None:
@@ -273,7 +274,7 @@ class TrajectoryValidator:
     def _solve_waypoint_with_recovery(self, target_pos, target_quat, seed_arm, rail_pos, prev_rail=None,
                                        prev_arm=None, check_jump=False,
                                        dt_waypoint=None,
-                                       max_rail_vel_threshold=2.0,
+                                       max_rail_vel_threshold=1.0,
                                        max_joint_vel_threshold=2.0,
                                        condition_number_threshold=50.0,
                                        max_attempts=10,
@@ -311,6 +312,7 @@ class TrajectoryValidator:
                 # Check Rail Velocity (safeguard against prev_rail being None)
                 if prev_rail is not None:
                     rail_vel = np.abs(rail - prev_rail) / dt_waypoint
+                    # print(f"\n rail_vel {rail_vel}\n dt={dt_waypoint}")
                     rail_jump = rail_vel > max_rail_vel_threshold
                 else:
                     rail_vel = 0.0
@@ -404,7 +406,7 @@ class TrajectoryValidator:
 
     def find_feasible_segments(self, ee_x, ee_y, ee_z, ee_quat, q_seed, min_length,
                                     dt_waypoint,
-                                    max_rail_vel_threshold=2.0,
+                                    max_rail_vel_threshold=1.0,
                                     max_joint_vel_threshold=2.0,
                                     condition_number_threshold=50.0,
                                     max_attempts=10,
@@ -532,7 +534,7 @@ class TrajectoryValidator:
         return q_dot, q_interp
 
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
-                                  max_rail_vel_threshold=2.0,
+                                  max_rail_vel_threshold=1.0,
                                    max_joint_vel_threshold=2.0,
                                    condition_number_threshold=50.0,
                                    t_transition=2.0, t_traj=10.0,
@@ -575,7 +577,7 @@ class TrajectoryValidator:
         config_soln[0, :] = q_start
 
         dt_waypoint = (t_final - t_transition) / (num_waypts - 1)
-        assert dt_waypoint==1, f'dt_waypoint={dt_waypoint} differs from SISFOS Default 0.1'
+        assert dt_waypoint==0.1, f'dt_waypoint={dt_waypoint} differs from SISFOS Default 0.1'
         # dt_waypoint= 0.1
 
         if check_transition:
