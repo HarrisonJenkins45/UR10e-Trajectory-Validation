@@ -10,6 +10,7 @@ import pybullet as pb
 from spatialmath import SE3, UnitQuaternion
 from spatialgeometry import Cuboid
 from scipy.interpolate import PchipInterpolator
+import matplotlib.pyplot as plt
 
 EE_LINK = "tool0"
 
@@ -479,60 +480,176 @@ class TrajectoryValidator:
 
             return segments
 
-    def process_feasible_segment(self, segment, q_start, dt_waypoint,
-                                  t_transition=2.0, verbose=False):
-        """Turn a single segment returned by find_feasible_segments into a
-        full framerate trajectory, so it can be used as a drop-in
-        replacement for process_matlab_validation's output (q_dot,
-        q_interp) when the caller wants to run with "first feasible
-        segment == the whole trajectory" instead of failing outright on
-        any single infeasible waypoint.
+    def process_feasible_segment(
+            self,
+            segment,
+            q_start,
+            dt_waypoint,
+            t_transition=2.0,
+            verbose=False,
+        ):
+            """Turn a single segment returned by find_feasible_segments into a
+            full framerate trajectory, so it can be used as a drop-in
+            replacement for process_matlab_validation's output (q_dot,
+            q_interp) when the caller wants to run with "first feasible
+            segment == the whole trajectory" instead of failing outright on
+            any single infeasible waypoint.
 
-        segment['q_full'] is already IK-solved/checked (that's what made it
-        into the segment in the first place), so no solving happens here --
-        this just does the same unchecked approach-phase prepend + pchip
-        interpolation + np.gradient tail that process_matlab_validation
-        does for the full waypoint set.
+            segment['q_full'] is already IK-solved/checked (that's what made it
+            into the segment in the first place), so no solving happens here --
+            this just does the same unchecked approach-phase prepend + pchip
+            interpolation + np.gradient tail that process_matlab_validation
+            does for the full waypoint set.
 
-        q_start: the actual arm state to transition FROM (e.g. q_home).
-        Prepended as an unchecked point at t=0, exactly like the
-        transition-phase solve in process_matlab_validation -- the
-        segment's own first point was already given an unchecked "entry"
-        solve seeded from q_start's arm joints (see find_feasible_segments),
-        so this only adds the initial physical approach from wherever the
-        arm actually starts.
-        dt_waypoint: must match what was passed into find_feasible_segments
-        for this segment, so the recovered timing lines up.
+            q_start: the actual arm state to transition FROM (e.g. q_home).
+            Prepended as an unchecked point at t=0, exactly like the
+            transition-phase solve in process_matlab_validation -- the
+            segment's own first point was already given an unchecked "entry"
+            solve seeded from q_start's arm joints (see find_feasible_segments),
+            so this only adds the initial physical approach from wherever the
+            arm actually starts.
+            dt_waypoint: must match what was passed into find_feasible_segments
+            for this segment, so the recovered timing lines up.
 
-        Returns: (q_dot, q_interp), matching the tail of the return tuple
-        from process_matlab_validation.
-        """
-        q_full_seg = segment['q_full']
-        seg_len = len(q_full_seg)
+            Returns: (q_dot, q_interp), matching the tail of the return tuple
+            from process_matlab_validation.
+            """
+            q_full_seg = segment['q_full']
+            seg_len = len(q_full_seg)
 
-        t_traj = dt_waypoint * (seg_len - 1)
-        t_final = t_traj + t_transition
-        num_frames = int(t_final * self.framerate)
+            t_traj = dt_waypoint * (seg_len - 1)
+            t_final = t_traj + t_transition
+            num_frames = int(t_final * self.framerate)
 
-        config_soln = np.zeros((seg_len + 1, 7))
-        config_soln[0, :] = q_start
-        config_soln[1:, :] = q_full_seg
+            config_soln = np.zeros((seg_len + 1, 7))
+            config_soln[0, :] = q_start
+            config_soln[1:, :] = q_full_seg
 
-        t_waypoints_full = np.concatenate(([0], np.linspace(t_transition, t_final, seg_len)))
-        t_sim = np.linspace(0, t_final, num_frames)
+            t_waypoints_full = np.concatenate(
+                ([0], np.linspace(t_transition, t_final, seg_len))
+            )
+            t_sim = np.linspace(0, t_final, num_frames)
 
-        pchip_interpolator = PchipInterpolator(t_waypoints_full, config_soln, axis=0)
-        q_interp = pchip_interpolator(t_sim)
+            pchip_interpolator = PchipInterpolator(
+                t_waypoints_full, config_soln, axis=0
+            )
+            q_interp = pchip_interpolator(t_sim)
 
-        dt_sim = 1.0 / self.framerate
-        q_dot = np.gradient(q_interp, dt_sim, axis=0)
+            dt_sim = 1.0 / self.framerate
+            q_dot = np.gradient(q_interp, dt_sim, axis=0)
 
-        if verbose:
-            print(f'[segment interp] segment [{segment["start_idx"]}, {segment["end_idx"]}] '
-                  f'(len={seg_len}) -> {num_frames} frames over {t_final:.2f}s')
+            if verbose:
+                print(
+                    f'[segment interp] segment [{segment["start_idx"]}, {segment["end_idx"]}] '
+                    f'(len={seg_len}) -> {num_frames} frames over {t_final:.2f}s'
+                )
 
-        return q_dot, q_interp
+            # --- Plotting Joint Velocities ---
 
+    # Host bind-mount directory for saving plots
+            save_dir = '/root/ros2_ws/src/'
+            os.makedirs(save_dir, exist_ok=True)
+
+            arm_joint_labels = [
+                'Shoulder Pan',
+                'Shoulder Lift',
+                'Elbow',
+                'Wrist 1',
+                'Wrist 2',
+                'Wrist 3',
+            ]
+
+            # --- Plot 1: Arm Joint Velocities ---
+            try:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                for i in range(6):
+                    ax.plot(
+                        t_sim,
+                        q_dot[:, i + 1],
+                        linewidth=1.8,
+                        label=arm_joint_labels[i],
+                    )
+
+                ax.axhline(
+                    y=0.1,
+                    color='r',
+                    linestyle='--',
+                    alpha=0.7,
+                    label='Arm Limit (+)',
+                )
+                ax.axhline(
+                    y=-0.2,#max_joint_vel_threshold,
+                    color='r',
+                    linestyle='--',
+                    alpha=0.7,
+                    label='Arm Limit (-)',
+                )
+
+                ax.set_title(
+                    'Feasible Segment Arm Joint Velocities',
+                    fontsize=14,
+                    fontweight='bold',
+                )
+                ax.set_xlabel('Time (s)', fontsize=12)
+                ax.set_ylabel('Velocity (rad/s)', fontsize=12)
+                ax.grid(True, which='both', linestyle=':', alpha=0.6)
+                ax.autoscale(enable=True, axis='both', tight=True)
+                ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.0))
+
+                arm_save_path = os.path.join(save_dir, 'arm_joint_velocities.png')
+                plt.savefig(arm_save_path, bbox_inches='tight', dpi=300)
+                plt.close(fig)
+
+                if verbose:
+                    print(f'Arm joint velocity plot saved to: {arm_save_path}')
+            except Exception as e:
+                print(f'Failed to generate arm velocity plot: {e}')
+
+            # --- Plot 2: Rail Velocity ---
+            try:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(
+                    t_sim,
+                    q_dot[:, 0],
+                    color='purple',
+                    linewidth=2.0,
+                    label='Rail Carriage',
+                )
+
+                ax.axhline(
+                    y=0.1,#max_rail_vel_threshold,
+                    color='m',
+                    linestyle='--',
+                    alpha=0.7,
+                    label='Rail Limit (+)',
+                )
+                ax.axhline(
+                    y=-0.1,
+                    color='m',
+                    linestyle='--',
+                    alpha=0.7,
+                    label='Rail Limit (-)',
+                )
+
+                ax.set_title(
+                    'Feasible Segment Rail Velocity', fontsize=14, fontweight='bold'
+                )
+                ax.set_xlabel('Time (s)', fontsize=12)
+                ax.set_ylabel('Velocity (m/s)', fontsize=12)
+                ax.grid(True, which='both', linestyle=':', alpha=0.6)
+                ax.autoscale(enable=True, axis='both', tight=True)
+                ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.0))
+
+                rail_save_path = os.path.join(save_dir, 'rail_velocity.png')
+                plt.savefig(rail_save_path, bbox_inches='tight', dpi=300)
+                plt.close(fig)
+
+                if verbose:
+                    print(f'Rail velocity plot saved to: {rail_save_path}')
+            except Exception as e:
+                print(f'Failed to generate rail velocity plot: {e}')
+
+            return q_dot, q_interp
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
                                   max_rail_vel_threshold=1.0,
                                    max_joint_vel_threshold=2.0,
