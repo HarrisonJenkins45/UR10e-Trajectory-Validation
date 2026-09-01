@@ -1,0 +1,4 @@
+srv/ValidateTrajectory.idl
+srv/ValidateTrajectory.srv
+srv/ValidateTrajectory_Request.msg
+srv/ValidateTrajectory_Response.msg

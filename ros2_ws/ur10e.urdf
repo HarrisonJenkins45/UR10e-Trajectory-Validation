@@ -409,11 +409,10 @@
 
   <!-- Linear rail the arm is mounted on. PLACEHOLDER VALUES below: confirm
        against the real rig (axis direction, limit travel range); the
-       box sizes/mass/inertia are rough stand-ins, not measured. 
-       TODO(Harrison): Get the real values, formally add the rail to the URDF-->
+       box sizes/mass/inertia are rough stand-ins, not measured. -->
   <link name="rail_base_link">
     <visual>
-      <geometry><box size="2.0 0.1 0.05"/></geometry>
+      <geometry><box size="3.0 0.1 0.05"/></geometry>
       <material name="rail_grey"><color rgba="0.5 0.5 0.5 1"/></material>
     </visual>
     <collision>
@@ -452,9 +451,10 @@
   <joint name="linear_rail_joint" type="prismatic">
     <parent link="rail_base_link"/>
     <child link="rail_carriage_link"/>
-    <axis xyz="0 1 0"/>
-    <origin rpy="0 0 0" xyz="0 0 0.025"/>
-    <limit lower="-1.0" upper="1.0" effort="500" velocity="1.0"/>
+    <axis xyz="1 0 0"/>
+    <origin rpy="0 0 0" xyz="0 0 0.025"/><!--TODO: Get the correct values for this offset??-->
+    <limit lower="0.0" upper="3.0" effort="500" velocity="5.0"/>  <!--NOTE: The actual measured values from the center of the rail are -->
+    <!-- <limit lower="-1.5" upper="1.5" effort="500" velocity="5.0"/>  NOTE: The actual measured values from the center of the rail are -->
   </joint>
 
   <!-- links -  main serial chain -->
@@ -746,26 +746,26 @@
             name="ignition::gazebo::systems::JointPositionController">
       <joint_name>shoulder_lift_joint</joint_name>
       <topic>/model/ur10e/joint/shoulder_lift_joint/cmd_pos</topic>
-      <p_gain>50</p_gain>
+      <p_gain>300</p_gain>
       <i_gain>0.1</i_gain>
-      <d_gain>1</d_gain>
+      <d_gain>10</d_gain>
       <i_max>1</i_max>
       <i_min>-1</i_min>
-      <cmd_max>100</cmd_max>
-      <cmd_min>-100</cmd_min>
+      <cmd_max>300</cmd_max>
+      <cmd_min>-300</cmd_min>
     </plugin>
 
     <plugin filename="libignition-gazebo-joint-position-controller-system.so"
             name="ignition::gazebo::systems::JointPositionController">
       <joint_name>elbow_joint</joint_name>
       <topic>/model/ur10e/joint/elbow_joint/cmd_pos</topic>
-      <p_gain>50</p_gain>
+      <p_gain>300</p_gain>
       <i_gain>0.1</i_gain>
-      <d_gain>1</d_gain>
+      <d_gain>10</d_gain>
       <i_max>1</i_max>
       <i_min>-1</i_min>
-      <cmd_max>100</cmd_max>
-      <cmd_min>-100</cmd_min>
+      <cmd_max>300</cmd_max>
+      <cmd_min>-300</cmd_min>
     </plugin>
 
     <plugin filename="libignition-gazebo-joint-position-controller-system.so"

@@ -1,0 +1,258 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-8522060fc3d368d8da0b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						18
+					]
+				},
+				{
+					"build" : "ur10e_interfaces__py",
+					"jsonFile" : "directory-ur10e_interfaces__py-c7f83b291963ca792335.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/root/ros2_ws/build/ur10e_interfaces/ur10e_interfaces__py",
+					"targetIndexes" : 
+					[
+						5
+					]
+				},
+				{
+					"build" : "ur10e_interfaces__rs",
+					"jsonFile" : "directory-ur10e_interfaces__rs-bfc589d6e2ea1255db15.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/root/ros2_ws/build/ur10e_interfaces/ur10e_interfaces__rs",
+					"targetIndexes" : 
+					[
+						17
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "ur10e_interfaces",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_ur10e_interfaces_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_ur10e_interfaces_egg-8d067000f8d2234450e2.json",
+					"name" : "ament_cmake_python_build_ur10e_interfaces_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_ur10e_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_ur10e_interfaces-6e3e0b78b054fc5e9bbf.json",
+					"name" : "ament_cmake_python_copy_ur10e_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-5385d96131605b3c6e6d.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces-dc39a854806aeb62b1ed.json",
+					"name" : "ur10e_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__cpp-f37fcde1f596389ebbcd.json",
+					"name" : "ur10e_interfaces__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "ur10e_interfaces__py::@c5584a0dfcc30d8de4e5",
+					"jsonFile" : "target-ur10e_interfaces__py-2e6c1f058242144a3a39.json",
+					"name" : "ur10e_interfaces__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_generator_c-00d1de982e3f067f2a19.json",
+					"name" : "ur10e_interfaces__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_generator_py-1bc111b60d7ba520d483.json",
+					"name" : "ur10e_interfaces__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_c-1ad6674bacadf97fd0d4.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_c__pyext-1da606eada3279b11ab7.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_cpp-7da4e10bdda0fd73ebea.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_fastrtps_c-6b455347412e827dc48e.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext-14db878121abd484035b.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_fastrtps_cpp-912eabb42e1a962f1fdd.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_introspection_c-8fa55bae3f2728bb8260.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_introspection_c__pyext-700bc5cb110d295d02c6.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces__rosidl_typesupport_introspection_cpp-fad3f78070d1f344df96.json",
+					"name" : "ur10e_interfaces__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "ur10e_interfaces__rs::@a2a9db72fcf50d918242",
+					"jsonFile" : "target-ur10e_interfaces__rs-1300150e562723de79f0.json",
+					"name" : "ur10e_interfaces__rs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ur10e_interfaces_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ur10e_interfaces_uninstall-069657376693552fb264.json",
+					"name" : "ur10e_interfaces_uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/root/ros2_ws/build/ur10e_interfaces",
+		"source" : "/root/ros2_ws/src/ur10e_interfaces"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

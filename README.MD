@@ -42,27 +42,37 @@
     * `VisualizeTraj_RvizPlayback.py`
     * `obstacle_markers.py`
 
+**<u> SISIFOS relative rail read-in</u>**
+* Need to make sure the rail is properly situated relative to the home position in the arena
 
+**<u>Base translation </u>**
+* Includes the rail as a 7th degree of freedom in all IK optimizations
+
+
+**<u>Orientation only simulation </u>**
+* Update ClientNode.py to clearly define each frame (with the A frame equal to the G frame for ow)
+* As an immediate goal want hold the translation of the A/G frame constant and simulate pure tumbling motion based on the quaterions
 
 
 ## Features In progress
-**<u>Base translation </u>**
-* Includes the rail as a 7th degree of freedom in all IK optimizations
+
+**<u>Get accurate features for URDF </u>**
+* Need to update the rail with accurate specs based
+* Validation_core should get the rail velocity limit from the URDF
+* How is the rail joint perpendicular to the direction of travel in the URDF, but it looks fine in Sim
+* Get the proper distance for the rail join origin
+currently: linear_rail_joint has origin xyz="0 0 0.025"
+
+
+**<u>Joint velocity checking on the rail </u>**
+* Current code lacks a way to limit rail velocities that would produce non-feasible/unsafe rail commands
+    * Documentation suggests that the max speed is 5m/s?? and max accel is 60 m/s^2??
 
 
 **<u>Connecting to Hardware </u>**
 * Reading in true relative locations from VICON
 * Setup external driver to run the UR10e after a trajectory is validated
 
-**<u>Joint velocity checking on the rail </u>**
-* Current code lacks a way to limit rail velocities that would produce non-feasible/unsafe rail commands
-
-**<u>Orientation only simulation </u>**
-* Update ClientNode.py to clearly define each frame (with the A frame equal to the G frame for ow)
-* As an immediate goal want hold the translation of the A/G frame constant and simulate pure tumbling motion based on the quaterions
-
-**<u>Get accurate features for URDF </u>**
-* Need to update the rail with accurate specs based
 
 
 ## Set Up and Running Guide 

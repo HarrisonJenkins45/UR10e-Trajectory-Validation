@@ -1,0 +1,35 @@
+running egg_info
+creating ../../build/package1/package1.egg-info
+writing ../../build/package1/package1.egg-info/PKG-INFO
+writing dependency_links to ../../build/package1/package1.egg-info/dependency_links.txt
+writing entry points to ../../build/package1/package1.egg-info/entry_points.txt
+writing requirements to ../../build/package1/package1.egg-info/requires.txt
+writing top-level names to ../../build/package1/package1.egg-info/top_level.txt
+writing manifest file '../../build/package1/package1.egg-info/SOURCES.txt'
+reading manifest file '../../build/package1/package1.egg-info/SOURCES.txt'
+writing manifest file '../../build/package1/package1.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /root/ros2_ws/build/package1/build
+creating /root/ros2_ws/build/package1/build/lib
+creating /root/ros2_ws/build/package1/build/lib/package1
+copying package1/first_node.py -> /root/ros2_ws/build/package1/build/lib/package1
+copying package1/__init__.py -> /root/ros2_ws/build/package1/build/lib/package1
+running install
+running install_lib
+creating /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1
+copying /root/ros2_ws/build/package1/build/lib/package1/first_node.py -> /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1
+copying /root/ros2_ws/build/package1/build/lib/package1/__init__.py -> /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1
+byte-compiling /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1/first_node.py to first_node.cpython-310.pyc
+byte-compiling /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /root/ros2_ws/install/package1/share/ament_index
+creating /root/ros2_ws/install/package1/share/ament_index/resource_index
+creating /root/ros2_ws/install/package1/share/ament_index/resource_index/packages
+copying resource/package1 -> /root/ros2_ws/install/package1/share/ament_index/resource_index/packages
+copying package.xml -> /root/ros2_ws/install/package1/share/package1
+running install_egg_info
+Copying ../../build/package1/package1.egg-info to /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1-0.0.0-py3.10.egg-info
+running install_scripts
+Installing test_node script to /root/ros2_ws/install/package1/lib/package1
+writing list of installed files to '/root/ros2_ws/build/package1/install.log'

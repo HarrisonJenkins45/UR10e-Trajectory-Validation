@@ -1,0 +1,36 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from ur10e_interfaces/srv/ValidateTrajectory.srv
+// generated code does not contain a copyright notice
+
+
+module ur10e_interfaces {
+  module srv {
+    @verbatim (language="comment", text=
+      "ValidateTrajectory.srv")
+    struct ValidateTrajectory_Request {
+      @verbatim (language="comment", text=
+        "1. REQUEST (Input sent to the service)" "\n"
+        "Desired EE trajectory path (flattened matrix or list of poses)")
+      sequence<double> ee_positions_x;
+
+      sequence<double> ee_positions_y;
+
+      sequence<double> ee_positions_z;
+
+      sequence<double> ee_quat;
+
+      sequence<double> sim_time;
+    };
+    @verbatim (language="comment", text=
+      "2. RESPONSE (Output sent back to the main script)")
+    struct ValidateTrajectory_Response {
+      boolean success;
+
+      string message;
+
+      @verbatim (language="comment", text=
+        "Approved velocity commands (flattened)")
+      sequence<double> joint_velocities;
+    };
+  };
+};

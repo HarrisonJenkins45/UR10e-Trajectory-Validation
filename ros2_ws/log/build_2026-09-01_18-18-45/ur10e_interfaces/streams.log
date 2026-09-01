@@ -1,0 +1,243 @@
+[0.026s] Invoking command in '/root/ros2_ws/build/ur10e_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake /root/ros2_ws/src/ur10e_interfaces -DCMAKE_INSTALL_PREFIX=/root/ros2_ws/install/ur10e_interfaces
+[0.249s] -- The C compiler identification is GNU 11.4.0
+[0.250s] -- The CXX compiler identification is GNU 11.4.0
+[0.250s] -- Detecting C compiler ABI info
+[0.295s] -- Detecting C compiler ABI info - done
+[0.301s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.302s] -- Detecting C compile features
+[0.305s] -- Detecting C compile features - done
+[0.308s] -- Detecting CXX compiler ABI info
+[0.384s] -- Detecting CXX compiler ABI info - done
+[0.392s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.392s] -- Detecting CXX compile features
+[0.392s] -- Detecting CXX compile features - done
+[0.396s] -- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.538s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.636s] -- Found rosidl_default_generators: 1.2.1 (/opt/ros/humble/share/rosidl_default_generators/cmake)
+[0.640s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.648s] -- Found rosidl_adapter: 3.1.9 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[0.694s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.939s] -- Found ament_cmake_ros: 0.10.0 (/opt/ros/humble/share/ament_cmake_ros/cmake)
+[1.089s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[1.287s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[1.307s] -- Found PythonInterp: /usr/bin/python3 (found suitable version "3.10.12", minimum required is "3.6") 
+[1.308s] -- Found python_cmake_module: 0.10.0 (/opt/ros/humble/share/python_cmake_module/cmake)
+[1.329s] -- Found PythonLibs: /usr/lib/x86_64-linux-gnu/libpython3.10.so (found suitable version "3.10.12", minimum required is "3.5") 
+[1.329s] -- Using PYTHON_EXECUTABLE: /usr/bin/python3
+[1.329s] -- Using PYTHON_INCLUDE_DIRS: /usr/include/python3.10
+[1.329s] -- Using PYTHON_LIBRARIES: /usr/lib/x86_64-linux-gnu/libpython3.10.so
+[1.347s] -- Found PythonExtra: .so  
+[1.439s] -- Configuring done
+[1.480s] -- Generating done
+[1.493s] -- Build files have been written to: /root/ros2_ws/build/ur10e_interfaces
+[1.500s] Invoked command in '/root/ros2_ws/build/ur10e_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake /root/ros2_ws/src/ur10e_interfaces -DCMAKE_INSTALL_PREFIX=/root/ros2_ws/install/ur10e_interfaces
+[1.501s] Invoking command in '/root/ros2_ws/build/ur10e_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake --build /root/ros2_ws/build/ur10e_interfaces -- -j8 -l8
+[1.540s] [  3%] [34m[1mGenerating C code for ROS interfaces[0m
+[1.549s] [  6%] [34m[1mGenerating Rust code for ROS interfaces[0m
+[1.556s] [  9%] [34m[1mGenerating C++ code for ROS interfaces[0m
+[1.562s] [  9%] Built target ament_cmake_python_copy_ur10e_interfaces
+[1.810s] running egg_info
+[1.810s] creating ur10e_interfaces.egg-info
+[1.810s] writing ur10e_interfaces.egg-info/PKG-INFO
+[1.811s] writing dependency_links to ur10e_interfaces.egg-info/dependency_links.txt
+[1.811s] writing top-level names to ur10e_interfaces.egg-info/top_level.txt
+[1.811s] writing manifest file 'ur10e_interfaces.egg-info/SOURCES.txt'
+[1.814s] reading manifest file 'ur10e_interfaces.egg-info/SOURCES.txt'
+[1.814s] writing manifest file 'ur10e_interfaces.egg-info/SOURCES.txt'
+[1.821s] [  9%] Built target ur10e_interfaces__rs
+[1.838s] [ 12%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_generator_c.dir/rosidl_generator_c/ur10e_interfaces/srv/detail/validate_trajectory__functions.c.o[0m
+[1.841s] [ 12%] Built target ament_cmake_python_build_ur10e_interfaces_egg
+[1.843s] [ 12%] Built target ur10e_interfaces__cpp
+[1.852s] [ 21%] [34m[1mGenerating C++ introspection for ROS interfaces[0m
+[1.852s] [ 21%] [34m[1mGenerating C++ type support dispatch for ROS interfaces[0m
+[1.852s] [ 21%] [34m[1mGenerating C++ type support for eProsima Fast-RTPS[0m
+[1.899s] [ 25%] [32m[1mLinking C shared library libur10e_interfaces__rosidl_generator_c.so[0m
+[1.934s] [ 25%] Built target ur10e_interfaces__rosidl_generator_c
+[1.945s] [ 34%] [34m[1mGenerating C type support for eProsima Fast-RTPS[0m
+[1.945s] [ 34%] [34m[1mGenerating C introspection for ROS interfaces[0m
+[1.945s] [ 34%] [34m[1mGenerating C type support dispatch for ROS interfaces[0m
+[2.089s] [ 37%] [32mBuilding CXX object CMakeFiles/ur10e_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/ur10e_interfaces/srv/validate_trajectory__type_support.cpp.o[0m
+[2.116s] [ 40%] [32mBuilding CXX object CMakeFiles/ur10e_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/ur10e_interfaces/srv/detail/validate_trajectory__type_support.cpp.o[0m
+[2.127s] [ 43%] [32mBuilding CXX object CMakeFiles/ur10e_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/ur10e_interfaces/srv/detail/dds_fastrtps/validate_trajectory__type_support.cpp.o[0m
+[2.186s] [ 46%] [32mBuilding CXX object CMakeFiles/ur10e_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/ur10e_interfaces/srv/validate_trajectory__type_support.cpp.o[0m
+[2.207s] [ 50%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/ur10e_interfaces/srv/detail/validate_trajectory__type_support.c.o[0m
+[2.218s] [ 53%] [32mBuilding CXX object CMakeFiles/ur10e_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/ur10e_interfaces/srv/detail/validate_trajectory__type_support_c.cpp.o[0m
+[2.221s] [ 56%] [32m[1mLinking CXX shared library libur10e_interfaces__rosidl_typesupport_c.so[0m
+[2.256s] [ 59%] [32m[1mLinking C shared library libur10e_interfaces__rosidl_typesupport_introspection_c.so[0m
+[2.267s] [ 59%] Built target ur10e_interfaces__rosidl_typesupport_c
+[2.284s] [ 59%] Built target ur10e_interfaces__rosidl_typesupport_introspection_c
+[2.333s] [ 62%] [32m[1mLinking CXX shared library libur10e_interfaces__rosidl_typesupport_cpp.so[0m
+[2.371s] [ 62%] Built target ur10e_interfaces__rosidl_typesupport_cpp
+[2.477s] [ 65%] [32m[1mLinking CXX shared library libur10e_interfaces__rosidl_typesupport_introspection_cpp.so[0m
+[2.509s] [ 68%] [32m[1mLinking CXX shared library libur10e_interfaces__rosidl_typesupport_fastrtps_cpp.so[0m
+[2.517s] [ 71%] [32m[1mLinking CXX shared library libur10e_interfaces__rosidl_typesupport_fastrtps_c.so[0m
+[2.542s] [ 71%] Built target ur10e_interfaces__rosidl_typesupport_introspection_cpp
+[2.576s] [ 71%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_cpp
+[2.580s] [ 71%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_c
+[2.596s] [ 71%] Built target ur10e_interfaces
+[2.613s] [ 75%] [34m[1mGenerating Python code for ROS interfaces[0m
+[2.967s] [ 75%] Built target ur10e_interfaces__py
+[2.983s] [ 78%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_generator_py.dir/rosidl_generator_py/ur10e_interfaces/srv/_validate_trajectory_s.c.o[0m
+[3.103s] [ 81%] [32m[1mLinking C shared library rosidl_generator_py/ur10e_interfaces/libur10e_interfaces__rosidl_generator_py.so[0m
+[3.135s] [ 81%] Built target ur10e_interfaces__rosidl_generator_py
+[3.153s] [ 90%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_typesupport_c__pyext.dir/rosidl_generator_py/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_c.c.o[0m
+[3.153s] [ 90%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext.dir/rosidl_generator_py/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c.o[0m
+[3.153s] [ 90%] [32mBuilding C object CMakeFiles/ur10e_interfaces__rosidl_typesupport_introspection_c__pyext.dir/rosidl_generator_py/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_introspection_c.c.o[0m
+[3.233s] [ 96%] [32m[1mLinking C shared library rosidl_generator_py/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.233s] [ 96%] [32m[1mLinking C shared library rosidl_generator_py/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.236s] [100%] [32m[1mLinking C shared library rosidl_generator_py/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.263s] [100%] Built target ur10e_interfaces__rosidl_typesupport_introspection_c__pyext
+[3.264s] [100%] Built target ur10e_interfaces__rosidl_typesupport_c__pyext
+[3.267s] [100%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext
+[3.276s] Invoked command in '/root/ros2_ws/build/ur10e_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake --build /root/ros2_ws/build/ur10e_interfaces -- -j8 -l8
+[3.277s] Invoking command in '/root/ros2_ws/build/ur10e_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake --install /root/ros2_ws/build/ur10e_interfaces
+[3.283s] -- Install configuration: ""
+[3.283s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/rosidl_interfaces/ur10e_interfaces
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__functions.c
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__struct.h
+[3.284s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.h
+[3.285s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__functions.h
+[3.285s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/validate_trajectory.h
+[3.285s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg
+[3.285s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_generator_c__visibility_control.h
+[3.285s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/library_path.sh
+[3.286s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/library_path.dsv
+[3.286s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_c.so
+[3.287s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_c.so" to ""
+[3.287s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.287s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg
+[3.287s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+[3.287s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.287s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.287s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_fastrtps_c.h
+[3.287s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_c.so
+[3.288s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_c.so" to ""
+[3.288s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.288s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.288s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.288s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_introspection_c.h
+[3.289s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.c
+[3.289s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg
+[3.289s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h
+[3.289s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_c.so
+[3.290s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_c.so" to ""
+[3.290s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_c.so
+[3.290s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_c.so" to ""
+[3.290s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.291s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg
+[3.291s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_generator_cpp__visibility_control.hpp
+[3.291s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.291s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.291s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__struct.hpp
+[3.291s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__traits.hpp
+[3.291s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__builder.hpp
+[3.291s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.hpp
+[3.292s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/validate_trajectory.hpp
+[3.292s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.292s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg
+[3.292s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+[3.292s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.292s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.292s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/dds_fastrtps
+[3.292s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_fastrtps_cpp.hpp
+[3.293s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_cpp.so
+[3.293s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_cpp.so" to ""
+[3.293s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces
+[3.294s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv
+[3.294s] -- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail
+[3.294s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_introspection_cpp.hpp
+[3.294s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.cpp
+[3.294s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_cpp.so
+[3.295s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_cpp.so" to ""
+[3.295s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_cpp.so
+[3.295s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_cpp.so" to ""
+[3.296s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/pythonpath.sh
+[3.296s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/pythonpath.dsv
+[3.296s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info
+[3.296s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/PKG-INFO
+[3.296s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/top_level.txt
+[3.297s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/dependency_links.txt
+[3.297s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/SOURCES.txt
+[3.297s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces
+[3.297s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[3.297s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[3.298s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/__init__.py
+[3.298s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_c.c
+[3.298s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_introspection_c.c
+[3.298s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[3.299s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c
+[3.299s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv
+[3.299s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/_validate_trajectory.py
+[3.299s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/_validate_trajectory_s.c
+[3.299s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/__init__.py
+[3.300s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/libur10e_interfaces__rosidl_generator_py.so
+[3.333s] Listing '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces'...
+[3.333s] Compiling '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/__init__.py'...
+[3.333s] Listing '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv'...
+[3.333s] Compiling '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/__init__.py'...
+[3.334s] Compiling '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/_validate_trajectory.py'...
+[3.337s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[3.337s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so" to ""
+[3.338s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[3.338s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so" to ""
+[3.338s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[3.339s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so" to ""
+[3.339s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_py.so
+[3.340s] -- Set runtime path of "/root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_py.so" to ""
+[3.340s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/rust_packages/ur10e_interfaces
+[3.340s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust
+[3.340s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/build.rs
+[3.340s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/Cargo.toml
+[3.340s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src
+[3.341s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv
+[3.341s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv/rmw.rs
+[3.341s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/lib.rs
+[3.341s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv.rs
+[3.341s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory.idl
+[3.342s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory.srv
+[3.342s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory_Request.msg
+[3.342s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory_Response.msg
+[3.342s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/package_run_dependencies/ur10e_interfaces
+[3.343s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/parent_prefix_path/ur10e_interfaces
+[3.343s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/ament_prefix_path.sh
+[3.343s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/ament_prefix_path.dsv
+[3.343s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/path.sh
+[3.344s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/path.dsv
+[3.344s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.bash
+[3.344s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.sh
+[3.344s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.zsh
+[3.344s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.dsv
+[3.345s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/package.dsv
+[3.345s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/packages/ur10e_interfaces
+[3.345s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cExport.cmake
+[3.346s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cExport-noconfig.cmake
+[3.346s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cExport.cmake
+[3.346s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+[3.346s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cExport.cmake
+[3.347s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cExport-noconfig.cmake
+[3.347s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cExport.cmake
+[3.347s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cExport-noconfig.cmake
+[3.347s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cppExport.cmake
+[3.348s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cppExport.cmake
+[3.348s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+[3.348s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cppExport.cmake
+[3.348s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+[3.349s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cppExport.cmake
+[3.349s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cppExport-noconfig.cmake
+[3.349s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_pyExport.cmake
+[3.349s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_pyExport-noconfig.cmake
+[3.349s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake-extras.cmake
+[3.350s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_include_directories-extras.cmake
+[3.350s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_libraries-extras.cmake
+[3.350s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_targets-extras.cmake
+[3.350s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+[3.351s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_dependencies-extras.cmake
+[3.351s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+[3.351s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_aggregate_target-extras.cmake
+[3.351s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfacesConfig.cmake
+[3.351s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfacesConfig-version.cmake
+[3.352s] -- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/package.xml
+[3.354s] Invoked command in '/root/ros2_ws/build/ur10e_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble /usr/bin/cmake --install /root/ros2_ws/build/ur10e_interfaces

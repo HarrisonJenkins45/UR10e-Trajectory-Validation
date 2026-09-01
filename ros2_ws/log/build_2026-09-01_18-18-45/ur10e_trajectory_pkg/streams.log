@@ -1,0 +1,71 @@
+[0.486s] Invoking command in '/root/ros2_ws/src/ur10e_trajectory_pkg': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data
+[0.684s] running egg_info
+[0.685s] creating ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info
+[0.685s] writing ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/PKG-INFO
+[0.685s] writing dependency_links to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/dependency_links.txt
+[0.685s] writing entry points to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/entry_points.txt
+[0.685s] writing requirements to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/requires.txt
+[0.686s] writing top-level names to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/top_level.txt
+[0.686s] writing manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.687s] reading manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.688s] writing manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.688s] running build
+[0.688s] running build_py
+[0.688s] creating /root/ros2_ws/build/ur10e_trajectory_pkg/build
+[0.688s] creating /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib
+[0.688s] creating /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.688s] copying ur10e_trajectory_pkg/VisualizeTraj.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.692s] copying ur10e_trajectory_pkg/obstacle_markers.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.692s] copying ur10e_trajectory_pkg/Validate_trajServer.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.693s] copying ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.694s] copying ur10e_trajectory_pkg/__init__.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.694s] copying ur10e_trajectory_pkg/joint_state_to_gazebo_bridge.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.694s] copying ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old (copy).py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.695s] copying ur10e_trajectory_pkg/validation_core.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.695s] copying ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.696s] copying ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.696s] copying ur10e_trajectory_pkg/joint_state_node.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.696s] running install
+[0.697s] running install_lib
+[0.697s] creating /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.697s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/__init__.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.697s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/Validate_trajServer.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/obstacle_markers.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/validation_core.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old (copy).py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/joint_state_node.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.698s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.699s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.699s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/VisualizeTraj.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.699s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/__init__.py to __init__.cpython-310.pyc
+[0.699s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old.py to joint_state_to_gazebo_bridge_old.cpython-310.pyc
+[0.700s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge.py to joint_state_to_gazebo_bridge.cpython-310.pyc
+[0.701s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/Validate_trajServer.py to Validate_trajServer.cpython-310.pyc
+[0.702s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/obstacle_markers.py to obstacle_markers.cpython-310.pyc
+[0.702s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/validation_core.py to validation_core.cpython-310.pyc
+[0.705s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/joint_state_to_gazebo_bridge_old (copy).py to joint_state_to_gazebo_bridge_old (copy).cpython-310.pyc
+[0.706s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/joint_state_node.py to joint_state_node.cpython-310.pyc
+[0.706s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/ClientNode.py to ClientNode.cpython-310.pyc
+[0.707s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py to VisualizeTraj_RvizPlayback.cpython-310.pyc
+[0.707s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/VisualizeTraj.py to VisualizeTraj.cpython-310.pyc
+[0.708s] running install_data
+[0.708s] creating /root/ros2_ws/install/ur10e_trajectory_pkg/share/ament_index
+[0.708s] creating /root/ros2_ws/install/ur10e_trajectory_pkg/share/ament_index/resource_index
+[0.708s] creating /root/ros2_ws/install/ur10e_trajectory_pkg/share/ament_index/resource_index/packages
+[0.708s] copying resource/ur10e_trajectory_pkg -> /root/ros2_ws/install/ur10e_trajectory_pkg/share/ament_index/resource_index/packages
+[0.708s] copying package.xml -> /root/ros2_ws/install/ur10e_trajectory_pkg/share/ur10e_trajectory_pkg
+[0.708s] creating /root/ros2_ws/install/ur10e_trajectory_pkg/share/ur10e_trajectory_pkg/launch
+[0.708s] copying ur10e_trajectory_pkg/VisualizeTraj.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/share/ur10e_trajectory_pkg/launch
+[0.708s] copying ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/share/ur10e_trajectory_pkg/launch
+[0.709s] running install_egg_info
+[0.710s] Copying ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info
+[0.711s] running install_scripts
+[0.727s] Installing joint_state_node script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.727s] Installing joint_state_to_gazebo_bridge script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.727s] Installing obstacle_markers script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.727s] Installing trajectory_client script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.727s] Installing validation_server script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.728s] writing list of installed files to '/root/ros2_ws/build/ur10e_trajectory_pkg/install.log'
+[0.742s] Invoked command in '/root/ros2_ws/src/ur10e_trajectory_pkg' returned '0': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data
