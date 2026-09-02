@@ -15,8 +15,7 @@ import matplotlib.pyplot as plt
 
 EE_LINK = "tool0"
 #How can we get this so it comes automatically from the URDF?
-IPA_rail_max= 5.0 # This is the actual max velocity for the rail
-RAIL_sf= 0.15 #Saftey factor for the rail velocity
+IPA_rail_max= 1.0 # m/s, actual max velocity for the rail is 5 m/s
 
 class TrajectoryValidator:
     def __init__(self, urdf_path, mesh_base_path=None, framerate=30):
@@ -278,7 +277,7 @@ class TrajectoryValidator:
     def _solve_waypoint_with_recovery(self, target_pos, target_quat, seed_arm, rail_pos, prev_rail=None,
                                        prev_arm=None, check_jump=False,
                                        dt_waypoint=None,
-                                       max_rail_vel_threshold=IPA_rail_max*RAIL_sf, #Set the rail velocity threshold 
+                                       max_rail_vel_threshold=IPA_rail_max, #Set the rail velocity threshold 
                                        max_joint_vel_threshold=2.0,
                                        condition_number_threshold=50.0,
                                        max_attempts=10,
