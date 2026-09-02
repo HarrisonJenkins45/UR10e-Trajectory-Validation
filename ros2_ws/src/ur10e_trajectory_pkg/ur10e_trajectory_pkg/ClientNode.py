@@ -97,7 +97,7 @@ def main(args=None):
     # Slice trajectory for target/EE in ECI/arena world frame to match num_pts
     q_I_G = df[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(dtype=np.float64)[:num_pts]
 
-    # TODO: Set this constant for now
+    # TODO: Set this constant for now--> Eventually we will read this in from the SISIFOS 
     p_G_I = df[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(dtype=np.float64)[0]
     # p_G_I=np.array([-6.65540788e+06 , 5.87780398e-01,  4.22723109e-01],dtype=np.float64)
     p_G_I = np.tile((p_G_I), (num_pts, 1)) 
@@ -106,7 +106,7 @@ def main(args=None):
 
     simTime = df['timestamp'].to_numpy(dtype=np.float64)[:num_pts]
 
-    TARGET_BOUND_M = 1.0  # Fit trajectory inside 1-meter radius
+    TARGET_BOUND_M = 1.0  # Fit trajectory inside 1-meter radius (Note: only relavant for position not orientation)
 
     # TODO: Update with real VICON readings when integrated
     p_B_I = p_G_I[0] - np.array([1.0, 0.0, 0.0])  # Base offset 1m back from initial point
