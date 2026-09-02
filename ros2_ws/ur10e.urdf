@@ -408,9 +408,16 @@
   <!--<xacro:ur_arm_transmission prefix="${prefix}" hw_interface="${transmission_hw_interface}" />-->
   <!-- Placeholder for ros2_control transmission which don't yet exist -->
 
-  <!-- Linear rail the arm is mounted on. PLACEHOLDER VALUES below: confirm
-       against the real rig (axis direction, limit travel range); the
-       box sizes/mass/inertia are rough stand-ins, not measured. -->
+
+
+  <!-- Rail bolted to the environment -->
+  <joint name="world-rail_base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="world"/>
+    <child link="rail_base_link"/>
+  </joint>
+
+  <!-- The actualy 3m IPA guiderail that the arm is mounted on-->
   <link name="rail_base_link">
     <visual>
       <geometry><box size="3.0 0.1 0.05"/></geometry>
@@ -426,6 +433,17 @@
     </inertial>
   </link>
 
+
+  <!-- Linear carriage joint (The rail's single moving DOF)-->
+  <joint name="linear_rail_joint" type="prismatic">
+    <parent link="rail_base_link"/>
+    <child link="rail_carriage_link"/>
+    <axis xyz="1 0 0"/>
+    <origin rpy="0 0 0" xyz="0 0 0.025"/><!--TODO: Get the correct values for this offset??-->
+    <limit lower="0.0" upper="3.0" effort="500" velocity="5.0"/>   
+  </joint>
+
+<!--Linear Carriage that the base sits on -->
   <link name="rail_carriage_link">
     <visual>
       <geometry><box size="0.15 0.15 0.05"/></geometry>
@@ -441,21 +459,6 @@
     </inertial>
   </link>
 
-  <!-- Rail bolted to the environment -->
-  <!-- <joint name="world-rail_base_joint" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="world"/>
-    <child link="rail_base_link"/>
-  </joint> -->
-
-  <!-- The rail's single moving DOF. PLACEHOLDER axis/limits; see comment above. -->
-  <joint name="linear_rail_joint" type="prismatic">
-    <parent link="rail_base_link"/>
-    <child link="rail_carriage_link"/>
-    <axis xyz="1 0 0"/>
-    <origin rpy="0 0 0" xyz="0 0 0.025"/><!--TODO: Get the correct values for this offset??-->
-    <limit lower="0.0" upper="3.0" effort="500" velocity="5.0"/>   
-  </joint>
 
   <!-- links -  main serial chain -->
   <link name="base_link"/>
@@ -808,3 +811,4 @@
     </plugin>
   </gazebo>
 </robot>
+
