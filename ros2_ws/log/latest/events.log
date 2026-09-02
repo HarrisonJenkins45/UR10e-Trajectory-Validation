@@ -1,0 +1,524 @@
+[0.000000] (-) TimerEvent: {}
+[0.000144] (package1) JobQueued: {'identifier': 'package1', 'dependencies': OrderedDict()}
+[0.000194] (ur10e_interfaces) JobQueued: {'identifier': 'ur10e_interfaces', 'dependencies': OrderedDict()}
+[0.000218] (ur_description) JobQueued: {'identifier': 'ur_description', 'dependencies': OrderedDict()}
+[0.000292] (ur10e_trajectory_pkg) JobQueued: {'identifier': 'ur10e_trajectory_pkg', 'dependencies': OrderedDict([('ur10e_interfaces', '/root/ros2_ws/install/ur10e_interfaces')])}
+[0.000347] (ur10e_interfaces) JobStarted: {'identifier': 'ur10e_interfaces'}
+[0.007934] (package1) JobStarted: {'identifier': 'package1'}
+[0.013241] (ur_description) JobStarted: {'identifier': 'ur_description'}
+[0.025298] (ur10e_interfaces) JobProgress: {'identifier': 'ur10e_interfaces', 'progress': 'cmake'}
+[0.025793] (ur10e_interfaces) JobProgress: {'identifier': 'ur10e_interfaces', 'progress': 'build'}
+[0.026432] (ur10e_interfaces) Command: {'cmd': ['/usr/bin/cmake', '--build', '/root/ros2_ws/build/ur10e_interfaces', '--', '-j8', '-l8'], 'cwd': '/root/ros2_ws/build/ur10e_interfaces', 'env': OrderedDict([('HOSTNAME', 'cefd8b24792d'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/root'), ('ROS_PYTHON_VERSION', '3'), ('COLCON_PREFIX_PATH', '/root/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'), ('DISPLAY', ':2'), ('LANG', 'C.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble'), ('PWD', '/root/ros2_ws/build/ur10e_interfaces'), ('LC_ALL', 'C.UTF-8'), ('PYTHONPATH', '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('CMAKE_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble')]), 'shell': False}
+[0.099436] (-) TimerEvent: {}
+[0.199691] (-) TimerEvent: {}
+[0.262712] (ur10e_interfaces) StdoutLine: {'line': b'[  9%] Built target ur10e_interfaces__cpp\n'}
+[0.262958] (ur10e_interfaces) StdoutLine: {'line': b'[  9%] Built target ur10e_interfaces__rs\n'}
+[0.263098] (ur10e_interfaces) StdoutLine: {'line': b'[ 15%] Built target ur10e_interfaces__rosidl_generator_c\n'}
+[0.263258] (ur10e_interfaces) StdoutLine: {'line': b'[ 15%] Built target ament_cmake_python_copy_ur10e_interfaces\n'}
+[0.263338] (ur10e_interfaces) StdoutLine: {'line': b'[ 53%] Built target ur10e_interfaces__rosidl_typesupport_c\n'}
+[0.263428] (ur10e_interfaces) StdoutLine: {'line': b'[ 53%] Built target ur10e_interfaces__rosidl_typesupport_introspection_cpp\n'}
+[0.263562] (ur10e_interfaces) StdoutLine: {'line': b'[ 53%] Built target ur10e_interfaces__rosidl_typesupport_cpp\n'}
+[0.263669] (ur10e_interfaces) StdoutLine: {'line': b'[ 53%] Built target ur10e_interfaces__rosidl_typesupport_introspection_c\n'}
+[0.263837] (ur10e_interfaces) StdoutLine: {'line': b'[ 62%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_cpp\n'}
+[0.264569] (ur10e_interfaces) StdoutLine: {'line': b'[ 71%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_c\n'}
+[0.264675] (ur10e_interfaces) StdoutLine: {'line': b'[ 71%] Built target ur10e_interfaces\n'}
+[0.264857] (ur10e_interfaces) StdoutLine: {'line': b'[ 75%] Built target ur10e_interfaces__py\n'}
+[0.265345] (ur10e_interfaces) StdoutLine: {'line': b'[ 81%] Built target ur10e_interfaces__rosidl_generator_py\n'}
+[0.265425] (ur10e_interfaces) StdoutLine: {'line': b'[100%] Built target ur10e_interfaces__rosidl_typesupport_c__pyext\n'}
+[0.266020] (ur10e_interfaces) StdoutLine: {'line': b'[100%] Built target ur10e_interfaces__rosidl_typesupport_introspection_c__pyext\n'}
+[0.266137] (ur10e_interfaces) StdoutLine: {'line': b'[100%] Built target ur10e_interfaces__rosidl_typesupport_fastrtps_c__pyext\n'}
+[0.266354] (ur_description) JobProgress: {'identifier': 'ur_description', 'progress': 'cmake'}
+[0.266533] (ur_description) JobProgress: {'identifier': 'ur_description', 'progress': 'build'}
+[0.266565] (ur_description) Command: {'cmd': ['/usr/bin/cmake', '--build', '/root/ros2_ws/build/ur_description', '--', '-j8', '-l8'], 'cwd': '/root/ros2_ws/build/ur_description', 'env': OrderedDict([('HOSTNAME', 'cefd8b24792d'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/root'), ('ROS_PYTHON_VERSION', '3'), ('COLCON_PREFIX_PATH', '/root/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'), ('DISPLAY', ':2'), ('LANG', 'C.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble'), ('PWD', '/root/ros2_ws/build/ur_description'), ('LC_ALL', 'C.UTF-8'), ('PYTHONPATH', '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('CMAKE_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble')]), 'shell': False}
+[0.296316] (ur_description) CommandEnded: {'returncode': 0}
+[0.297082] (ur_description) JobProgress: {'identifier': 'ur_description', 'progress': 'install'}
+[0.299789] (-) TimerEvent: {}
+[0.304671] (ur_description) Command: {'cmd': ['/usr/bin/cmake', '--install', '/root/ros2_ws/build/ur_description'], 'cwd': '/root/ros2_ws/build/ur_description', 'env': OrderedDict([('HOSTNAME', 'cefd8b24792d'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/root'), ('ROS_PYTHON_VERSION', '3'), ('COLCON_PREFIX_PATH', '/root/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'), ('DISPLAY', ':2'), ('LANG', 'C.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble'), ('PWD', '/root/ros2_ws/build/ur_description'), ('LC_ALL', 'C.UTF-8'), ('PYTHONPATH', '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('CMAKE_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble')]), 'shell': False}
+[0.308818] (ur10e_interfaces) StdoutLine: {'line': b'running egg_info\n'}
+[0.309423] (ur10e_interfaces) StdoutLine: {'line': b'writing ur10e_interfaces.egg-info/PKG-INFO\n'}
+[0.309638] (ur10e_interfaces) StdoutLine: {'line': b'writing dependency_links to ur10e_interfaces.egg-info/dependency_links.txt\n'}
+[0.309809] (ur10e_interfaces) StdoutLine: {'line': b'writing top-level names to ur10e_interfaces.egg-info/top_level.txt\n'}
+[0.311786] (ur_description) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[0.312003] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config\n'}
+[0.312115] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3e\n'}
+[0.312307] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3e/physical_parameters.yaml\n'}
+[0.312410] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3e/default_kinematics.yaml\n'}
+[0.312503] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3e/visual_parameters.yaml\n'}
+[0.312596] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3e/joint_limits.yaml\n'}
+[0.312693] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur12e\n'}
+[0.312845] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur12e/physical_parameters.yaml\n'}
+[0.312950] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur12e/joint_limits.yaml\n'}
+[0.313055] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur12e/default_kinematics.yaml\n'}
+[0.313184] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur12e/visual_parameters.yaml\n'}
+[0.313295] (ur10e_interfaces) StdoutLine: {'line': b"reading manifest file 'ur10e_interfaces.egg-info/SOURCES.txt'\n"}
+[0.313410] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5\n'}
+[0.313527] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5/physical_parameters.yaml\n'}
+[0.313610] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5/default_kinematics.yaml\n'}
+[0.313698] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5/joint_limits.yaml\n'}
+[0.313818] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5/visual_parameters.yaml\n'}
+[0.313910] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur8long\n'}
+[0.314033] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur8long/visual_parameters.yaml\n'}
+[0.314182] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur8long/physical_parameters.yaml\n'}
+[0.314272] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur8long/default_kinematics.yaml\n'}
+[0.314372] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur8long/joint_limits.yaml\n'}
+[0.314468] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5e\n'}
+[0.314610] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5e/default_kinematics.yaml\n'}
+[0.314700] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5e/visual_parameters.yaml\n'}
+[0.314789] (ur10e_interfaces) StdoutLine: {'line': b"writing manifest file 'ur10e_interfaces.egg-info/SOURCES.txt'\n"}
+[0.314895] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5e/joint_limits.yaml\n'}
+[0.314989] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur5e/physical_parameters.yaml\n'}
+[0.315069] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10\n'}
+[0.315194] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10/visual_parameters.yaml\n'}
+[0.315274] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10/physical_parameters.yaml\n'}
+[0.315411] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10/default_kinematics.yaml\n'}
+[0.315601] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10/joint_limits.yaml\n'}
+[0.315741] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/initial_positions.yaml\n'}
+[0.315874] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur20\n'}
+[0.315970] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur20/physical_parameters.yaml\n'}
+[0.316057] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur20/visual_parameters.yaml\n'}
+[0.316147] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur20/default_kinematics.yaml\n'}
+[0.316310] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur20/joint_limits.yaml\n'}
+[0.316439] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10e\n'}
+[0.316520] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10e/joint_limits.yaml\n'}
+[0.316605] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10e/physical_parameters.yaml\n'}
+[0.316705] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10e/default_kinematics.yaml\n'}
+[0.316788] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur10e/visual_parameters.yaml\n'}
+[0.316877] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur18\n'}
+[0.316971] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur18/joint_limits.yaml\n'}
+[0.317067] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur18/physical_parameters.yaml\n'}
+[0.317207] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur18/visual_parameters.yaml\n'}
+[0.317297] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur18/default_kinematics.yaml\n'}
+[0.317382] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur15\n'}
+[0.317484] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur15/visual_parameters.yaml\n'}
+[0.317575] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur15/joint_limits.yaml\n'}
+[0.317665] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur15/physical_parameters.yaml\n'}
+[0.317748] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur15/default_kinematics.yaml\n'}
+[0.317835] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3\n'}
+[0.317921] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3/visual_parameters.yaml\n'}
+[0.318004] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3/physical_parameters.yaml\n'}
+[0.318123] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3/default_kinematics.yaml\n'}
+[0.318237] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur3/joint_limits.yaml\n'}
+[0.318324] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur7e\n'}
+[0.318412] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur7e/visual_parameters.yaml\n'}
+[0.318498] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur7e/default_kinematics.yaml\n'}
+[0.318589] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur7e/joint_limits.yaml\n'}
+[0.318670] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur7e/physical_parameters.yaml\n'}
+[0.318762] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur30\n'}
+[0.318853] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur30/physical_parameters.yaml\n'}
+[0.318930] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur30/visual_parameters.yaml\n'}
+[0.319017] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur30/joint_limits.yaml\n'}
+[0.319173] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur30/default_kinematics.yaml\n'}
+[0.319274] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur16e\n'}
+[0.319352] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur16e/default_kinematics.yaml\n'}
+[0.319442] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur16e/visual_parameters.yaml\n'}
+[0.319561] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur16e/physical_parameters.yaml\n'}
+[0.319648] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/config/ur16e/joint_limits.yaml\n'}
+[0.319733] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/launch\n'}
+[0.319813] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/launch/view_ur.launch.py\n'}
+[0.319906] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/launch/view_ur.launch.xml\n'}
+[0.320003] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes\n'}
+[0.320107] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10\n'}
+[0.320205] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision\n'}
+[0.320295] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/wrist2.stl\n'}
+[0.320389] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/shoulder.stl\n'}
+[0.320498] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/wrist3.stl\n'}
+[0.320606] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/upperarm.stl\n'}
+[0.320688] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/base.stl\n'}
+[0.320788] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/forearm.stl\n'}
+[0.320884] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/collision/wrist1.stl\n'}
+[0.320990] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual\n'}
+[0.321075] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/wrist1.dae\n'}
+[0.321208] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/base.dae\n'}
+[0.321285] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/shoulder.dae\n'}
+[0.321369] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/wrist2.dae\n'}
+[0.321458] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/forearm.dae\n'}
+[0.321537] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/upperarm.dae\n'}
+[0.321653] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10/visual/wrist3.dae\n'}
+[0.321739] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e\n'}
+[0.321825] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual\n'}
+[0.321910] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/shoulder.dae\n'}
+[0.322014] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/wrist2.dae\n'}
+[0.322092] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/forearm.dae\n'}
+[0.322212] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/wrist3.dae\n'}
+[0.322303] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/upperarm.dae\n'}
+[0.322389] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/base.dae\n'}
+[0.322512] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/visual/wrist1.dae\n'}
+[0.322625] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision\n'}
+[0.322703] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/wrist1.stl\n'}
+[0.322802] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/forearm.stl\n'}
+[0.322901] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/upperarm.stl\n'}
+[0.323001] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/base.stl\n'}
+[0.323088] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/wrist3.stl\n'}
+[0.323223] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/wrist2.stl\n'}
+[0.323303] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5e/collision/shoulder.stl\n'}
+[0.323401] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3\n'}
+[0.323481] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision\n'}
+[0.323567] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/shoulder.stl\n'}
+[0.323661] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/wrist1.stl\n'}
+[0.323748] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/upperarm.stl\n'}
+[0.323842] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/wrist2.stl\n'}
+[0.323920] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/base.stl\n'}
+[0.324008] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/wrist3.stl\n'}
+[0.324112] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/collision/forearm.stl\n'}
+[0.324305] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual\n'}
+[0.324439] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/wrist3.dae\n'}
+[0.324596] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/base.dae\n'}
+[0.324683] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/upperarm.dae\n'}
+[0.324763] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/wrist2.dae\n'}
+[0.324839] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/shoulder.dae\n'}
+[0.324925] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/wrist1.dae\n'}
+[0.325013] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3/visual/forearm.dae\n'}
+[0.325148] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e\n'}
+[0.325290] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision\n'}
+[0.325366] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/wrist1.stl\n'}
+[0.325440] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/shoulder.stl\n'}
+[0.325555] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/base.stl\n'}
+[0.325633] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/wrist2.stl\n'}
+[0.325710] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/upperarm.stl\n'}
+[0.325794] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/forearm.stl\n'}
+[0.325869] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/collision/wrist3.stl\n'}
+[0.326091] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual\n'}
+[0.326186] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/wrist1.dae\n'}
+[0.326303] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/shoulder.dae\n'}
+[0.326446] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/wrist3.dae\n'}
+[0.326544] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/base.dae\n'}
+[0.326746] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/wrist2.dae\n'}
+[0.327447] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/forearm.dae\n'}
+[0.327594] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur3e/visual/upperarm.dae\n'}
+[0.327747] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30\n'}
+[0.327844] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/collision\n'}
+[0.327972] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/collision/upperarm.stl\n'}
+[0.328258] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/collision/forearm.stl\n'}
+[0.328425] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/visual\n'}
+[0.328542] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/visual/forearm.dae\n'}
+[0.328653] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/visual/UR30_DIFF_8bit_2K.png\n'}
+[0.328798] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/visual/upperarm.dae\n'}
+[0.328887] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur30/LICENSE.txt\n'}
+[0.329009] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e\n'}
+[0.329225] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/visual\n'}
+[0.329662] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/visual/forearm.dae\n'}
+[0.329795] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/visual/upperarm.dae\n'}
+[0.329915] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/collision\n'}
+[0.330006] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/collision/forearm.stl\n'}
+[0.330125] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur16e/collision/upperarm.stl\n'}
+[0.330255] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long\n'}
+[0.330382] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/visual\n'}
+[0.330529] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/visual/upperarm.dae\n'}
+[0.330616] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/visual/UR8Long_DIFF_8bit_2K.jpg\n'}
+[0.330892] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/visual/forearm.dae\n'}
+[0.330992] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/LICENSE.txt\n'}
+[0.331219] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/collision\n'}
+[0.332071] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/collision/forearm.stl\n'}
+[0.332281] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur8long/collision/upperarm.stl\n'}
+[0.332415] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e\n'}
+[0.332530] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual\n'}
+[0.332659] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/upperarm.dae\n'}
+[0.332780] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/wrist3.dae\n'}
+[0.332874] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/wrist2.dae\n'}
+[0.333025] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/forearm.dae\n'}
+[0.333172] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/wrist1.dae\n'}
+[0.333287] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/shoulder.dae\n'}
+[0.333377] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/visual/base.dae\n'}
+[0.333451] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision\n'}
+[0.333536] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/upperarm.stl\n'}
+[0.333622] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/forearm.stl\n'}
+[0.333726] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/wrist1.stl\n'}
+[0.333807] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/shoulder.stl\n'}
+[0.333896] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/wrist2.stl\n'}
+[0.333979] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/base.stl\n'}
+[0.334062] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur10e/collision/wrist3.stl\n'}
+[0.334207] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18\n'}
+[0.334286] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/collision\n'}
+[0.334371] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/collision/forearm.stl\n'}
+[0.334454] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/collision/upperarm.stl\n'}
+[0.334539] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/LICENSE.txt\n'}
+[0.334644] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/visual\n'}
+[0.334731] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/visual/forearm.dae\n'}
+[0.334825] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/visual/UR18_DIFF_8bit_2K.jpg\n'}
+[0.334911] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur18/visual/upperarm.dae\n'}
+[0.334996] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5\n'}
+[0.335135] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision\n'}
+[0.335241] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/wrist1.stl\n'}
+[0.335328] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/forearm.stl\n'}
+[0.335414] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/base.stl\n'}
+[0.335514] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/shoulder.stl\n'}
+[0.335603] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/wrist3.stl\n'}
+[0.335689] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/upperarm.stl\n'}
+[0.335776] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/collision/wrist2.stl\n'}
+[0.335862] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual\n'}
+[0.335954] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/base.dae\n'}
+[0.336392] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/shoulder.dae\n'}
+[0.336641] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/wrist1.dae\n'}
+[0.336731] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/forearm.dae\n'}
+[0.336827] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/upperarm.dae\n'}
+[0.337018] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/wrist2.dae\n'}
+[0.337241] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur5/visual/wrist3.dae\n'}
+[0.337384] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20\n'}
+[0.337513] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual\n'}
+[0.337830] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/UR20_DIFF_8bit_2K.png\n'}
+[0.338213] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/base.dae\n'}
+[0.338416] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/wrist1.dae\n'}
+[0.338832] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/shoulder.dae\n'}
+[0.339628] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/forearm.dae\n'}
+[0.340764] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/wrist2.dae\n'}
+[0.340878] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/upperarm.dae\n'}
+[0.341301] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/visual/wrist3.dae\n'}
+[0.341508] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision\n'}
+[0.341968] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/wrist1.stl\n'}
+[0.342069] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/upperarm.stl\n'}
+[0.342222] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/forearm.stl\n'}
+[0.342421] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/base.stl\n'}
+[0.342941] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/wrist2.stl\n'}
+[0.343058] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/shoulder.stl\n'}
+[0.343678] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/collision/wrist3.stl\n'}
+[0.343779] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur20/LICENSE.txt\n'}
+[0.343989] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15\n'}
+[0.344242] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual\n'}
+[0.344362] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/wrist1.dae\n'}
+[0.344469] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/forearm.dae\n'}
+[0.345037] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/upperarm.dae\n'}
+[0.345217] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/wrist3.dae\n'}
+[0.345314] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/UR15_DIFF_8bit_2K.jpg\n'}
+[0.345414] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/shoulder.dae\n'}
+[0.345518] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/base.dae\n'}
+[0.345612] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/visual/wrist2.dae\n'}
+[0.345763] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/LICENSE.txt\n'}
+[0.345858] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision\n'}
+[0.346000] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/wrist2.stl\n'}
+[0.346092] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/upperarm.stl\n'}
+[0.346238] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/wrist3.stl\n'}
+[0.346359] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/base.stl\n'}
+[0.346458] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/shoulder.stl\n'}
+[0.346577] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/wrist1.stl\n'}
+[0.346661] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/meshes/ur15/collision/forearm.stl\n'}
+[0.346746] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/rviz\n'}
+[0.346848] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/rviz/view_robot.rviz\n'}
+[0.346943] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf\n'}
+[0.347032] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/ur_macro.xacro\n'}
+[0.347138] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/inc\n'}
+[0.347254] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/inc/ur_transmissions.xacro\n'}
+[0.347367] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/inc/ur_common.xacro\n'}
+[0.347562] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/ur.urdf.xacro\n'}
+[0.347679] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/urdf/ur.ros2_control.xacro\n'}
+[0.347799] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/test\n'}
+[0.347889] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/test/test_ur_urdf_xacro.py\n'}
+[0.347989] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/test/test_view_ur_launch.py\n'}
+[0.348096] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ament_index/resource_index/package_run_dependencies/ur_description\n'}
+[0.348231] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ament_index/resource_index/parent_prefix_path/ur_description\n'}
+[0.348315] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/environment/ament_prefix_path.sh\n'}
+[0.348408] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/environment/ament_prefix_path.dsv\n'}
+[0.348497] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/environment/path.sh\n'}
+[0.348581] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/environment/path.dsv\n'}
+[0.348666] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/local_setup.bash\n'}
+[0.348751] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/local_setup.sh\n'}
+[0.348841] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/local_setup.zsh\n'}
+[0.348929] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/local_setup.dsv\n'}
+[0.349024] (ur_description) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur_description/share/ur_description/package.dsv\n'}
+[0.349685] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ament_index/resource_index/packages/ur_description\n'}
+[0.350034] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/cmake/ur_descriptionConfig.cmake\n'}
+[0.350202] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/cmake/ur_descriptionConfig-version.cmake\n'}
+[0.350389] (ur_description) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur_description/share/ur_description/package.xml\n'}
+[0.350606] (ur_description) CommandEnded: {'returncode': 0}
+[0.350997] (ur10e_interfaces) StdoutLine: {'line': b'[100%] Built target ament_cmake_python_build_ur10e_interfaces_egg\n'}
+[0.354071] (ur_description) JobEnded: {'identifier': 'ur_description', 'rc': 0}
+[0.354988] (ur10e_interfaces) CommandEnded: {'returncode': 0}
+[0.355414] (ur10e_interfaces) JobProgress: {'identifier': 'ur10e_interfaces', 'progress': 'install'}
+[0.355592] (ur10e_interfaces) Command: {'cmd': ['/usr/bin/cmake', '--install', '/root/ros2_ws/build/ur10e_interfaces'], 'cwd': '/root/ros2_ws/build/ur10e_interfaces', 'env': OrderedDict([('HOSTNAME', 'cefd8b24792d'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/root'), ('ROS_PYTHON_VERSION', '3'), ('COLCON_PREFIX_PATH', '/root/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'), ('DISPLAY', ':2'), ('LANG', 'C.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble'), ('PWD', '/root/ros2_ws/build/ur10e_interfaces'), ('LC_ALL', 'C.UTF-8'), ('PYTHONPATH', '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('CMAKE_PREFIX_PATH', '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/package1:/opt/ros/humble')]), 'shell': False}
+[0.363027] (ur10e_interfaces) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[0.363221] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/rosidl_interfaces/ur10e_interfaces\n'}
+[0.363321] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.363444] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.363615] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.363698] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__functions.c\n'}
+[0.363819] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__struct.h\n'}
+[0.363904] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.h\n'}
+[0.363984] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__functions.h\n'}
+[0.364060] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/validate_trajectory.h\n'}
+[0.364190] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg\n'}
+[0.364275] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_generator_c__visibility_control.h\n'}
+[0.364346] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/library_path.sh\n'}
+[0.364419] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/library_path.dsv\n'}
+[0.364569] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_c.so\n'}
+[0.364676] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.364760] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg\n'}
+[0.364839] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_fastrtps_c__visibility_control.h\n'}
+[0.364921] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.364998] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.365089] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_fastrtps_c.h\n'}
+[0.365194] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_c.so\n'}
+[0.365364] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.365496] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.365596] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.365681] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_introspection_c.h\n'}
+[0.365762] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.c\n'}
+[0.365841] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg\n'}
+[0.365915] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h\n'}
+[0.366003] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_c.so\n'}
+[0.366272] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_c.so\n'}
+[0.366501] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.366579] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg\n'}
+[0.366671] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_generator_cpp__visibility_control.hpp\n'}
+[0.366757] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.366836] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.366928] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__struct.hpp\n'}
+[0.367024] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__traits.hpp\n'}
+[0.367129] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__builder.hpp\n'}
+[0.367224] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.hpp\n'}
+[0.367367] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/validate_trajectory.hpp\n'}
+[0.367474] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.367554] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg\n'}
+[0.367640] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h\n'}
+[0.367712] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.367784] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.367882] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/dds_fastrtps\n'}
+[0.367963] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_fastrtps_cpp.hpp\n'}
+[0.368045] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_fastrtps_cpp.so\n'}
+[0.368175] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces\n'}
+[0.368258] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv\n'}
+[0.368329] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail\n'}
+[0.368409] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__rosidl_typesupport_introspection_cpp.hpp\n'}
+[0.368478] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/include/ur10e_interfaces/ur10e_interfaces/srv/detail/validate_trajectory__type_support.cpp\n'}
+[0.368572] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_introspection_cpp.so\n'}
+[0.368850] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_typesupport_cpp.so\n'}
+[0.369060] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/pythonpath.sh\n'}
+[0.369260] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/pythonpath.dsv\n'}
+[0.369388] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info\n'}
+[0.369467] (ur10e_interfaces) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/PKG-INFO\n'}
+[0.369634] (ur10e_interfaces) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/top_level.txt\n'}
+[0.369832] (ur10e_interfaces) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/dependency_links.txt\n'}
+[0.370035] (ur10e_interfaces) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces-0.0.0-py3.10.egg-info/SOURCES.txt\n'}
+[0.370491] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces\n'}
+[0.370664] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.370797] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.370971] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/__init__.py\n'}
+[0.371050] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_c.c\n'}
+[0.371176] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_introspection_c.c\n'}
+[0.371277] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.371373] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/_ur10e_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c\n'}
+[0.371449] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv\n'}
+[0.371527] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/_validate_trajectory.py\n'}
+[0.371604] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/_validate_trajectory_s.c\n'}
+[0.371673] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv/__init__.py\n'}
+[0.371754] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/libur10e_interfaces__rosidl_generator_py.so\n'}
+[0.398656] (ur10e_interfaces) StdoutLine: {'line': b"Listing '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces'...\n"}
+[0.398806] (ur10e_interfaces) StdoutLine: {'line': b"Listing '/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/srv'...\n"}
+[0.399887] (-) TimerEvent: {}
+[0.402153] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.403742] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.403961] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages/ur10e_interfaces/ur10e_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so\n'}
+[0.404118] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/lib/libur10e_interfaces__rosidl_generator_py.so\n'}
+[0.404199] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/rust_packages/ur10e_interfaces\n'}
+[0.404481] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust\n'}
+[0.404669] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/build.rs\n'}
+[0.404761] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/Cargo.toml\n'}
+[0.404862] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src\n'}
+[0.404952] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv\n'}
+[0.405030] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv/rmw.rs\n'}
+[0.405175] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/lib.rs\n'}
+[0.405295] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/rust/src/srv.rs\n'}
+[0.405388] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory.idl\n'}
+[0.405512] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory.srv\n'}
+[0.405594] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory_Request.msg\n'}
+[0.405678] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/srv/ValidateTrajectory_Response.msg\n'}
+[0.405750] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/package_run_dependencies/ur10e_interfaces\n'}
+[0.405837] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/parent_prefix_path/ur10e_interfaces\n'}
+[0.405909] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/ament_prefix_path.sh\n'}
+[0.405991] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/ament_prefix_path.dsv\n'}
+[0.406107] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/path.sh\n'}
+[0.406261] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/environment/path.dsv\n'}
+[0.406347] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.bash\n'}
+[0.406437] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.sh\n'}
+[0.406513] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.zsh\n'}
+[0.406601] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/local_setup.dsv\n'}
+[0.406681] (ur10e_interfaces) StdoutLine: {'line': b'-- Installing: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/package.dsv\n'}
+[0.406764] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ament_index/resource_index/packages/ur10e_interfaces\n'}
+[0.406838] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cExport.cmake\n'}
+[0.406924] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cExport-noconfig.cmake\n'}
+[0.407067] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cExport.cmake\n'}
+[0.407178] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cExport-noconfig.cmake\n'}
+[0.407272] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cExport.cmake\n'}
+[0.407380] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cExport-noconfig.cmake\n'}
+[0.407487] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cExport.cmake\n'}
+[0.407573] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cExport-noconfig.cmake\n'}
+[0.407675] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_cppExport.cmake\n'}
+[0.407778] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cppExport.cmake\n'}
+[0.407913] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake\n'}
+[0.408039] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cppExport.cmake\n'}
+[0.408173] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_introspection_cppExport-noconfig.cmake\n'}
+[0.408420] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cppExport.cmake\n'}
+[0.408525] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfaces__rosidl_typesupport_cppExport-noconfig.cmake\n'}
+[0.408621] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_pyExport.cmake\n'}
+[0.408697] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/export_ur10e_interfaces__rosidl_generator_pyExport-noconfig.cmake\n'}
+[0.408787] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake-extras.cmake\n'}
+[0.408866] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_include_directories-extras.cmake\n'}
+[0.408959] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_libraries-extras.cmake\n'}
+[0.409032] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_targets-extras.cmake\n'}
+[0.409129] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake\n'}
+[0.409215] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ament_cmake_export_dependencies-extras.cmake\n'}
+[0.409294] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake\n'}
+[0.409364] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/rosidl_cmake_aggregate_target-extras.cmake\n'}
+[0.409442] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfacesConfig.cmake\n'}
+[0.409517] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/cmake/ur10e_interfacesConfig-version.cmake\n'}
+[0.409597] (ur10e_interfaces) StdoutLine: {'line': b'-- Up-to-date: /root/ros2_ws/install/ur10e_interfaces/share/ur10e_interfaces/package.xml\n'}
+[0.410350] (ur10e_interfaces) CommandEnded: {'returncode': 0}
+[0.426821] (ur10e_interfaces) JobEnded: {'identifier': 'ur10e_interfaces', 'rc': 0}
+[0.427893] (ur10e_trajectory_pkg) JobStarted: {'identifier': 'ur10e_trajectory_pkg'}
+[0.500010] (-) TimerEvent: {}
+[0.600225] (-) TimerEvent: {}
+[0.653155] (package1) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/package1', 'build', '--build-base', '/root/ros2_ws/build/package1/build', 'install', '--record', '/root/ros2_ws/build/package1/install.log', '--install-scripts', '$base/lib/package1', '--single-version-externally-managed', 'install_data'], 'cwd': '/root/ros2_ws/src/package1', 'env': {'HOSTNAME': 'cefd8b24792d', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/root', 'ROS_PYTHON_VERSION': '3', 'COLCON_PREFIX_PATH': '/root/ros2_ws/install', 'ROS_DISTRO': 'humble', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':2', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'AMENT_PREFIX_PATH': '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble', 'PWD': '/root/ros2_ws/build/package1', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/root/ros2_ws/build/package1/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_interfaces'}, 'shell': False}
+[0.700344] (-) TimerEvent: {}
+[0.800589] (-) TimerEvent: {}
+[0.854428] (package1) StdoutLine: {'line': b'running egg_info\n'}
+[0.855008] (package1) StdoutLine: {'line': b'writing ../../build/package1/package1.egg-info/PKG-INFO\n'}
+[0.855124] (package1) StdoutLine: {'line': b'writing dependency_links to ../../build/package1/package1.egg-info/dependency_links.txt\n'}
+[0.855303] (package1) StdoutLine: {'line': b'writing entry points to ../../build/package1/package1.egg-info/entry_points.txt\n'}
+[0.855470] (package1) StdoutLine: {'line': b'writing requirements to ../../build/package1/package1.egg-info/requires.txt\n'}
+[0.855547] (package1) StdoutLine: {'line': b'writing top-level names to ../../build/package1/package1.egg-info/top_level.txt\n'}
+[0.856717] (package1) StdoutLine: {'line': b"reading manifest file '../../build/package1/package1.egg-info/SOURCES.txt'\n"}
+[0.857404] (package1) StdoutLine: {'line': b"writing manifest file '../../build/package1/package1.egg-info/SOURCES.txt'\n"}
+[0.857575] (package1) StdoutLine: {'line': b'running build\n'}
+[0.857652] (package1) StdoutLine: {'line': b'running build_py\n'}
+[0.857805] (package1) StdoutLine: {'line': b'running install\n'}
+[0.857949] (package1) StdoutLine: {'line': b'running install_lib\n'}
+[0.858938] (package1) StdoutLine: {'line': b'running install_data\n'}
+[0.859064] (package1) StdoutLine: {'line': b'running install_egg_info\n'}
+[0.860449] (package1) StdoutLine: {'line': b"removing '/root/ros2_ws/install/package1/lib/python3.10/site-packages/package1-0.0.0-py3.10.egg-info' (and everything under it)\n"}
+[0.860862] (package1) StdoutLine: {'line': b'Copying ../../build/package1/package1.egg-info to /root/ros2_ws/install/package1/lib/python3.10/site-packages/package1-0.0.0-py3.10.egg-info\n'}
+[0.862096] (package1) StdoutLine: {'line': b'running install_scripts\n'}
+[0.878442] (package1) StdoutLine: {'line': b'Installing test_node script to /root/ros2_ws/install/package1/lib/package1\n'}
+[0.878721] (package1) StdoutLine: {'line': b"writing list of installed files to '/root/ros2_ws/build/package1/install.log'\n"}
+[0.895305] (package1) CommandEnded: {'returncode': 0}
+[0.900758] (package1) JobEnded: {'identifier': 'package1', 'rc': 0}
+[0.901035] (-) TimerEvent: {}
+[0.920677] (ur10e_trajectory_pkg) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/ur10e_trajectory_pkg', 'build', '--build-base', '/root/ros2_ws/build/ur10e_trajectory_pkg/build', 'install', '--record', '/root/ros2_ws/build/ur10e_trajectory_pkg/install.log', '--install-scripts', '$base/lib/ur10e_trajectory_pkg', '--single-version-externally-managed', 'install_data'], 'cwd': '/root/ros2_ws/src/ur10e_trajectory_pkg', 'env': {'HOSTNAME': 'cefd8b24792d', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/root/ros2_ws/install/ur10e_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/root', 'ROS_PYTHON_VERSION': '3', 'COLCON_PREFIX_PATH': '/root/ros2_ws/install', 'ROS_DISTRO': 'humble', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'DISPLAY': ':2', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'AMENT_PREFIX_PATH': '/root/ros2_ws/install/ur_description:/root/ros2_ws/install/ur10e_trajectory_pkg:/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/package1:/opt/ros/humble', 'PWD': '/root/ros2_ws/build/ur10e_trajectory_pkg', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:/root/ros2_ws/install/ur10e_interfaces/local/lib/python3.10/dist-packages:/root/ros2_ws/install/package1/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description'}, 'shell': False}
+[1.001150] (-) TimerEvent: {}
+[1.101378] (-) TimerEvent: {}
+[1.116718] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running egg_info\n'}
+[1.117198] (ur10e_trajectory_pkg) StdoutLine: {'line': b'writing ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/PKG-INFO\n'}
+[1.117371] (ur10e_trajectory_pkg) StdoutLine: {'line': b'writing dependency_links to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/dependency_links.txt\n'}
+[1.117495] (ur10e_trajectory_pkg) StdoutLine: {'line': b'writing entry points to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/entry_points.txt\n'}
+[1.117700] (ur10e_trajectory_pkg) StdoutLine: {'line': b'writing requirements to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/requires.txt\n'}
+[1.117786] (ur10e_trajectory_pkg) StdoutLine: {'line': b'writing top-level names to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/top_level.txt\n'}
+[1.119137] (ur10e_trajectory_pkg) StdoutLine: {'line': b"reading manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'\n"}
+[1.119945] (ur10e_trajectory_pkg) StdoutLine: {'line': b"writing manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'\n"}
+[1.120050] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running build\n'}
+[1.120134] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running build_py\n'}
+[1.120520] (ur10e_trajectory_pkg) StdoutLine: {'line': b'copying ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg\n'}
+[1.120885] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running install\n'}
+[1.121081] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running install_lib\n'}
+[1.121899] (ur10e_trajectory_pkg) StdoutLine: {'line': b'copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg\n'}
+[1.122611] (ur10e_trajectory_pkg) StdoutLine: {'line': b'byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/ClientNode.py to ClientNode.cpython-310.pyc\n'}
+[1.123517] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running install_data\n'}
+[1.123700] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running install_egg_info\n'}
+[1.125144] (ur10e_trajectory_pkg) StdoutLine: {'line': b"removing '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info' (and everything under it)\n"}
+[1.125526] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Copying ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info\n'}
+[1.126716] (ur10e_trajectory_pkg) StdoutLine: {'line': b'running install_scripts\n'}
+[1.142688] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Installing joint_state_node script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg\n'}
+[1.142858] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Installing joint_state_to_gazebo_bridge script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg\n'}
+[1.142981] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Installing obstacle_markers script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg\n'}
+[1.143081] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Installing trajectory_client script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg\n'}
+[1.143170] (ur10e_trajectory_pkg) StdoutLine: {'line': b'Installing validation_server script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg\n'}
+[1.143481] (ur10e_trajectory_pkg) StdoutLine: {'line': b"writing list of installed files to '/root/ros2_ws/build/ur10e_trajectory_pkg/install.log'\n"}
+[1.158443] (ur10e_trajectory_pkg) CommandEnded: {'returncode': 0}
+[1.163972] (ur10e_trajectory_pkg) JobEnded: {'identifier': 'ur10e_trajectory_pkg', 'rc': 0}
+[1.164486] (-) EventReactorShutdown: {}

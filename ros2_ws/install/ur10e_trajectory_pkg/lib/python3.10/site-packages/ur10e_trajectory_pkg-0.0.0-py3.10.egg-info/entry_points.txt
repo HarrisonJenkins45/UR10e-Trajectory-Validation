@@ -1,0 +1,7 @@
+[console_scripts]
+joint_state_node = ur10e_trajectory_pkg.joint_state_node:main
+joint_state_to_gazebo_bridge = ur10e_trajectory_pkg.joint_state_to_gazebo_bridge:main
+obstacle_markers = ur10e_trajectory_pkg.obstacle_markers:main
+trajectory_client = ur10e_trajectory_pkg.ClientNode:main
+validation_server = ur10e_trajectory_pkg.Validate_trajServer:main
+

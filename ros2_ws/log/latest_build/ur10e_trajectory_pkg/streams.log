@@ -1,0 +1,28 @@
+[0.493s] Invoking command in '/root/ros2_ws/src/ur10e_trajectory_pkg': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data
+[0.689s] running egg_info
+[0.689s] writing ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/PKG-INFO
+[0.690s] writing dependency_links to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/dependency_links.txt
+[0.690s] writing entry points to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/entry_points.txt
+[0.690s] writing requirements to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/requires.txt
+[0.690s] writing top-level names to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/top_level.txt
+[0.691s] reading manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.692s] writing manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.692s] running build
+[0.692s] running build_py
+[0.693s] copying ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg
+[0.693s] running install
+[0.693s] running install_lib
+[0.694s] copying /root/ros2_ws/build/ur10e_trajectory_pkg/build/lib/ur10e_trajectory_pkg/ClientNode.py -> /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg
+[0.695s] byte-compiling /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg/ClientNode.py to ClientNode.cpython-310.pyc
+[0.696s] running install_data
+[0.696s] running install_egg_info
+[0.697s] removing '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info' (and everything under it)
+[0.698s] Copying ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info
+[0.699s] running install_scripts
+[0.715s] Installing joint_state_node script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.715s] Installing joint_state_to_gazebo_bridge script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.715s] Installing obstacle_markers script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.715s] Installing trajectory_client script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.715s] Installing validation_server script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.716s] writing list of installed files to '/root/ros2_ws/build/ur10e_trajectory_pkg/install.log'
+[0.731s] Invoked command in '/root/ros2_ws/src/ur10e_trajectory_pkg' returned '0': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data

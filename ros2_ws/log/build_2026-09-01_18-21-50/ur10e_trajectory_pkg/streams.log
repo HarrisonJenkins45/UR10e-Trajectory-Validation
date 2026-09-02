@@ -1,0 +1,25 @@
+[0.505s] Invoking command in '/root/ros2_ws/src/ur10e_trajectory_pkg': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data
+[0.705s] running egg_info
+[0.706s] writing ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/PKG-INFO
+[0.706s] writing dependency_links to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/dependency_links.txt
+[0.706s] writing entry points to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/entry_points.txt
+[0.706s] writing requirements to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/requires.txt
+[0.706s] writing top-level names to ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/top_level.txt
+[0.708s] reading manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.708s] writing manifest file '../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info/SOURCES.txt'
+[0.708s] running build
+[0.709s] running build_py
+[0.709s] running install
+[0.709s] running install_lib
+[0.711s] running install_data
+[0.711s] running install_egg_info
+[0.712s] removing '/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info' (and everything under it)
+[0.713s] Copying ../../build/ur10e_trajectory_pkg/ur10e_trajectory_pkg.egg-info to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages/ur10e_trajectory_pkg-0.0.0-py3.10.egg-info
+[0.714s] running install_scripts
+[0.731s] Installing joint_state_node script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.731s] Installing joint_state_to_gazebo_bridge script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.731s] Installing obstacle_markers script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.731s] Installing trajectory_client script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.731s] Installing validation_server script to /root/ros2_ws/install/ur10e_trajectory_pkg/lib/ur10e_trajectory_pkg
+[0.731s] writing list of installed files to '/root/ros2_ws/build/ur10e_trajectory_pkg/install.log'
+[0.748s] Invoked command in '/root/ros2_ws/src/ur10e_trajectory_pkg' returned '0': CMAKE_PREFIX_PATH=/root/ros2_ws/install/ur10e_interfaces:/root/ros2_ws/install/ur_description PYTHONPATH=/root/ros2_ws/build/ur10e_trajectory_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/install/ur10e_trajectory_pkg/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/ur10e_trajectory_pkg build --build-base /root/ros2_ws/build/ur10e_trajectory_pkg/build install --record /root/ros2_ws/build/ur10e_trajectory_pkg/install.log --install-scripts $base/lib/ur10e_trajectory_pkg --single-version-externally-managed install_data
