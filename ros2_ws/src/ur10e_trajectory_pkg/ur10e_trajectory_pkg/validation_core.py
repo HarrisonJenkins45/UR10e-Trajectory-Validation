@@ -420,9 +420,9 @@ class TrajectoryValidator:
             rail_pos = q_seed[0]  # running value -- may move if rail fallback ever fires
             q_home_arm = q_seed[1:]
 
-            def try_point(target_pos, target_quat, seed_arm, prev_rail, prev_arm, check_jump):
+            def try_point(target_pos, target_quat, seed_arm,seed_rail, prev_rail, prev_arm, check_jump):
                 result = self._solve_waypoint_with_recovery(
-                    target_pos, target_quat, np.asarray(seed_arm)[-6:], rail_pos, prev_rail=prev_rail,
+                    target_pos, target_quat, np.asarray(seed_arm)[-6:], seed_rail, prev_rail=prev_rail,
                     prev_arm=(np.asarray(prev_arm)[-6:] if prev_arm is not None else None),
                     check_jump=check_jump, dt_waypoint=dt_waypoint,
                     max_rail_vel_threshold=max_rail_vel_threshold,
@@ -441,7 +441,7 @@ class TrajectoryValidator:
                 target_pos = pos[idx, :]
                 target_quat = quat[idx, :]
                 if current_start is None:
-                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_home_arm, None,None, check_jump=False)
+                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_home_arm, rail_pos, None,None, check_jump=False)
                     if ok:
                         current_start = idx
                         current_qs = [q_full]
@@ -451,7 +451,7 @@ class TrajectoryValidator:
 
                         print(f'[segment scan] point {idx}: infeasible even as a fresh entry, skipping')
                 else:
-                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, prev_config_arm,rail_prev, prev_config_arm, check_jump=True)
+                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_arm, rail, rail_prev,prev_config_arm, check_jump=True)
                     if ok:
                         current_qs.append(q_full)
                         prev_config_arm = q_arm
@@ -652,6 +652,7 @@ class TrajectoryValidator:
                 print(f'Failed to generate rail velocity plot: {e}')
 
             return q_dot, q_interp
+    
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
                                   max_rail_vel_threshold=1.0,
                                    max_joint_vel_threshold=2.0,
