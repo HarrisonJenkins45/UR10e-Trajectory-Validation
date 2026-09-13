@@ -1,5 +1,15 @@
 # Dockerfile
-FROM osrf/ros:humble-desktop-full
+#
+# Pinned by digest, not by tag. `humble-desktop-full` moves, and it carries
+# scipy, matplotlib and the ROS stack, so a moved tag can change a validation
+# verdict with no source change. This digest is the image every measurement
+# on this branch was taken in.
+#
+# To upgrade deliberately:
+#   docker buildx imagetools inspect osrf/ros:humble-desktop-full
+# then replace the digest below, rebuild, and re-run ./run_tests.sh. Expect
+# to update the base-image versions asserted in test_environment.py.
+FROM osrf/ros@sha256:1db1e4e941d4f77fab55bcd479158a75273329335e86ec468bff280859e8178c
 
 RUN apt-get update && apt-get install -y \
     ros-humble-ros-gz \
@@ -13,21 +23,15 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# Order matters: let roboticstoolbox pull in its own numpy/matplotlib/spatialma>
-# versions first, then pin numpy back down afterward, or its C-extensions
-# (compiled against numpy 1.x) will crash exactly like you saw.
-RUN pip install --no-cache-dir roboticstoolbox-python && \
-    pip install --no-cache-dir "numpy<2" && \
-    pip install --no-cache-dir pandas && \
-    pip install --no-cache-dir pybullet
+# Exact pins, resolved together in one pip invocation. This previously ran as
+# four separate installs in a careful order, because roboticstoolbox pulled in
+# its own numpy 2.x and broke its C extensions, which are compiled against
+# 1.x. Pinning numpy explicitly removes the ordering dependency; see
+# requirements.txt for what is pinned here and what the base image supplies.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /root/ros2_ws
 
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
     echo "source /root/ros2_ws/install/setup.bash" >> /root/.bashrc
-
-
-
-
-
-

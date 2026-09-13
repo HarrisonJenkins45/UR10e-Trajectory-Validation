@@ -1,0 +1,31 @@
+# Exact pins for the pip-managed half of the environment.
+#
+# Captured from the container that produced every measurement on this branch.
+# Validation results depend on solver behaviour, so an unpinned upgrade can
+# change which trajectories pass without any source change. Pin first, then
+# upgrade deliberately and re-run the suite.
+#
+# NOT LISTED HERE, ON PURPOSE: scipy and matplotlib come from the ROS apt
+# base, not from pip, so they are pinned by the base image digest in the
+# Dockerfile instead. Adding them here would make pip fight the system
+# packages. Recorded for reference, verified by test_environment.py:
+#     scipy 1.8.0, matplotlib 3.5.1, Python 3.10.12
+#
+# The ur_description package is pinned separately, as a git submodule at
+# release 2.13.0. See the README.
+
+# numpy is pinned BELOW 2.x deliberately. roboticstoolbox's C extensions are
+# compiled against numpy 1.x and crash at import against 2.x.
+numpy==1.26.4
+
+roboticstoolbox-python==1.4.1
+pybullet==3.2.7
+pandas==2.3.3
+
+# Pulled in by roboticstoolbox; pinned explicitly so a transitive upgrade
+# cannot change kinematics or IK behaviour unnoticed.
+spatialmath-python==1.1.16
+spatialgeometry==1.4.0
+pgraph-python==0.6.5
+ansitable==1.0.1
+xacrodoc==2.0.1

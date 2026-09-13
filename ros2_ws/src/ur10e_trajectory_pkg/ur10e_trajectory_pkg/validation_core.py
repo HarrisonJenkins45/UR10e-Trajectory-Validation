@@ -23,9 +23,26 @@ EE_LINK = "tool0"
 # command by editing this. As of writing the URDF says 5.0 m/s.
 RAIL_VEL_SAFETY_CAP = 1.0  # m/s
 
+# Seed for the waypoint-recovery perturbations. Fixed so that the same input
+# gives the same verdict: without it the retries drew from numpy's global
+# generator, seeded from OS entropy, and three runs of one 500-waypoint file
+# returned 364, 366 and 365 feasible waypoints.
+#
+# This makes results repeatable. It does NOT make them better -- the retry
+# still perturbs within one solution basin and cannot reach another branch,
+# so a false rejection is now a reproducible false rejection. Pass seed=None
+# to restore unseeded exploration.
+DEFAULT_IK_SEED = 20260913
+
 class TrajectoryValidator:
-    def __init__(self, urdf_path, mesh_base_path=None, framerate=30):
+    def __init__(self, urdf_path, mesh_base_path=None, framerate=30,
+                 seed=DEFAULT_IK_SEED):
         self.framerate = framerate
+
+        # Instance-owned generator, not numpy's global one, so validating a
+        # trajectory cannot disturb random state elsewhere in the process.
+        self._seed = seed
+        self._rng = np.random.default_rng(seed)
 
         # rtb.ERobot.URDF() (and pybullet's loadURDF) resolve package://
         # mesh URIs against their own default search paths -- NOT against
@@ -394,7 +411,7 @@ class TrajectoryValidator:
         search_radius = 0.05
         for attempt in range(max_rail_attempts + 1):
             this_seed = seed_arm if attempt == 0 else (
-                seed_arm + (2 * np.random.rand(6) - 1) * search_radius)
+                seed_arm + (2 * self._rng.random(6) - 1) * search_radius)
             new_rail, q_arm, sol = self.solve_ik_lm(target_pos, target_quat, this_seed, rail_seed=rail_pos)
             res = evaluate(q_arm, sol, new_rail)
             if res is not None and not (res['low_cond'] or res['jump'] or res['collide']):
@@ -461,6 +478,19 @@ class TrajectoryValidator:
 
         return False
 
+    def reset_rng(self):
+        """Return the recovery generator to its initial state.
+
+        Called at the start of every top-level validation so that repeated
+        requests to one long-lived validator are independent. Seeding at
+        construction alone is not enough: generator state would carry from
+        one request into the next, so the second validation of an identical
+        trajectory would draw a different sequence and could reach a
+        different verdict. Same failure shape as the start pose the server
+        used to inherit from its own playback.
+        """
+        self._rng = np.random.default_rng(self._seed)
+
     def find_feasible_segments(self, ee_x, ee_y, ee_z, ee_quat, q_seed, min_length,
                                     dt_waypoint,
                                     max_rail_vel_threshold=None,
@@ -468,6 +498,9 @@ class TrajectoryValidator:
                                     condition_number_threshold=50.0,
                                     max_attempts=10,
                                     verbose=False):
+            # Independent of any previous validation on this instance.
+            self.reset_rng()
+
             # See _solve_waypoint_with_recovery for why this resolves here.
             if max_rail_vel_threshold is None:
                 max_rail_vel_threshold = self._rail_vel_limit
@@ -740,6 +773,8 @@ class TrajectoryValidator:
         subsequent waypoint -- a real rail wouldn't snap back right after
         relocating.
         """
+        # Independent of any previous validation on this instance.
+        self.reset_rng()
         # None means 'use the rail's own limit', i.e. the URDF value clamped
         # by RAIL_VEL_SAFETY_CAP. Resolved here rather than in the signature
         # because it is per-instance -- it depends on the loaded model.
