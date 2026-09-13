@@ -76,8 +76,69 @@ currently: linear_rail_joint has origin xyz="0 0 0.025"
 
 
 ## Set Up and Running Guide 
+
+### Cloning: read this first
+
+`ros2_ws/src/Universal_Robots_ROS2_Description` is a **git submodule**, pinned to
+release 2.13.0 of the official Universal Robots description package. It supplies
+every mesh and all the collision geometry the validator loads, so the workspace
+will not build if it is missing. A plain `git clone` leaves that directory empty.
+
+Clone with the submodule included:
+
+```bash
+git clone --recurse-submodules \
+  git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
+```
+
+Already cloned without it? Populate it after the fact:
+
+```bash
+git submodule update --init --recursive
+```
+
+Check it is present and sitting on the pinned commit:
+
+```bash
+git submodule status
+#  18e6f603b3eb... ros2_ws/src/Universal_Robots_ROS2_Description (2.13.0)
+```
+
+The first character matters. A space means the checkout matches the pin. A `-`
+means the submodule is not initialised, so the directory is empty. A `+` means
+the checkout has drifted off the pinned commit.
+
+Note that `git pull` does **not** update submodule contents. After pulling a
+commit that changes the pin, run `git submodule update --init --recursive`
+again, or the meshes will silently stay at the old version.
+
+### Updating the pinned version
+
+The pin is a specific commit recorded in this repo, not a moving reference, so
+it changes only when someone deliberately changes it and commits the result:
+
+```bash
+cd ros2_ws/src/Universal_Robots_ROS2_Description
+git fetch origin
+git checkout <tag or commit>     # e.g. 2.13.0
+cd -
+git add ros2_ws/src/Universal_Robots_ROS2_Description
+git commit -m "Bump UR description to <version>"
+```
+
+`git submodule update --remote` does the same thing but jumps to the tip of the
+`humble` branch rather than a tag you chose. Either way the `git add` and commit
+are what actually record the new pin; without them nothing is saved.
+
+Because the meshes drive both the rendered model and the collision geometry,
+re-run the test suite after any bump:
+
+```bash
+colcon test --packages-select ur10e_trajectory_pkg
+```
+
 #### In terminal #1
-1) Clone the workspace (ros2_ws) from GitHub
+1) Clone the workspace as described above, making sure the submodule is populated
 2) Build the docker image from the DockerFile
 
     - `cd ~/ros2_ws`
