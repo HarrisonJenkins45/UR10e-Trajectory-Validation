@@ -69,6 +69,52 @@ def test_numpy_is_below_2(pins):
     assert int(pins['numpy'].split('.')[0]) == 1
 
 
+def test_numpy_satisfies_the_installed_scipy(pins):
+    """scipy states a numpy range; the pin has to sit inside it.
+
+    This was violated for the life of the project: scipy 1.8.0 requires numpy
+    below 1.25 and the pin was 1.26.4, so every run emitted a compatibility
+    warning. Pinning an unsupported pair makes it reproducible, not supported.
+    """
+    import scipy
+
+    ceiling = getattr(scipy, 'np_maxversion', None)
+    if ceiling is None:            # newer scipy stopped publishing a bound
+        pytest.skip('installed scipy declares no numpy ceiling')
+
+    def parts(version):
+        return tuple(int(p) for p in version.split('.')[:3])
+
+    assert parts(pins['numpy']) < parts(ceiling), (
+        f'numpy {pins["numpy"]} is at or above {ceiling}, the ceiling scipy '
+        f'{scipy.__version__} declares'
+    )
+
+
+def test_importing_the_stack_emits_no_compatibility_warning():
+    """An incompatible pairing must fail the suite, not print a warning.
+
+    Imports run in a subprocess with warnings promoted to errors, because the
+    warning fires at first import and would already have been swallowed by the
+    time this test body runs.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        'import scipy, numpy, roboticstoolbox, spatialmath, '
+        'spatialgeometry, pandas'
+    )
+    result = subprocess.run(
+        [sys.executable, '-W', 'error::UserWarning', '-c', probe],
+        capture_output=True, text=True, timeout=180, check=False,
+    )
+    assert result.returncode == 0, (
+        'importing the stack raised a warning promoted to an error:\n'
+        f'{result.stderr.strip()[-600:]}'
+    )
+
+
 def test_ur_description_is_at_the_pinned_revision():
     """The mesh source is pinned, or we are not in a git checkout."""
     revision = environment.ur_description_revision()

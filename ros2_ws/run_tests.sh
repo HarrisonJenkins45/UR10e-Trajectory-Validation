@@ -34,7 +34,9 @@ docker run --rm \
     -v "$WORKSPACE":/root/ros2_ws \
     "$IMAGE" \
     bash -lc '
-        set -euo pipefail
+        # No set -u: the ROS setup scripts reference unbound variables and
+        # would abort the run before any test executes.
+        set -eo pipefail
         source /opt/ros/humble/setup.bash
         cd /root/ros2_ws
         colcon build --symlink-install \

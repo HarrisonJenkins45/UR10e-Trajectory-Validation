@@ -14,9 +14,15 @@
 # The ur_description package is pinned separately, as a git submodule at
 # release 2.13.0. See the README.
 
-# numpy is pinned BELOW 2.x deliberately. roboticstoolbox's C extensions are
-# compiled against numpy 1.x and crash at import against 2.x.
-numpy==1.26.4
+# numpy 1.24.4 is the one version satisfying every constraint at once:
+#   scipy 1.8.0 (from the apt base) requires  < 1.25
+#   roboticstoolbox C extensions require      < 2      (built against 1.x)
+#   pandas 2.3.3 on python 3.10 requires     >= 1.22.4
+#   spatialmath-python requires              >= 1.22
+# This was 1.26.4, which violates the scipy bound and made every run emit a
+# compatibility warning. Reproducible but unsupported is still unsupported;
+# test_environment.py now fails on that warning rather than printing it.
+numpy==1.24.4
 
 roboticstoolbox-python==1.4.1
 pybullet==3.2.7

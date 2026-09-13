@@ -34,6 +34,23 @@ RAIL_VEL_SAFETY_CAP = 1.0  # m/s
 # to restore unseeded exploration.
 DEFAULT_IK_SEED = 20260913
 
+# ikine_LM defaults to slimit=100: on failing to converge from q0 it retries
+# from up to 99 further configurations of its own choosing, and with seed=None
+# those are drawn nondeterministically. Measured on an unreachable target,
+# five identical calls burned 100 searches each and returned five different
+# configurations.
+#
+# Held at 1 so each call is exactly one deterministic search from the seed we
+# supply. Retry policy belongs in _solve_waypoint_with_recovery, which already
+# owns it; nesting a second, invisible search inside it made the attempt
+# accounting meaningless and determinism unprovable.
+#
+# Note those internal restarts only ever fired on CONVERGENCE failure, never
+# when a solution converged and was then rejected by our own condition-number,
+# velocity or collision gates. That is the common case, so this removes far
+# less exploration than the numbers suggest.
+IK_SEARCH_LIMIT = 1
+
 class TrajectoryValidator:
     def __init__(self, urdf_path, mesh_base_path=None, framerate=30,
                  seed=DEFAULT_IK_SEED):
@@ -315,7 +332,8 @@ class TrajectoryValidator:
 
         q0 = np.concatenate(([rail_seed], q_seed_arm))
         sol = self.robot.ikine_LM(T_target, end=EE_LINK, q0=q0,
-                                    mask=[1, 1, 1, 1, 1, 1], tol=1e-4)
+                                  mask=[1, 1, 1, 1, 1, 1], tol=1e-4,
+                                  slimit=IK_SEARCH_LIMIT, seed=self._seed)
         return sol.q[0],sol.q[1:], sol
 
 
