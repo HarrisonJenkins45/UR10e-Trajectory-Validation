@@ -44,9 +44,9 @@ class TrajectoryClientNode(Node):
         # reshapes it back to (N, 4) on the way in.
         req.ee_quat = np.asarray(quat).flatten().tolist()
         req.sim_time=simTime
-        # Explicit start pose. Omitting it makes the server fall back to its
-        # own home constant, which is still reproducible, but sending it keeps
-        # the assumption visible on the caller's side where it belongs.
+        # Start pose, required by the service: it rejects an omitted field
+        # rather than defaulting, so the assumption lives here at the call
+        # site rather than inside the server.
         req.q_start = Q_START if q_start is None else list(q_start)
 
         self.future = self.cli.call_async(req)

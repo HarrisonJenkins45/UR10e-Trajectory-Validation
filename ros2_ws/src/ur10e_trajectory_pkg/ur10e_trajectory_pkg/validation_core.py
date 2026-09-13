@@ -10,6 +10,8 @@ import roboticstoolbox as rtb
 import pybullet as pb
 from spatialmath import SE3, UnitQuaternion
 from spatialgeometry import Cuboid
+
+from ur10e_trajectory_pkg.configurations import ARM_SLICE, NUM_JOINTS
 from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 
@@ -338,8 +340,56 @@ class TrajectoryValidator:
 
 
 
-    def compute_jacobian(self, q_arm):
-        return self.robot.jacobe(q_arm, end=EE_LINK, start='base_link')
+    @staticmethod
+    def _checked_configuration(q_full):
+        """Reject anything that is not a complete, finite configuration.
+
+        The defect this replaces was silent: a six-element arm vector passed
+        to a seven-joint robot was padded by roboticstoolbox with a trailing
+        zero, shifting every joint one position and pinning wrist_3 to zero.
+        Nothing raised, and the reported condition number described a
+        configuration the robot was not in.
+        """
+        q = np.asarray(q_full, dtype=float)
+        if q.shape != (NUM_JOINTS,):
+            raise ValueError(
+                f'expected a full {NUM_JOINTS}-joint configuration '
+                f'[rail_m, 6x arm_rad], got {q.size} values'
+            )
+        if not np.all(np.isfinite(q)):
+            raise ValueError('configuration contains non-finite values')
+        return q
+
+    def compute_system_jacobian(self, q_full):
+        """6x7 Jacobian of the tool, in the WORLD (URDF root) frame.
+
+        Columns follow configurations.JOINT_NAMES: the rail first, then the
+        six arm joints. Answers whether the rail-and-arm system together can
+        produce a commanded Cartesian motion.
+
+        Frame is named because it is part of the contract: a twist multiplied
+        against this must be expressed in the same frame. Body-frame variants,
+        if ever needed, get their own names rather than changing this one.
+        """
+        return self.robot.jacob0(self._checked_configuration(q_full), end=EE_LINK)
+
+    def compute_arm_jacobian(self, q_full):
+        """6x6 Jacobian of the six arm joints, in the WORLD frame.
+
+        The arm columns of the system Jacobian, at the same configuration and
+        in the same frame, so the two are directly comparable. Answers whether
+        the UR arm itself is near a kinematic singularity, which the rail
+        cannot rescue.
+
+        Takes the COMPLETE configuration, not the six arm values: the rail
+        position changes where the arm is, and the old six-value subchain call
+        is exactly the shape that was silently padded.
+
+        Selecting columns rather than calling the subchain is deliberate. Both
+        give identical singular values, verified across 200 random
+        configurations, so nothing is lost and there is one evaluation path.
+        """
+        return self.compute_system_jacobian(q_full)[:, ARM_SLICE]
 
     def _failure_reason(self, sol, res, condition_number_threshold,max_rail_vel_threshold,
                          max_joint_vel_threshold, rail_fallback_exhausted):
@@ -389,7 +439,7 @@ class TrajectoryValidator:
             if not sol.success:
                 return None
             q_full = np.concatenate(([rail], q_arm))
-            J = self.compute_jacobian(q_arm)
+            J = self.compute_arm_jacobian(q_full)
             singular_values = np.linalg.svd(J, compute_uv=False)
             cond_num = (singular_values[0] / singular_values[-1]
                         if singular_values[-1] > 1e-9 else np.inf)

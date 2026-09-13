@@ -7,6 +7,8 @@ import rclpy
 import numpy as np
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+
+from ur10e_trajectory_pkg.configurations import JOINT_NAMES
 from scipy.io import loadmat
 
 class MatTrajectoryPlayer(Node):
@@ -15,16 +17,9 @@ class MatTrajectoryPlayer(Node):
 
         self.publisher_ = self.create_publisher(JointState, 'joint_states', 10)
 
-        # Joint names matching your URDF (7 joints total: linear base + 6 UR10e joints)
-        self.joint_names = [
-            'linear_rail_joint',   # Column 8: Linear rail prismatic joint
-            'shoulder_pan_joint',  # Column 2
-            'shoulder_lift_joint', # Column 3
-            'elbow_joint',         # Column 4
-            'wrist_1_joint',       # Column 5
-            'wrist_2_joint',       # Column 6
-            'wrist_3_joint'        # Column 7
-        ]
+        # Shared ordering, not a retyped copy: the rail is index 0 and
+        # everything downstream indexes positionally.
+        self.joint_names = list(JOINT_NAMES)
 
         # 1. Load MAT File
         mat_path = os.path.expanduser('~/ros2_ws/joint_trajectory.mat')
