@@ -13,8 +13,9 @@ verification work rather than in a cleanup branch:
    not in. Measured on one pose: rank 5 and 2.5e16 as computed, against
    rank 6 and 66.0 for the same pose with the full joint vector.
 
-2. The home seed sits on a wrist singularity. HOME_Q has wrist_2 = 0, the
-   classic UR degeneracy where the wrist_1 and wrist_3 axes align. Its true
+2. The legacy start posture sits on a wrist singularity.
+   LEGACY_MATLAB_START_Q has wrist_2 = 0, the classic UR degeneracy where
+   the wrist_1 and wrist_3 axes align. Its true
    condition number is infinite. Defect 1 hides this, because the shifted
    metric reports an unremarkable number instead.
 
@@ -25,7 +26,7 @@ import numpy as np
 import pytest
 from ament_index_python.packages import get_package_share_directory
 
-from ur10e_trajectory_pkg.Validate_trajServer import HOME_Q
+from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 from test_geometry_invariants import _urdf_path
@@ -108,9 +109,9 @@ def test_arm_jacobian_matches_the_full_joint_vector(validator):
 
 @pytest.mark.xfail(
     strict=True,
-    reason='Known defect: HOME_Q has wrist_2 = 0, a UR wrist singularity, so '
-           'its true condition number is infinite. Move the seed off the '
-           'degeneracy, then delete this marker.',
+    reason='Known defect: LEGACY_MATLAB_START_Q has wrist_2 = 0, a UR '
+           'wrist singularity, so its true condition number is infinite. '
+           'Choose a non-singular seed, then delete this marker.',
 )
 def test_home_seed_is_not_singular(validator):
     """The default start pose must not sit on a singularity.
@@ -119,7 +120,7 @@ def test_home_seed_is_not_singular(validator):
     the search inside a degenerate basin and makes rejection the default
     outcome rather than a finding about the trajectory.
     """
-    q_full = np.concatenate(([1.5], HOME_Q[1:]))
+    q_full = np.concatenate(([1.5], LEGACY_MATLAB_START_Q[1:]))
     jacobian = validator.robot.jacobe(q_full, end=EE_LINK, start=ARM_BASE)
     assert np.linalg.matrix_rank(jacobian) == 6
     assert _condition(jacobian) < 50.0

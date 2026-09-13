@@ -18,11 +18,16 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-# Matches qHome in the MATLAB script / Validate_trajServer.py's default
-# seed: rail=0, then [0, -135, 90, -90, 0, 0] deg for the 6 arm joints.
-import math
-HOME_POSITION_RAD = [0.0, 0.0, math.radians(-135.0), math.radians(90.0),
-                      math.radians(-90.0), 0.0, 0.0]
+# The legacy MATLAB start posture, shared with the server and client rather
+# than retyped here. This is where the bridge parks the simulated arm, which
+# is the only sense in which it is a "home": it says nothing about where the
+# physical robot begins. See configurations.py.
+from ur10e_trajectory_pkg.configurations import (
+    JOINT_NAMES,
+    LEGACY_MATLAB_START_Q,
+)
+
+HOME_POSITION_RAD = LEGACY_MATLAB_START_Q.tolist()
 
 
 class JointStateToGazeboBridge(Node):
@@ -31,15 +36,7 @@ class JointStateToGazeboBridge(Node):
 
         # Must match the joint names used in Validate_trajServer.py / the
         # URDF's JointPositionController plugin blocks exactly.
-        self.joint_names = [
-            'linear_rail_joint',
-            'shoulder_pan_joint',
-            'shoulder_lift_joint',
-            'elbow_joint',
-            'wrist_1_joint',
-            'wrist_2_joint',
-            'wrist_3_joint',
-        ]
+        self.joint_names = list(JOINT_NAMES)
 
         self.cmd_publishers = {
             name: self.create_publisher(Float64, f'/cmd/{name}', 10)

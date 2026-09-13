@@ -3,22 +3,25 @@ import rclpy
 import pandas as pd
 from rclpy.node import Node
 from ur10e_interfaces.srv import ValidateTrajectory
+from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
 from scipy.spatial.transform import Rotation as R
 
 
 
 TEST_VALID_TRAJ=False
 
-# Configuration the arm is in when the trajectory starts:
-# [rail_m, shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3],
-# rail in metres and arm joints in radians. Sent with every request.
+# Start configuration sent with every request, as
+# [rail_m, shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3].
 #
-# The server seeds its inverse kinematics from this, and a different start can
-# put the solver in a different branch and change which waypoints come out
-# reachable. Stating it here keeps a validation result reproducible instead of
-# depending on whatever the arm happened to be doing beforehand. Replace with a
-# real measurement once VICON or hardware feedback is wired up.
-Q_START_HOME = np.deg2rad([0.0, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0]).tolist()
+# This is the LEGACY SIMULATION START, not a measured pose. It is where the
+# Gazebo bridge parks the simulated arm, so it is correct for simulation runs
+# and reproduces the historical baseline. It is not where the physical robot
+# begins, and it is singular at the wrist. Replace it with a real measurement
+# once VICON or driver feedback exists.
+#
+# The server no longer defaults to it when q_start is omitted, so the
+# assumption is stated here, at the call site that owns it.
+Q_START = LEGACY_MATLAB_START_Q.tolist()
 
 class TrajectoryClientNode(Node):
 
@@ -44,7 +47,7 @@ class TrajectoryClientNode(Node):
         # Explicit start pose. Omitting it makes the server fall back to its
         # own home constant, which is still reproducible, but sending it keeps
         # the assumption visible on the caller's side where it belongs.
-        req.q_start = Q_START_HOME if q_start is None else list(q_start)
+        req.q_start = Q_START if q_start is None else list(q_start)
 
         self.future = self.cli.call_async(req)
         return self.future

@@ -19,8 +19,10 @@ float64[] sim_time
 # change which waypoints are reachable. Sending it explicitly is what makes
 # a validation result reproducible.
 #
-# Leave empty to start from the documented home pose. Any other length is
-# rejected rather than guessed at.
+# REQUIRED. An omitted or wrong-length field is rejected rather than
+# defaulted: a caller that forgets would otherwise get a confident answer
+# computed from a configuration the robot is not in. Simulation and
+# regression callers pass configurations.LEGACY_MATLAB_START_Q explicitly.
 float64[] q_start
 
 ---

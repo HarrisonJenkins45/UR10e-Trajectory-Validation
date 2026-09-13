@@ -4,6 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState  # Standard ROS msg for joint encoders
 from ur10e_interfaces.srv import ValidateTrajectory
 
+from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 # Module-level debug toggles (easier to find/flip than buried in __init__)
@@ -17,30 +18,25 @@ DEFAULT_T_TRAJ = 10.0         # matches process_matlab_validation's own default 
                                # since incoming requests carry positions but not timing
 
 
-# Fallback start configuration, used only when a request omits q_start.
-# Matches qHome from the MATLAB script: [0, -135, 90, -90, 0, 0] deg for the
-# six arm joints, with the rail at its zero (origin) end.
-HOME_Q = np.deg2rad(np.array([0.0, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0]))
-
-# Number of actuated joints: the rail plus the six arm joints.
-NUM_JOINTS = 7
-
-
 def resolve_start_pose(q_start_field):
     """Turn a request's q_start field into a start configuration.
 
-    Returns (q_start, description). An empty field means 'use home'; a
-    full-length field is taken as given. Any other length raises rather than
-    being padded or truncated into something that would quietly validate the
-    wrong trajectory.
+    The start pose is required. It used to default to a legacy MATLAB posture
+    when omitted, which meant a caller that simply forgot got a confident
+    answer computed from a configuration the robot was not in. That posture is
+    also singular, so the default quietly seeded the solver on a degeneracy.
 
-    Deliberately a pure function of the request. The server used to read its
-    start pose from the /joint_states topic it publishes to itself, so each
-    request began wherever the previous playback stopped and the same input
-    could validate differently depending on what ran before.
+    Simulation and regression callers that genuinely want it must pass
+    configurations.LEGACY_MATLAB_START_Q explicitly, so the assumption appears
+    at the call site.
     """
     if len(q_start_field) == 0:
-        return HOME_Q.copy(), 'home (q_start omitted from request)'
+        raise ValueError(
+            'q_start is required: send the configuration the arm is actually '
+            f'in, as {NUM_JOINTS} values [rail_m, 6x arm_rad]. For the legacy '
+            'simulation start, pass configurations.LEGACY_MATLAB_START_Q '
+            'explicitly rather than relying on a default'
+        )
     q_start = np.asarray(q_start_field, dtype=float)
     if q_start.shape != (NUM_JOINTS,):
         raise ValueError(
@@ -87,15 +83,7 @@ class TrajectoryValidationNode(Node):
         self.framerate = 30
         self.playbackFrameRate=60
 
-        self.joint_names = [
-            'linear_rail_joint',
-            'shoulder_pan_joint',
-            'shoulder_lift_joint',
-            'elbow_joint',
-            'wrist_1_joint',
-            'wrist_2_joint',
-            'wrist_3_joint',
-        ]
+        self.joint_names = list(JOINT_NAMES)
 
         from ament_index_python.packages import get_package_share_directory
         ur_description_share = get_package_share_directory('ur_description')
