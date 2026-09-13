@@ -9,6 +9,17 @@ from scipy.spatial.transform import Rotation as R
 
 TEST_VALID_TRAJ=False
 
+# Configuration the arm is in when the trajectory starts:
+# [rail_m, shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3],
+# rail in metres and arm joints in radians. Sent with every request.
+#
+# The server seeds its inverse kinematics from this, and a different start can
+# put the solver in a different branch and change which waypoints come out
+# reachable. Stating it here keeps a validation result reproducible instead of
+# depending on whatever the arm happened to be doing beforehand. Replace with a
+# real measurement once VICON or hardware feedback is wired up.
+Q_START_HOME = np.deg2rad([0.0, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0]).tolist()
+
 class TrajectoryClientNode(Node):
 
     def __init__(self):
@@ -19,7 +30,7 @@ class TrajectoryClientNode(Node):
         while not self.cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Waiting for validate_trajectory service...')
 
-    def send_request(self, x_pts, y_pts, z_pts, quat, simTime):
+    def send_request(self, x_pts, y_pts, z_pts, quat, simTime, q_start=None):
         req = ValidateTrajectory.Request()
         req.ee_positions_x = x_pts
         req.ee_positions_y = y_pts
@@ -30,8 +41,10 @@ class TrajectoryClientNode(Node):
         # reshapes it back to (N, 4) on the way in.
         req.ee_quat = np.asarray(quat).flatten().tolist()
         req.sim_time=simTime
-
-
+        # Explicit start pose. Omitting it makes the server fall back to its
+        # own home constant, which is still reproducible, but sending it keeps
+        # the assumption visible on the caller's side where it belongs.
+        req.q_start = Q_START_HOME if q_start is None else list(q_start)
 
         self.future = self.cli.call_async(req)
         return self.future

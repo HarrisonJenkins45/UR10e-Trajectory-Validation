@@ -17,28 +17,57 @@ DEFAULT_T_TRAJ = 10.0         # matches process_matlab_validation's own default 
                                # since incoming requests carry positions but not timing
 
 
+# Fallback start configuration, used only when a request omits q_start.
+# Matches qHome from the MATLAB script: [0, -135, 90, -90, 0, 0] deg for the
+# six arm joints, with the rail at its zero (origin) end.
+HOME_Q = np.deg2rad(np.array([0.0, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0]))
+
+# Number of actuated joints: the rail plus the six arm joints.
+NUM_JOINTS = 7
+
+
+def resolve_start_pose(q_start_field):
+    """Turn a request's q_start field into a start configuration.
+
+    Returns (q_start, description). An empty field means 'use home'; a
+    full-length field is taken as given. Any other length raises rather than
+    being padded or truncated into something that would quietly validate the
+    wrong trajectory.
+
+    Deliberately a pure function of the request. The server used to read its
+    start pose from the /joint_states topic it publishes to itself, so each
+    request began wherever the previous playback stopped and the same input
+    could validate differently depending on what ran before.
+    """
+    if len(q_start_field) == 0:
+        return HOME_Q.copy(), 'home (q_start omitted from request)'
+    q_start = np.asarray(q_start_field, dtype=float)
+    if q_start.shape != (NUM_JOINTS,):
+        raise ValueError(
+            f'q_start must have {NUM_JOINTS} elements '
+            f'[rail_m, 6x arm_rad], got {q_start.size}'
+        )
+    return q_start, 'q_start supplied by client'
+
+
 class TrajectoryValidationNode(Node):
 
     def __init__(self):
         super().__init__('trajectory_validation_node')
 
-        # In a real-hardware setup, this would stay None until the actual robot
-        # publishes its first /joint_states reading. But nothing in this
-        # simulate-only setup does that (spawning into Gazebo doesn't publish
-        # feedback), and the goal here is just to display the trajectory, not
-        # closed-loop control -- so seed a sensible starting point instead of
-        # blocking forever on external feedback that will never arrive.
-        # Matches qHome from the MATLAB script: [0, -135, 90, -90, 0, 0] deg
-        # for the 6 arm joints, rail assumed to start at 0.
-        self.current_joint_positions = np.deg2rad(
-            np.array([0.0, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0])
-        )
-
-        # Subscriber to read current joint states
-        # Arguments: Message Type, Topic Name, Callback Function, QoS/Queue Size
-        self.joint_state_sub = self.create_subscription(
-            JointState, '/joint_states', self.joint_state_callback, 10
-        )
+        # NO /joint_states SUBSCRIPTION HERE, deliberately.
+        #
+        # This node publishes playback frames to /joint_states. Subscribing to
+        # the same topic meant it consumed its own output: after a playback the
+        # stored pose was that trajectory's final frame, so the next request
+        # started from there rather than from home. The same input then
+        # validated differently depending on what had run before (measured:
+        # 359/500 waypoints cold, 500/500 straight after a previous run). It
+        # also picked up frames from any other node publishing joint states.
+        #
+        # The start pose is now an explicit request field. Closed-loop use
+        # against real hardware needs genuine feedback, but that has to arrive
+        # on a topic this node does not itself publish to.
 
         # Publisher to directly drive joint states in visualization/sim
         # Method syntax: create_publisher(msg_type, topic_name, qos_profile)
@@ -91,29 +120,21 @@ class TrajectoryValidationNode(Node):
 
 
 
-    def joint_state_callback(self, msg):
-        joint_map = dict(zip(msg.name, msg.position))
-        try:
-            self.current_joint_positions = np.array(
-                [joint_map[name] for name in self.joint_names]
-            )
-        except KeyError as e:
-            self.get_logger().warn_once(
-                f'Joint name mismatch in /joint_states: Missing key {e}'
-            )
-
     def validation_callback(self, request, response):
         self.get_logger().info('Received trajectory validation request...')
 
-        if self.current_joint_positions is None:
-            self.get_logger().error('Validation failed: No /joint_states received yet!')
+        try:
+            q_start, start_desc = resolve_start_pose(request.q_start)
+        except ValueError as exc:
+            self.get_logger().error(f'Validation failed: {exc}')
             response.success = False
-            response.message = 'Error: Hardware joint states unavailable.'
+            response.message = f'Error: {exc}'
             response.joint_velocities = []
             return response
 
-        q_start = self.current_joint_positions.copy()
-        
+        self.get_logger().info(f'Start pose: {start_desc} -> {np.round(q_start, 4).tolist()}')
+
+
         ee_x = np.array(request.ee_positions_x)
         ee_y = np.array(request.ee_positions_y)
         ee_z = np.array(request.ee_positions_z)
@@ -139,7 +160,8 @@ class TrajectoryValidationNode(Node):
             if not segments:
                 is_valid = False
                 q_dot_matrix, q_interp = np.array([]), np.array([])
-                message = f'No feasible segment of length >= {MIN_SEGMENT_LENGTH} found across {num_waypts} waypoints'
+                message = (f'No feasible segment of length >= {MIN_SEGMENT_LENGTH} found across '
+                           f'{num_waypts} waypoints [start: {start_desc}]')
             else:
                 # segment = segments[0]  # 1st viable segment is used as the full trajectory
                 segment= max(segments,key=lambda s: s['length'])
@@ -150,7 +172,8 @@ class TrajectoryValidationNode(Node):
                 # message = (f'Using 1st feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
                 #            f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
                 message = (f'Using largest feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
-                           f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
+                           f'(length={segment["length"]}/{num_waypts}) as the full trajectory '
+                           f'[start: {start_desc}]')
         else:
             # Run validation and generate interpolated trajectory frames
             is_valid, q_dot_matrix, q_interp, message = self.validator.process_matlab_validation(
