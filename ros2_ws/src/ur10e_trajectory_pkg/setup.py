@@ -13,7 +13,7 @@ setup(
 
         ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj.py']),
         ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py']),
-        ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisTraj_Rviz.py']),
+        # ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisTraj_Rviz.py']),
 
     ],
 

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ur10e_sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ur10e_sim:latest
+    container_name: ur10e_sim
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - ~/ros2_ws:/root/ros2_ws
+    stdin_open: true
+    tty: true
