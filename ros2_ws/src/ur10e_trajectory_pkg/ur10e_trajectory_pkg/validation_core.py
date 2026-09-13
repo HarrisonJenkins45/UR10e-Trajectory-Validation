@@ -14,8 +14,14 @@ from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 
 EE_LINK = "tool0"
-#How can we get this so it comes automatically from the URDF?
-IPA_rail_max= 1.0 # m/s, actual max velocity for the rail is 5 m/s
+
+# Deliberate safety derate, NOT the rig's capability. The hardware ceiling is
+# read from the URDF at startup (see self._rail_vel_limit in __init__) and the
+# validator enforces the LOWER of the two, so this can only ever be more
+# conservative than the rail. Raise the rig's real limit by editing the URDF's
+# <limit velocity="..."> on linear_rail_joint; raise what we are willing to
+# command by editing this. As of writing the URDF says 5.0 m/s.
+RAIL_VEL_SAFETY_CAP = 1.0  # m/s
 
 class TrajectoryValidator:
     def __init__(self, urdf_path, mesh_base_path=None, framerate=30):
@@ -97,12 +103,22 @@ class TrajectoryValidator:
                 )
             self._rail_limits = (float(self.robot.qlim[0][0]), float(self.robot.qlim[1][0]))
 
+            # Rail velocity ceiling, read from the URDF's <limit velocity="...">
+            # via the same link the position limits above came from, then
+            # clamped by the safety cap. This is the single source of truth for
+            # what the rail can do -- previously three separate literals in this
+            # file happened to agree, and the URDF's value was never read at all.
+            rail_link = self.robot.links[self._link_index_by_name[self._q_link_names[0]]]
+            rail_qdlim = getattr(rail_link, 'qdlim', None)
+            self._rail_vel_limit = (min(float(rail_qdlim), RAIL_VEL_SAFETY_CAP)
+                                    if rail_qdlim else RAIL_VEL_SAFETY_CAP)
+
             # # Kept for visualization/back-compat only (e.g. anything that
             # # still expects validator.env / validator.floor_box /
             # # validator.wall_box to exist) -- collision checking below no
             # # longer uses these.
-            # self.floor_box = Cuboid(scale=[3.0, 0.05, 3.0], pose=SE3(0.0, 1.0, 0.0))
-            # self.wall_box = Cuboid(scale=[3.0, 3.0, 0.05], pose=SE3(0.0, 0.0, -0.05))
+            # self.wall_box = Cuboid(scale=[3.0, 0.05, 3.0], pose=SE3(0.0, 1.0, 0.0))
+            # self.floor_box = Cuboid(scale=[3.0, 3.0, 0.05], pose=SE3(0.0, 0.0, -0.05))
 
             
             # # Matches rail_base_link's <collision><box size="2.0 0.1 0.05"/></collision>
@@ -152,25 +168,33 @@ class TrajectoryValidator:
         # Same order as self._q_link_names, i.e. same order as q_full.
         self._pb_joint_indices = [pb_joint_index_by_link_name[n] for n in self._q_link_names]
 
-        # Floor parallel to XY plane at Y = +1.0m, Wall parallel to XZ
-        # plane at Z = -0.05m (matches MATLAB's actual code, not its stale
-        # comment -- see script header). Sizes below are the original
-        # Cuboid `scale` (full extents) halved, since pybullet boxes take
-        # half-extents.
-        floor_shape = pb.createCollisionShape(
+        # Wall: vertical plane parallel to XZ, standing at Y = +1.0m.
+        # Floor: horizontal plane parallel to XY, lying at Z = -0.05m.
+        # (Matches MATLAB's actual code, not its stale comment -- see script
+        # header.) These two names were previously swapped, and the comment
+        # naming their planes was wrong in both directions: a surface at
+        # constant Y is parallel to XZ, not XY. Geometry is unchanged.
+        #
+        # Sizes below are the original Cuboid `scale` (full extents) halved,
+        # since pybullet boxes take half-extents.
+        wall_shape = pb.createCollisionShape(
             pb.GEOM_BOX, halfExtents=[1.5, 0.025, 1.5], physicsClientId=self._pb_client
         )
-        wall_shape = pb.createCollisionShape(
+        floor_shape = pb.createCollisionShape(
             pb.GEOM_BOX, halfExtents=[1.5, 1.5, 0.025], physicsClientId=self._pb_client
+        )
+        # X centre +1.5, not 0 -- see obstacle_markers.publish_markers. The
+        # rail spans X = 0 -> 3, so centred-on-origin planes would leave its
+        # outer half outside the environment entirely, where no floor or wall
+        # collision can ever be reported. Must stay in step with the markers.
+        self.wall_id = pb.createMultiBody(
+            baseCollisionShapeIndex=wall_shape,
+            basePosition=[1.5, 1.0, 0.0],
+            physicsClientId=self._pb_client,
         )
         self.floor_id = pb.createMultiBody(
             baseCollisionShapeIndex=floor_shape,
-            basePosition=[0.0, 1.0, 0.0],
-            physicsClientId=self._pb_client,
-        )
-        self.wall_id = pb.createMultiBody(
-            baseCollisionShapeIndex=wall_shape,
-            basePosition=[0.0, 0.0, -0.05],
+            basePosition=[1.5, 0.0, -0.05],
             physicsClientId=self._pb_client,
         )
 
@@ -243,6 +267,30 @@ class TrajectoryValidator:
         6-element arm joint seed for the LM search.
 
         Returns: (rail_out, q_arm (6,), sol ) -- rail_out is the solved rail position
+
+        FRAME CONTRACT -- target_pos/target_quat are in the URDF's ROOT frame
+        ('world', which world-rail_base_joint fixes to rail_base_link at
+        identity), NOT the arm base frame. ikine_LM is deliberately called
+        without start=, so it solves the full 7-DOF chain from the root and
+        interprets the target there.
+
+        This is not a free choice: once the rail is a solved DOF the arm base
+        rides the carriage, so it is not a fixed frame and cannot be the frame
+        targets are expressed in. The rail base is the only static frame.
+
+        KNOWN DISCREPANCY: ClientNode.get_end_effector_in_base_frame names its
+        output frame 'B' after the UR base and builds targets relative to it.
+        That frame and this one disagree by linear_rail_joint's <origin> (the
+        mount height, 25 mm in Z and still a placeholder) plus the full rail
+        position once the carriage moves. Reconcile once the mount height is
+        measured -- p_B_I on the client side should mean the rail base in the
+        arena, not the arm base.
+
+        end=EE_LINK is required, not decorative. This URDF has three leaf
+        links (ft_frame, base, tool0) and roboticstoolbox falls back to
+        ee_links[0], which is ft_frame -- same position as tool0 but flipped
+        180 degrees about X. Position would look right and orientation would
+        be silently wrong, which is the half that matters for a tumble.
         """
         R_mat = UnitQuaternion(target_quat[3], target_quat[:3]).R  # spatialmath wants [w, x, y, z]
         T_target = SE3.Rt(R_mat, target_pos)
@@ -277,7 +325,7 @@ class TrajectoryValidator:
     def _solve_waypoint_with_recovery(self, target_pos, target_quat, seed_arm, rail_pos, prev_rail=None,
                                        prev_arm=None, check_jump=False,
                                        dt_waypoint=None,
-                                       max_rail_vel_threshold=IPA_rail_max, #Set the rail velocity threshold 
+                                       max_rail_vel_threshold=None,
                                        max_joint_vel_threshold=2.0,
                                        condition_number_threshold=50.0,
                                        max_attempts=10,
@@ -296,6 +344,12 @@ class TrajectoryValidator:
         Returns a dict: ok, q_arm, q_full, rail_pos, cond_num, joint_vel,
         attempts_used, rail_moved, reason (None if ok).
         """
+        # None means 'use the rail's own limit', i.e. the URDF value clamped
+        # by RAIL_VEL_SAFETY_CAP. Resolved here rather than in the signature
+        # because it is per-instance -- it depends on the loaded model.
+        if max_rail_vel_threshold is None:
+            max_rail_vel_threshold = self._rail_vel_limit
+
         def evaluate(q_arm, sol, rail):
             if not sol.success:
                 return None
@@ -409,11 +463,15 @@ class TrajectoryValidator:
 
     def find_feasible_segments(self, ee_x, ee_y, ee_z, ee_quat, q_seed, min_length,
                                     dt_waypoint,
-                                    max_rail_vel_threshold=1.0,
+                                    max_rail_vel_threshold=None,
                                     max_joint_vel_threshold=2.0,
                                     condition_number_threshold=50.0,
                                     max_attempts=10,
                                     verbose=False):
+            # See _solve_waypoint_with_recovery for why this resolves here.
+            if max_rail_vel_threshold is None:
+                max_rail_vel_threshold = self._rail_vel_limit
+
             num_pts = len(ee_x)
             pos = np.column_stack((ee_x, ee_y, ee_z))
             quat = np.asarray(ee_quat)
@@ -654,7 +712,7 @@ class TrajectoryValidator:
             return q_dot, q_interp
     
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
-                                  max_rail_vel_threshold=1.0,
+                                  max_rail_vel_threshold=None,
                                    max_joint_vel_threshold=2.0,
                                    condition_number_threshold=50.0,
                                    t_transition=2.0, t_traj=10.0,
@@ -682,6 +740,12 @@ class TrajectoryValidator:
         subsequent waypoint -- a real rail wouldn't snap back right after
         relocating.
         """
+        # None means 'use the rail's own limit', i.e. the URDF value clamped
+        # by RAIL_VEL_SAFETY_CAP. Resolved here rather than in the signature
+        # because it is per-instance -- it depends on the loaded model.
+        if max_rail_vel_threshold is None:
+            max_rail_vel_threshold = self._rail_vel_limit
+
         num_waypts = len(ee_x)
         t_final = t_traj + t_transition
         num_frames = int(t_final * self.framerate)

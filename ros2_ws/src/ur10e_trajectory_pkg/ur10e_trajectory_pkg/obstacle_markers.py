@@ -2,7 +2,13 @@
 """Publishes the wall/floor obstacles as RViz Markers, since RViz only draws
 what's explicitly published to it -- unlike Gazebo, where adding a shape to
 the SDF world is enough on its own. Geometry matches validation_core.py's
-Cuboid env exactly (floor at Y=1.0, wall at Z=-0.05).
+Cuboid env exactly.
+
+NAMES FOLLOW GEOMETRY, not the other way round. The wall is the vertical
+plane (thin in Y, spanning X-Z) standing at Y = +1.0. The floor is the
+horizontal plane (thin in Z, spanning X-Y) lying just under the rig at
+Z = -0.05. These two were previously swapped here and in validation_core,
+which made the gold horizontal floor read as a wall in RViz.
 """
 import rclpy
 from rclpy.node import Node
@@ -33,9 +39,16 @@ class ObstacleMarkerPublisher(Node):
         return m
 
     def publish_markers(self):
-        floor = self._make_cube(0, 0.0, 1.0, 0.0, 3.0, 0.05, 3.0, 0.1, 0.1, 0.1)
-        wall = self._make_cube(1, 0.0, 0.0, -0.05, 3.0, 3.0, 0.05, 0.85, 0.65, 0.0)
-        self.pub.publish(MarkerArray(markers=[floor, wall]))
+        # X CENTRES ARE +1.5, NOT 0. The rig measures from the origin: the
+        # rail spans X = 0 -> 3 so that rail position 0 is the home end.
+        # These 3 m planes are centred, so an X centre of 0 would span
+        # -1.5 -> 1.5 and leave the rail's outer half hanging off the floor
+        # with no wall beside it. +1.5 makes both planes span 0 -> 3 too.
+        # Vertical plane at Y = +1.0, thin in Y -- the wall. Dark grey.
+        wall = self._make_cube(0, 1.5, 1.0, 0.0, 3.0, 0.05, 3.0, 0.1, 0.1, 0.1)
+        # Horizontal plane at Z = -0.05, thin in Z -- the floor. Gold.
+        floor = self._make_cube(1, 1.5, 0.0, -0.05, 3.0, 3.0, 0.05, 0.85, 0.65, 0.0)
+        self.pub.publish(MarkerArray(markers=[wall, floor]))
 
 
 def main(args=None):

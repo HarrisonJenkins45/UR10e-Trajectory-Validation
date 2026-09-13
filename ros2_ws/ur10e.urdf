@@ -410,7 +410,18 @@
 
 
 
-  <!-- Rail bolted to the environment -->
+  <!-- Anchors the model to the simulator's world. Gazebo has no other
+       anchor for this rig (VisualizeTraj.py spawns it with no static flag,
+       into a world with gravity and no ground plane), so removing this
+       joint makes the arm fall through empty space.
+
+       THE ORIGIN MUST STAY IDENTITY. The real arena-to-rail transform is a
+       VICON calibration that changes whenever the rig is recalibrated or
+       remounted, and ClientNode.py is where it is applied. Filling in a
+       measured offset here applies it twice. Read 'world' as the rail's
+       mount point, not as the arena frame. If the sim rig needs to sit
+       somewhere other than the world origin, move it with the spawn
+       arguments in the launch file, not with this origin. -->
   <joint name="world-rail_base_joint" type="fixed">
     <origin rpy="0 0 0" xyz="0 0 0"/>
     <parent link="world"/>
