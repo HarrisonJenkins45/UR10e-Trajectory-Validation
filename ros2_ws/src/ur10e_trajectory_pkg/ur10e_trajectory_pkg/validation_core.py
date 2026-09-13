@@ -12,6 +12,7 @@ from spatialmath import SE3, UnitQuaternion
 from spatialgeometry import Cuboid
 
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, NUM_JOINTS
+from ur10e_trajectory_pkg.pose_metrics import pose_error
 from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 
@@ -414,7 +415,8 @@ class TrajectoryValidator:
                                        max_joint_vel_threshold=2.0,
                                        condition_number_threshold=50.0,
                                        max_rail_attempts=10,
-                                       verbose=False, label=''):
+                                       verbose=False, label='',
+                                       recorder=None, record_context=None):
         """Solves IK for one waypoint with MATLAB-style local-perturbation
         retry, shared by process_matlab_validation (transition step AND
         main loop) and find_feasible_segments, so the recovery policy only
@@ -483,11 +485,77 @@ class TrajectoryValidator:
         # reported count by ten. Removed rather than revived, since the
         # two-phase arm-then-rail retry it once gated went away when the rail
         # became a solved degree of freedom.
+        def emit(attempt, this_seed, new_rail, q_arm, sol, res):
+            """Hand one attempt to an observer, without influencing the loop.
+
+            Records every attempt including failed solves, and every gate as
+            an INDEPENDENT boolean. evaluate() collapses the arm and rail
+            velocity checks into one flag and returns None on solver failure,
+            and _failure_reason applies precedence and describes only the last
+            attempt, so none of those can reconstruct simultaneous failures.
+
+            Pose errors are recorded raw, never thresholded here: stage 2b
+            decides tolerances, and storing raw values means changing them
+            later needs no re-run.
+            """
+            q_full = np.concatenate(([new_rail], q_arm))
+            finite = bool(np.all(np.isfinite(q_full)))
+
+            position_err = orientation_err = None
+            cond = None
+            singular_values = None
+            if finite:
+                position_err, orientation_err = pose_error(
+                    self.robot.fkine(q_full, end=EE_LINK), target_pos, target_quat
+                )
+                sv = np.linalg.svd(self.compute_arm_jacobian(q_full),
+                                   compute_uv=False)
+                singular_values = sv.tolist()
+                cond = float(sv[0] / sv[-1]) if sv[-1] > 1e-9 else float('inf')
+
+            arm_violation = rail_violation = None
+            if check_jump and finite:
+                arm_speed = np.abs(q_arm - prev_arm) / dt_waypoint
+                arm_violation = bool(np.any(arm_speed > max_joint_vel_threshold))
+                if prev_rail is not None:
+                    rail_speed = abs(new_rail - prev_rail) / dt_waypoint
+                    rail_violation = bool(rail_speed > max_rail_vel_threshold)
+                else:
+                    rail_violation = False
+
+            recorder(dict(
+                (record_context or {}),
+                attempt=attempt,
+                seed_arm=np.asarray(this_seed).tolist(),
+                seed_rail=float(rail_pos),
+                solver_success=bool(sol.success),
+                solver_reason=str(getattr(sol, 'reason', '')),
+                solver_searches=int(getattr(sol, 'searches', -1)),
+                solver_iterations=int(getattr(sol, 'iterations', -1)),
+                configuration_finite=finite,
+                q_full=q_full.tolist() if finite else None,
+                rail_position=float(new_rail),
+                position_error_m=position_err,
+                orientation_error_rad=orientation_err,
+                arm_condition_number=cond,
+                arm_singular_values=singular_values,
+                gate_solver_failed=not bool(sol.success),
+                gate_singular=(None if cond is None
+                               else bool(cond > condition_number_threshold)),
+                gate_arm_velocity=arm_violation,
+                gate_rail_velocity=rail_violation,
+                gate_collision=(None if res is None else bool(res['collide'])),
+                accepted=bool(res is not None and not (
+                    res['low_cond'] or res['jump'] or res['collide'])),
+            ))
+
         for attempt in range(max_rail_attempts + 1):
             this_seed = seed_arm if attempt == 0 else (
                 seed_arm + (2 * self._rng.random(6) - 1) * search_radius)
             new_rail, q_arm, sol = self.solve_ik_lm(target_pos, target_quat, this_seed, rail_seed=rail_pos)
             res = evaluate(q_arm, sol, new_rail)
+            if recorder is not None:
+                emit(attempt, this_seed, new_rail, q_arm, sol, res)
             if res is not None and not (res['low_cond'] or res['jump'] or res['collide']):
                 if verbose:
                     print(f'{label}rail-assisted recovery succeeded '
@@ -570,7 +638,7 @@ class TrajectoryValidator:
                                     max_rail_vel_threshold=None,
                                     max_joint_vel_threshold=2.0,
                                     condition_number_threshold=50.0,
-                                    verbose=False):
+                                    verbose=False, recorder=None):
             # Independent of any previous validation on this instance.
             self.reset_rng()
 
@@ -584,7 +652,14 @@ class TrajectoryValidator:
             rail_pos = q_seed[0]  # running value -- may move if rail fallback ever fires
             q_home_arm = q_seed[1:]
 
-            def try_point(target_pos, target_quat, seed_arm,seed_rail, prev_rail, prev_arm, check_jump):
+            def try_point(target_pos, target_quat, seed_arm, seed_rail, prev_rail,
+                          prev_arm, check_jump, waypoint_index=None):
+                # entry_kind distinguishes the two ways a waypoint is solved.
+                # A fresh entry starts a new segment from the caller's seed
+                # after tracking broke; a continuation is seeded from the
+                # previous waypoint's solution. Conflating them is what makes
+                # "417 of 500" look like independent feasibility when it is
+                # the length of one contiguous run.
                 result = self._solve_waypoint_with_recovery(
                     target_pos, target_quat, np.asarray(seed_arm)[-6:], seed_rail, prev_rail=prev_rail,
                     prev_arm=(np.asarray(prev_arm)[-6:] if prev_arm is not None else None),
@@ -592,7 +667,13 @@ class TrajectoryValidator:
                     max_rail_vel_threshold=max_rail_vel_threshold,
                     max_joint_vel_threshold=max_joint_vel_threshold,
                     condition_number_threshold=condition_number_threshold,
-                    verbose=verbose, label='[segment scan] ')
+                    verbose=verbose, label='[segment scan] ',
+                    recorder=recorder,
+                    record_context=(None if recorder is None else dict(
+                        waypoint_index=waypoint_index,
+                        entry_kind='fresh' if not check_jump else 'continuation',
+                    )),
+                )
                 return result['ok'], result['q_arm'], result['q_full'], result['rail_pos']
 
             segments = []
@@ -604,7 +685,8 @@ class TrajectoryValidator:
                 target_pos = pos[idx, :]
                 target_quat = quat[idx, :]
                 if current_start is None:
-                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_home_arm, rail_pos, None,None, check_jump=False)
+                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_home_arm, rail_pos, None, None,
+                                                         check_jump=False, waypoint_index=idx)
                     if ok:
                         current_start = idx
                         current_qs = [q_full]
@@ -614,7 +696,8 @@ class TrajectoryValidator:
 
                         print(f'[segment scan] point {idx}: infeasible even as a fresh entry, skipping')
                 else:
-                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_arm, rail, rail_prev,prev_config_arm, check_jump=True)
+                    ok, q_arm, q_full, rail = try_point(target_pos, target_quat, q_arm, rail, rail_prev, prev_config_arm,
+                                                         check_jump=True, waypoint_index=idx)
                     if ok:
                         current_qs.append(q_full)
                         prev_config_arm = q_arm

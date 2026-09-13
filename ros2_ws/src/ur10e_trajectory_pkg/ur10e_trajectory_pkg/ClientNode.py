@@ -98,6 +98,55 @@ class TrajectoryClientNode(Node):
         return p_G_B, q_B_G
 
 
+
+# Hand-placement offset applied after the frame conversion, to lift the
+# trajectory off the floor until the real arena placement is measured. This
+# is a placeholder, not a calibration: see the README's hardware section.
+PLACEMENT_OFFSET_M = np.array([0.0, 0.5, 0.5])
+
+DEFAULT_CSV_PATH = ('/root/ros2_ws/src/ur10e_trajectory_pkg/'
+                    'ur10e_trajectory_pkg/camera_traj.csv')
+DEFAULT_NUM_WAYPOINTS = 500
+
+# Fits the trajectory inside a 1 m radius. Position only; orientation is
+# unscaled, which is what makes a pure-tumble trajectory meaningful.
+TARGET_BOUND_M = 1.0
+
+
+def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
+                             num_waypoints=DEFAULT_NUM_WAYPOINTS):
+    """End-effector targets for the service, from the SISIFOS trajectory.
+
+    Extracted from main() so that diagnostics measure the same targets the
+    service is actually sent. The failure census previously rebuilt this and
+    omitted PLACEMENT_OFFSET_M, which put every target in the floor and made
+    collision fire on all 5500 attempts.
+
+    Returns (x, y, z, quaternions, times); quaternions are [x, y, z, w] per
+    waypoint.
+    """
+    frame = pd.read_csv(csv_path)
+    q_I_G = frame[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(
+        dtype=np.float64)[:num_waypoints]
+
+    # Target position is held constant for now: the near-term goal is pure
+    # tumbling motion, so only the orientation varies along the trajectory.
+    p_G_I = frame[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(
+        dtype=np.float64)[0]
+    p_G_I = np.tile(p_G_I, (num_waypoints, 1))
+    sim_time = frame['timestamp'].to_numpy(dtype=np.float64)[:num_waypoints]
+
+    # TODO: replace with real VICON readings once integrated.
+    p_B_I = p_G_I[0] - np.array([1.0, 0.0, 0.0])
+    q_I_B = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64),
+                    (num_waypoints, 1))
+
+    p_G_B, q_B_G = TrajectoryClientNode.get_end_effector_in_base_frame(
+        p_G_I, q_I_G, p_B_I, q_I_B, TARGET_BOUND_M)
+    placed = p_G_B + PLACEMENT_OFFSET_M
+    return placed[:, 0], placed[:, 1], placed[:, 2], q_B_G, sim_time
+
+
 def main(args=None):
     rclpy.init(args=args)
     client_node = TrajectoryClientNode()
@@ -105,37 +154,7 @@ def main(args=None):
 
     # ------------- Start SISFOS Logic ------------#
 
-    #Read in the trajectory from SISIFOSp_G_I
-    csv_path='/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv'
-    df = pd.read_csv(csv_path)
-    num_pts= 500
-
-    # Slice trajectory for target/EE in ECI/arena world frame to match num_pts
-    q_I_G = df[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(dtype=np.float64)[:num_pts]
-
-    # TODO: Set this constant for now--> Eventually we will read this in from the SISIFOS 
-    p_G_I = df[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(dtype=np.float64)[0]
-    # p_G_I=np.array([-6.65540788e+06 , 5.87780398e-01,  4.22723109e-01],dtype=np.float64)
-    p_G_I = np.tile((p_G_I), (num_pts, 1)) 
-
-
-
-    simTime = df['timestamp'].to_numpy(dtype=np.float64)[:num_pts]
-
-    TARGET_BOUND_M = 1.0  # Fit trajectory inside 1-meter radius (Note: only relavant for position not orientation)
-
-    # TODO: Update with real VICON readings when integrated
-    p_B_I = p_G_I[0] - np.array([1.0, 0.0, 0.0])  # Base offset 1m back from initial point
-    q_I_B = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (num_pts, 1))
-
-    #Compute transformation
-    p_G_B, q_B_G = client_node.get_end_effector_in_base_frame(p_G_I, q_I_G, p_B_I, q_I_B, TARGET_BOUND_M)
-    
-
-    #Displace the starting position by (0,0.5,0.5) for this specific example until the Hardware setup is ready
-    x_pts=p_G_B[:,0] +0.0
-    y_pts=p_G_B[:,1] +0.5
-    z_pts=p_G_B[:,2]+ 0.5
+    x_pts, y_pts, z_pts, q_B_G, simTime = build_trajectory_targets()
 
     # ------------- End SISIFOS Logic ------------#
 
