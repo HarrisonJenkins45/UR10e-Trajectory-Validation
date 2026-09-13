@@ -1,6 +1,0 @@
-{
-  "package_name": "ur10e_interfaces",
-  "non_idl_tuples": [
-    "/root/ros2_ws/src/ur10e_interfaces:srv/ValidateTrajectory.srv"
-  ]
-}
