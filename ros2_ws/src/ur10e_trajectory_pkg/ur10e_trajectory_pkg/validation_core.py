@@ -413,7 +413,6 @@ class TrajectoryValidator:
                                        max_rail_vel_threshold=None,
                                        max_joint_vel_threshold=2.0,
                                        condition_number_threshold=50.0,
-                                       max_attempts=10,
                                        max_rail_attempts=10,
                                        verbose=False, label=''):
         """Solves IK for one waypoint with MATLAB-style local-perturbation
@@ -477,6 +476,13 @@ class TrajectoryValidator:
 
         # True 7DOF rail solve
         search_radius = 0.05
+        # max_rail_attempts + 1 solver calls: attempt 0 from the supplied
+        # seed, then max_rail_attempts perturbed retries. This is the only
+        # retry limit; a second parameter, max_attempts, was threaded through
+        # the call chain but controlled nothing and merely inflated the
+        # reported count by ten. Removed rather than revived, since the
+        # two-phase arm-then-rail retry it once gated went away when the rail
+        # became a solved degree of freedom.
         for attempt in range(max_rail_attempts + 1):
             this_seed = seed_arm if attempt == 0 else (
                 seed_arm + (2 * self._rng.random(6) - 1) * search_radius)
@@ -488,7 +494,7 @@ class TrajectoryValidator:
                           f'(rail {rail_pos:.3f} -> {new_rail:.3f})')
                 return dict(ok=True, q_arm=q_arm, q_full=res['q_full'], rail_pos=new_rail,
                             cond_num=res['cond_num'], joint_vel=res['joint_vel'],
-                            attempts_used=max_attempts + attempt, rail_moved=True, reason=None)
+                            attempts_used=attempt + 1, rail_moved=True, reason=None)
             last = (q_arm, sol, res)
             search_radius += 0.05
 
@@ -498,7 +504,7 @@ class TrajectoryValidator:
         return dict(ok=False, q_arm=q_arm, q_full=(res['q_full'] if res else None),
                     rail_pos=rail_pos, cond_num=(res['cond_num'] if res else None),
                     joint_vel=(res['joint_vel'] if res else None),
-                    attempts_used=max_attempts + max_rail_attempts, rail_moved=False, reason=reason)
+                    attempts_used=max_rail_attempts + 1, rail_moved=False, reason=reason)
 
     def check_all_collisions(self, q_full, verbose=False):
         """q_full: full joint vector in the same [rail, arm...] order as
@@ -564,7 +570,6 @@ class TrajectoryValidator:
                                     max_rail_vel_threshold=None,
                                     max_joint_vel_threshold=2.0,
                                     condition_number_threshold=50.0,
-                                    max_attempts=10,
                                     verbose=False):
             # Independent of any previous validation on this instance.
             self.reset_rng()
@@ -587,7 +592,6 @@ class TrajectoryValidator:
                     max_rail_vel_threshold=max_rail_vel_threshold,
                     max_joint_vel_threshold=max_joint_vel_threshold,
                     condition_number_threshold=condition_number_threshold,
-                    max_attempts=max_attempts, 
                     verbose=verbose, label='[segment scan] ')
                 return result['ok'], result['q_arm'], result['q_full'], result['rail_pos']
 
