@@ -407,3 +407,57 @@ def test_projection_scales_pool_and_placements():
     assert projection['fixed_seconds'] == pytest.approx(68.0)
     assert projection['p50_seconds'] == pytest.approx(68.0 + 1450 * 1.0)
     assert projection['p95_seconds'] > projection['p50_seconds']
+
+
+# --------------------------------------------------------------------------
+# Pool stability
+# --------------------------------------------------------------------------
+
+def _result(index, configuration, fraction, duration, connectivity=1.0,
+            record='same'):
+    return {'ready_index': index, 'configuration': configuration,
+            'provenance': 'broad_sample',
+            'per_placement': [{'placement': 'p', 'record': record}],
+            'summary': {'connectivity': connectivity,
+                        'worst_family_fraction': fraction,
+                        'worst_duration_s': duration, 'worst_peak_jerk': 10.0}}
+
+
+def _base():
+    return [_result(0, [0.0] * 7, 1.0, 2.0), _result(1, [1.0] * 7, 1.0, 2.5),
+            _result(2, [2.0] * 7, 0.8, 1.0)]
+
+
+def test_filter_pool_skips_or_keeps_by_configuration():
+    pool = [{'configuration': np.full(7, float(i))} for i in range(4)]
+    keys = {runner.pose_key(np.full(7, 1.0)), runner.pose_key(np.full(7, 3.0))}
+    assert [e['configuration'][0] for e in runner.filter_pool(pool, skip_keys=keys)] == [0.0, 2.0]
+    assert [e['configuration'][0] for e in runner.filter_pool(pool, only_keys=keys)] == [1.0, 3.0]
+
+
+def test_stability_passes_when_no_new_pose_beats_the_winner_decisively():
+    base = _base()
+    new = [_result(10, [5.0] * 7, 1.0, 1.95)]          # faster, within margin
+    report = runner.stability_check(base, new, [base[0]])
+    assert report['winner_position_in_merged'] == 1
+    assert report['criteria'] == {'winner_in_merged_top_3': True,
+                                  'no_new_pose_beats_winner_decisively': True,
+                                  'shared_poses_reproduce_exactly': True}
+    assert report['verdict'] == 'pass'
+
+
+def test_a_decisively_better_new_pose_means_the_pool_was_too_small():
+    base = _base()
+    new = [_result(10, [5.0] * 7, 1.0, 1.5)]            # 0.5 s faster
+    report = runner.stability_check(base, new, [base[0]])
+    assert report['criteria']['no_new_pose_beats_winner_decisively'] is False
+    assert report['verdict'].startswith('fail: pool too small')
+
+
+def test_a_shared_pose_that_does_not_reproduce_invalidates_the_check():
+    base = _base()
+    changed = _result(0, [0.0] * 7, 1.0, 2.0, record='different')
+    report = runner.stability_check(base, [], [changed])
+    assert report['criteria']['shared_poses_reproduce_exactly'] is False
+    assert report['verdict'].startswith('invalid')
+

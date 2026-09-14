@@ -330,11 +330,34 @@ def test_a_rail_binding_reports_the_rail_limits_status():
     velocity = np.zeros((10, 7))
     acceleration = np.zeros((10, 7))
     acceleration[3, 0] = 5.0
+    statuses = {'velocity': ['v'] * 7,
+                'acceleration': ['rail_acc'] + ['arm_acc'] * 6}
     binding = sweep.binding_limit(velocity, acceleration, np.ones(7),
-                                  np.full(7, 5.0), duration=2.0)
+                                  np.full(7, 5.0), 2.0, statuses, lower=0.2)
     assert binding['joint'] == 'linear_rail_joint'
     assert binding['kind'] == 'acceleration'
-    assert binding['status'] == motion_limits.RAIL_ACCELERATION.status
+    assert binding['status'] == 'rail_acc'
+    assert binding['active'] is True
+
+
+def test_binding_status_follows_the_urdf_check_not_the_table(validator):
+    """An edited URDF must not be labelled certified by the reference table."""
+    from types import SimpleNamespace
+    edited = np.array(validator.velocity_limits, dtype=float)
+    edited[5] *= 0.9
+    fake = SimpleNamespace(velocity_limits=edited,
+                           urdf_velocity_limits=edited.tolist(),
+                           joint_names=validator.joint_names)
+    statuses = motion_limits.limit_statuses(fake)
+    assert statuses['velocity'][5] == motion_limits.ASSUMED
+    assert motion_limits.limit_statuses(validator)['velocity'][5] == motion_limits.CERTIFIED
+
+    velocity = np.zeros((10, 7))
+    velocity[2, 5] = edited[5]
+    binding = sweep.binding_limit(velocity, np.zeros((10, 7)), edited,
+                                  np.full(7, 5.0), 2.0, statuses, lower=0.2)
+    assert binding['joint'] == 'wrist_2_joint'
+    assert binding['status'] == motion_limits.ASSUMED
 
 
 def test_exceeding_the_assumed_jerk_reference_does_not_make_it_infeasible(
@@ -850,4 +873,3 @@ def test_family_labels_are_invariant_under_input_order(validator, ready):
         validator, shuffled, sweep.branch_assignments(shuffled),
         position, quaternion)
     assert labels == [reference[2], reference[0], reference[1]]
-

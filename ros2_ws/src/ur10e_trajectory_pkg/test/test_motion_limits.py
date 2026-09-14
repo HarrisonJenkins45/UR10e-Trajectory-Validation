@@ -170,3 +170,10 @@ def test_effective_limits_record_what_was_enforced(validator):
     json.dumps(with_validator)
 
 
+def test_limit_statuses_are_in_joint_order(validator):
+    statuses = ml.limit_statuses(validator)
+    assert len(statuses['velocity']) == len(statuses['acceleration']) == NUM_JOINTS
+    assert statuses['velocity'][0] == ml.RAIL_VELOCITY.status
+    assert statuses['acceleration'][0] == ml.RAIL_ACCELERATION.status
+    assert statuses['acceleration'][1] == ml.ARM_ACCELERATION.status
+

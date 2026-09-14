@@ -648,24 +648,18 @@ REASON_JOINT_LIMITS = 'joint_limits'
 REASON_COLLISION = 'collision'
 
 
-def _limit_status(joint, kind):
-    """Provenance status of the limit on one joint, from motion_limits."""
-    if joint == RAIL_INDEX:
-        return (motion_limits.RAIL_VELOCITY if kind == 'velocity'
-                else motion_limits.RAIL_ACCELERATION).status
-    if kind == 'velocity':
-        return motion_limits.ARM_VELOCITY[JOINT_NAMES[joint]].status
-    return motion_limits.ARM_ACCELERATION.status
-
-
 def binding_limit(velocity, acceleration, velocity_limits, acceleration_limits,
-                  duration, lower=0.2, active=0.999):
+                  duration, statuses, lower, active=0.999):
     """Which joint and which limit set this approach's duration.
 
     The minimum duration is where some velocity or acceleration bound becomes
     active, so the largest peak-to-limit ratio names it. Its provenance status
     shows whether a certified limit or an assumed one is driving a ranking.
     A duration at the lower bound with no active limit is reported as such.
+
+    statuses is motion_limits.limit_statuses(validator), which takes velocity
+    provenance from the URDF check rather than the reference table. lower is
+    the caller's duration lower bound, passed in rather than repeated.
     """
     velocity_ratio = (np.max(np.abs(velocity), axis=0)
                       / np.asarray(velocity_limits, dtype=float))
@@ -681,7 +675,7 @@ def binding_limit(velocity, acceleration, velocity_limits, acceleration_limits,
         kind = 'minimum_duration'
     return {'joint': JOINT_NAMES[joint], 'kind': kind, 'ratio': ratio,
             'active': bool(ratio >= active),
-            'status': (_limit_status(joint, kind) if kind != 'minimum_duration'
+            'status': (statuses[kind][joint] if kind != 'minimum_duration'
                        else None)}
 
 
@@ -689,7 +683,7 @@ def evaluate_approach(validator, ready, target, entry_velocity,
                       entry_acceleration, velocity_limits,
                       acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3,
                       step_bounds=None, collision_counter=None,
-                      duration=None):
+                      duration=None, duration_lower=0.2, limit_statuses=None):
     """One ready pose to one layer-0 candidate, under the standard retiming.
 
     Feasibility here means velocity, acceleration, collision and joint limits.
@@ -713,7 +707,7 @@ def evaluate_approach(validator, ready, target, entry_velocity,
     if duration is None:
         duration = minimum_duration(ready, target, entry_velocity,
                                     entry_acceleration, velocity_limits,
-                                    acceleration_limits)
+                                    acceleration_limits, lower=duration_lower)
     if duration is None:
         return {'feasible': False, 'reason_code': REASON_NO_DURATION,
                 'reason': 'no duration satisfies velocity and acceleration '
@@ -743,8 +737,11 @@ def evaluate_approach(validator, ready, target, entry_velocity,
                      'duration_s': duration}, **stats)
 
     peak_jerk = np.max(np.abs(jerk), axis=0)
+    if limit_statuses is None:
+        limit_statuses = motion_limits.limit_statuses(validator)
     binding = binding_limit(velocity, acceleration, velocity_limits,
-                            acceleration_limits, duration)
+                            acceleration_limits, duration, limit_statuses,
+                            duration_lower)
     integrated = np.trapz(np.abs(jerk), dx=duration / (len(jerk) - 1), axis=0)
     return dict({
         'feasible': True,

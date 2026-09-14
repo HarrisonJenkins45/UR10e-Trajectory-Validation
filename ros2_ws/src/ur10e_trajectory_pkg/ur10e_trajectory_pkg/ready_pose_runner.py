@@ -389,7 +389,8 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
         - {v['family'] for v in valid if not v['extra_seed_only']})
     counts['family_report'] = report
     state.update(status='ready', valid=valid, dt=dt,
-                 velocity_limits=velocity_limits)
+                 velocity_limits=velocity_limits,
+                 limit_statuses=motion_limits.limit_statuses(validator))
     return state
 
 
@@ -508,7 +509,9 @@ def evaluate_ready_pose(validator, ready, placement, meter,
                     alternative['entry_acceleration'], velocity_limits,
                     acceleration_limits, step_bounds=step_bounds,
                     collision_counter=queries,
-                    duration=alternative['duration_s'])
+                    duration=alternative['duration_s'],
+                    duration_lower=DURATION_LOWER_S,
+                    limit_statuses=placement['limit_statuses'])
             counts['approaches_collision_checked'] += 1
             counts['collision_queries_per_approach'].append(sum(queries))
             checked.append(result)
@@ -730,6 +733,123 @@ def generated_placement(validator, placement, nominal_RG, meter,
     }
 
 
+# --------------------------------------------------------------------------
+# Pool stability, with its pass criteria fixed before any result is seen
+# --------------------------------------------------------------------------
+
+# A pose's score does not depend on the other poses in the pool: families,
+# fractions, durations and bindings are computed per pose against placements
+# generated without reference to it. So a larger pool is checked by
+# evaluating only its NEW poses and merging them with the base sweep, and the
+# poses the two pools share are rerun to confirm the records are identical
+# across processes.
+STABILITY_MARGIN_S = 0.1
+STABILITY_CRITERIA = (
+    'Fixed before the doubled-pool results were seen. (1) The base winner is '
+    'in the merged top 3. (2) No new pose beats it decisively: ranks above it '
+    'AND has higher connectivity, a higher worst family fraction, or a worst '
+    'duration shorter by more than STABILITY_MARGIN_S. (3) Every shared pose '
+    'reproduces its base record exactly. Pass needs all three. If (2) fails, '
+    'the pool was too small: grow it again or search near the new winner; do '
+    'not simply take the new pose.')
+
+
+def pose_key(configuration):
+    return tuple(np.round(np.asarray(configuration, dtype=float), 9).tolist())
+
+
+def artifact_pose_keys(path):
+    with open(path, encoding='utf-8') as handle:
+        return {pose_key(r['configuration']) for r in json.load(handle)['results']}
+
+
+def filter_pool(pool, skip_keys=None, only_keys=None):
+    """Pool entries not in skip_keys and, when given, in only_keys."""
+    out = []
+    for entry in pool:
+        key = pose_key(entry['configuration'])
+        if skip_keys is not None and key in skip_keys:
+            continue
+        if only_keys is not None and key not in only_keys:
+            continue
+        out.append(entry)
+    return out
+
+
+def _ranking_records(results):
+    return [dict(r['summary'], key=pose_key(r['configuration']),
+                 ready_index=r['ready_index'], provenance=r['provenance'],
+                 static_gates={'passed': True}) for r in results]
+
+
+def _comparable(record):
+    """A per-placement record without anything that may vary by process."""
+    return json.dumps(record, sort_keys=True, default=_plain)
+
+
+def stability_check(base_results, extra_results, shared_results,
+                    margin_s=STABILITY_MARGIN_S):
+    """Apply STABILITY_CRITERIA to a base sweep, its new poses and shared reruns."""
+    base = _ranking_records(base_results)
+    winner = sweep.rank_ready_poses(base)[0]
+    base_keys = {r['key'] for r in base}
+    merged = sweep.rank_ready_poses(base + _ranking_records(extra_results))
+    position = next(i for i, r in enumerate(merged) if r['key'] == winner['key'])
+
+    def value(record, name, missing):
+        return missing if record.get(name) is None else record[name]
+
+    decisive = []
+    for record in merged[:position]:
+        if record['key'] in base_keys:
+            continue
+        if (value(record, 'connectivity', -1.0) > value(winner, 'connectivity', -1.0)
+                or value(record, 'worst_family_fraction', -1.0)
+                > value(winner, 'worst_family_fraction', -1.0)
+                or value(record, 'worst_duration_s', np.inf)
+                < value(winner, 'worst_duration_s', np.inf) - margin_s):
+            decisive.append(record)
+
+    by_key = {pose_key(r['configuration']): r for r in base_results}
+    mismatched = [pose_key(r['configuration']) for r in shared_results
+                  if pose_key(r['configuration']) not in by_key
+                  or _comparable(r['per_placement'])
+                  != _comparable(by_key[pose_key(r['configuration'])]['per_placement'])]
+    criteria = {
+        'winner_in_merged_top_3': position < 3,
+        'no_new_pose_beats_winner_decisively': not decisive,
+        'shared_poses_reproduce_exactly': bool(shared_results) and not mismatched,
+    }
+    if not criteria['shared_poses_reproduce_exactly']:
+        verdict = 'invalid: shared poses did not reproduce their base records'
+    elif not criteria['no_new_pose_beats_winner_decisively']:
+        verdict = ('fail: pool too small; grow it again or search near the new '
+                   'winner, do not simply take the new pose')
+    elif not criteria['winner_in_merged_top_3']:
+        verdict = 'fail: base winner outside the merged top 3'
+    else:
+        verdict = 'pass'
+    return {
+        'criteria_text': STABILITY_CRITERIA,
+        'margin_s': margin_s,
+        'criteria': criteria,
+        'verdict': verdict,
+        'base_winner': {k: winner.get(k) for k in (
+            'ready_index', 'provenance', 'connectivity', 'worst_family_fraction',
+            'worst_duration_s', 'worst_peak_jerk', 'worst_duration_placement',
+            'worst_duration_binding')},
+        'winner_position_in_merged': position,
+        'merged_pool_size': len(merged),
+        'new_poses_above_winner': [
+            {k: r.get(k) for k in ('ready_index', 'provenance', 'connectivity',
+                                   'worst_family_fraction', 'worst_duration_s')}
+            for r in merged[:position] if r['key'] not in base_keys],
+        'decisive_beaters': len(decisive),
+        'shared_poses_checked': len(shared_results),
+        'shared_poses_mismatched': len(mismatched),
+    }
+
+
 def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
     """A small spread of ready poses over rail position and provenance."""
     edges = np.linspace(0.0, rail_travel, strata + 1)
@@ -817,7 +937,8 @@ def _binding_tally(bindings):
     for binding in bindings:
         if not binding:
             continue
-        key = f"{binding['joint']}:{binding['kind']}:{binding['status']}"
+        key = (f"{binding['joint']}:{binding['kind']}:{binding['status']}"
+               f"{'' if binding.get('active') else ':NOT_ACTIVE'}")
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
 
@@ -990,12 +1111,36 @@ def main(argv=None):
                              'double it for the pool stability check')
     parser.add_argument('--pool-finalists', type=int,
                         default=sweep.BROAD_FINALISTS)
+    parser.add_argument('--skip-poses-in', default=None,
+                        help='evaluate only pool poses NOT in this artifact')
+    parser.add_argument('--only-poses-in', default=None,
+                        help='evaluate only pool poses that ARE in this artifact')
+    parser.add_argument('--stability', nargs=3, metavar=('BASE', 'NEW', 'SHARED'),
+                        default=None,
+                        help='apply STABILITY_CRITERIA to three artifacts and exit')
     parser.add_argument('--all-pool', action='store_true',
                         help='evaluate every ready pose in the pool, not a '
                              'pilot selection')
     parser.add_argument('--no-exhaustive-check', action='store_true',
                         help='skip the exhaustive run that verifies pruning')
     args = parser.parse_args(argv)
+
+    if args.stability:
+        documents = []
+        for path in args.stability:
+            with open(path, encoding='utf-8') as handle:
+                documents.append(json.load(handle))
+        report = stability_check(documents[0]['results'], documents[1]['results'],
+                                 documents[2]['results'])
+        report['artifacts'] = {name: {'path': path,
+                                      'revision': doc['manifest']['repository_revision'],
+                                      'envelope': doc['manifest']['envelope']['name']}
+                               for name, path, doc in zip(('base', 'new', 'shared'),
+                                                          args.stability, documents)}
+        with open(args.out, 'w', encoding='utf-8') as handle:
+            json.dump(report, handle, indent=1, default=_plain)
+        print(json.dumps(report, indent=1, default=_plain))
+        return 0
 
     from ament_index_python.packages import get_package_share_directory
 
@@ -1048,6 +1193,14 @@ def main(argv=None):
             validator, count=args.pool_samples, finalists=args.pool_finalists)
     # The pilot selection keeps one anchor per rail position, so asking it
     # for the whole pool would silently drop the others.
+    full_pool_size = len(pool)
+    if args.skip_poses_in or args.only_poses_in:
+        pool = filter_pool(
+            pool,
+            skip_keys=(artifact_pose_keys(args.skip_poses_in)
+                       if args.skip_poses_in else None),
+            only_keys=(artifact_pose_keys(args.only_poses_in)
+                       if args.only_poses_in else None))
     pilot = list(pool) if args.all_pool else pilot_ready_poses(pool,
                                                                args.pilot_count)
 
@@ -1105,6 +1258,10 @@ def main(argv=None):
                      counts=pool_meter.counts),
         'ready_pose_selection': ('entire pool' if args.all_pool
                                  else PILOT_SELECTION_RULE),
+        'pose_filter': {'skip_poses_in': args.skip_poses_in,
+                        'only_poses_in': args.only_poses_in,
+                        'pool_size_before_filter': full_pool_size,
+                        'evaluated': len(pilot)},
         'pilot': [{'configuration': np.asarray(e['configuration']).tolist(),
                    'provenance': e['provenance'],
                    'anchor_name': e['anchor_name']} for e in pilot],

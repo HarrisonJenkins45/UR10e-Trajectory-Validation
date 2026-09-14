@@ -251,6 +251,20 @@ def effective_limits(validator):
     }
 
 
+def limit_statuses(validator):
+    """Provenance status per joint for velocity and acceleration, in q order.
+
+    Velocity statuses come from effective_limits, which checks the URDF against
+    the published table, so an edited URDF is not labelled certified.
+    """
+    document = effective_limits(validator)
+    return {
+        'velocity': [entry['status'] for entry in document['velocity']],
+        'acceleration': [RAIL_ACCELERATION.status]
+                        + [ARM_ACCELERATION.status] * 6,
+    }
+
+
 def manifest(validator=None):
     """Every limit with its provenance, for an artifact to record.
 
