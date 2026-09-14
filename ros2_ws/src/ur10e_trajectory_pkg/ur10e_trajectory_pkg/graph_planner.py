@@ -31,6 +31,29 @@ incomplete candidate set:
 Acceleration, jerk and continuous singularity margin are deliberately absent.
 They belong to the trajectory optimisation that follows, not in first-order
 graph state.
+
+First full run, 500 layers, both builds:
+
+    build        complete  cost     pairs      rail-pruned  edges
+    validation   yes       2.1761   2,751,040  2,092,045    558,239
+    generator    yes       2.1761   2,614,817  1,970,616    546,965
+
+    greedy tracker, same cost function            2.3310
+
+Two results worth keeping. The generator-only build reaches the SAME optimum
+as the build with the greedy path injected, so independent candidate
+generation is sufficient on this trajectory and the oracle added nothing it
+did not already contain. And the graph path costs 6.6% less than the greedy
+tracker's, which is global branch choice buying something a greedy tracker
+cannot, on a trajectory where both succeed.
+
+Swept collision rejected 13 edges of 558,239. Cheap kinematic pruning removed
+76% of pairs before any physics query, which is what makes a dense build
+affordable at this size.
+
+The frontier stays bounded near 80 states per layer rather than growing with
+depth: 2.75M pairs over 500 layers is about 5,500 per layer against roughly
+68 candidates. No beam or dominance rule is needed at this scale.
 """
 import argparse
 import json
