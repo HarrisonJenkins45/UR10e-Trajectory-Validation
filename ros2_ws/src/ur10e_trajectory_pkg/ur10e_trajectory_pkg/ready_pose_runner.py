@@ -541,7 +541,8 @@ def evaluate_ready_pose(validator, ready, placement, meter,
                 max_peak_jerk=result['max_peak_jerk'],
                 candidate_index=alternative['candidate_index'],
                 winding=alternative['winding'],
-                collision_achieved_step=result.get('collision_achieved_step'))
+                collision_achieved_step=result.get('collision_achieved_step'),
+                binding=result.get('binding'))
         branches.append(branch)
 
     classification = sweep.classify(placement['valid'], all_outcomes)
@@ -589,8 +590,11 @@ def family_approach_summary(branches):
     if not shortest:
         return {'family_shortest_duration_s': {},
                 'slowest_family_duration_s': None,
+                'slowest_family_binding': None,
                 'family_shortest_max_peak_jerk': None}
+    slowest = max(shortest.values(), key=lambda b: (b['duration_s'], b['family']))
     return {
+        'slowest_family_binding': slowest.get('binding'),
         'family_shortest_duration_s': {str(f): b['duration_s']
                                        for f, b in sorted(shortest.items())},
         'slowest_family_duration_s': max(b['duration_s']
@@ -619,6 +623,11 @@ def summarise_ready_pose(per_placement):
     Placements with no task candidate are excluded throughout, as
     connectivity_score already excludes them.
 
+    worst_family_fraction, the ranking key, is the minimum over placements of
+    families reached over families available; worst_family_count is kept as a
+    diagnostic, since its minimum is set by the placement with fewest families
+    rather than by the pose.
+
     worst_duration_s and worst_peak_jerk come from family_approach_summary:
     the slowest family's shortest approach, and the largest jerk among the
     families' shortest approaches, at the worst placement. The shortest single
@@ -636,6 +645,9 @@ def summarise_ready_pose(per_placement):
              if r['classification'] != NO_LAYERS]),
         'worst_branch_count': (min(r['connected_branches'] for r in eligible)
                                if eligible else None),
+        'worst_family_fraction': (
+            min(r['connected_families'] / r['family_count'] if r['family_count']
+                else 0.0 for r in eligible) if eligible else None),
         'worst_family_count': (min(r['connected_families'] for r in eligible)
                                if eligible else None),
         'worst_independent_branch_count': (
@@ -643,6 +655,12 @@ def summarise_ready_pose(per_placement):
                 for r in eligible) if eligible else None),
         'worst_duration_s': (max(r['slowest_family_duration_s']
                                  for r in connected) if connected else None),
+        'worst_duration_placement': (
+            max(connected, key=lambda r: r['slowest_family_duration_s'])['placement']
+            if connected else None),
+        'worst_duration_binding': (
+            max(connected, key=lambda r: r['slowest_family_duration_s']).get(
+                'slowest_family_binding') if connected else None),
         'worst_peak_jerk': (max(r['family_shortest_max_peak_jerk']
                                 for r in connected) if connected else None),
         'worst_shortest_approach_s': (max(r['best_duration_s'] for r in connected)
@@ -794,6 +812,16 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
     return results, placement_records, pose_seconds
 
 
+def _binding_tally(bindings):
+    counts = {}
+    for binding in bindings:
+        if not binding:
+            continue
+        key = f"{binding['joint']}:{binding['kind']}:{binding['status']}"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
 def aggregate(results, placement_records, meter, pose_seconds):
     per_pose = [r for result in results for r in result['per_placement']
                 if 'counts' in r]
@@ -801,6 +829,12 @@ def aggregate(results, placement_records, meter, pose_seconds):
                for q in r['counts']['collision_queries_per_approach']]
     windings = [w for r in per_pose for w in r['counts']['winding_alternatives']]
     return {
+        'binding_of_chosen_approaches': _binding_tally(
+            b.get('binding') for r in per_pose for b in r['branches']
+            if b['connected']),
+        'binding_of_worst_durations': _binding_tally(
+            result['summary'].get('worst_duration_binding')
+            for result in results),
         'placements': placement_records,
         'collision_queries_per_approach': distribution(queries),
         'winding_alternatives_per_candidate': distribution(windings),
@@ -898,8 +932,8 @@ def manifest(args, validator, candidates_document, trajectory_metadata, dt,
             'trajectory': trajectory_metadata,
         },
         'envelope': {
-            'name': 'PROVISIONAL_STAGE7_ENVELOPE_V1',
-            'definition': sweep.PROVISIONAL_STAGE7_ENVELOPE_V1,
+            'name': 'PROVISIONAL_STAGE7_ENVELOPE_V2',
+            'definition': sweep.PROVISIONAL_STAGE7_ENVELOPE_V2,
             'placements_evaluated': placement_names,
         },
         'pool': {

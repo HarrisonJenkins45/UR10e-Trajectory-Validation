@@ -59,8 +59,8 @@ def test_the_envelope_is_named_provisional_not_physical():
     Certification needs the permitted volume, attitude range, calibration
     uncertainty and an obstacle survey, none of which exist here.
     """
-    assert 'PROVISIONAL' in 'PROVISIONAL_STAGE7_ENVELOPE_V1'
-    assert sweep.PROVISIONAL_STAGE7_ENVELOPE_V1['scale'] == 1.0
+    assert 'PROVISIONAL' in 'PROVISIONAL_STAGE7_ENVELOPE_V2'
+    assert sweep.PROVISIONAL_STAGE7_ENVELOPE_V2['scale'] == 1.0
     note = sweep.certification_note()
     assert note['result_status'] == 'provisional'
     assert note['may_certify_for_hardware'] is False
@@ -74,13 +74,59 @@ def test_the_certification_note_records_the_enforced_limits(validator):
 
 
 def test_axis_extrema_reach_the_declared_bounds():
-    envelope = sweep.PROVISIONAL_STAGE7_ENVELOPE_V1
+    envelope = sweep.PROVISIONAL_STAGE7_ENVELOPE_V2
     extremes = [p for p in sweep.placements() if p['name'].startswith(('translate', 'rotate'))]
     assert len(extremes) == 12
     assert max(np.max(np.abs(p['translation'])) for p in extremes) == pytest.approx(
         envelope['translation_m'])
     assert max(np.max(np.abs(p['rotation_deg'])) for p in extremes) == pytest.approx(
         envelope['rotation_deg'])
+
+
+def _nominal_RG():
+    from scipy.spatial.transform import Rotation
+    from ur10e_trajectory_pkg import frames
+    return frames.make_transform(
+        rotation=Rotation.from_euler('xyz', [20.0, -35.0, 60.0], degrees=True).as_matrix(),
+        translation=[1.0, 0.5, 0.5])
+
+
+def test_rotation_turns_the_target_in_place():
+    """V1 rotated about the rail-base origin, so a 15 degree attitude change
+    moved the target by up to 0.46 m, under the floor or into the wall."""
+    from scipy.spatial.transform import Rotation
+    nominal = _nominal_RG()
+    placement = {'name': 'rotate', 'translation': np.zeros(3),
+                 'rotation_deg': np.array([15.0, -10.0, 5.0])}
+    placed = sweep.placement_transform(placement, nominal)
+    np.testing.assert_allclose(placed[:3, 3], nominal[:3, 3], atol=1e-12)
+    # In WORLD axes: the rotation pre-multiplies the nominal orientation.
+    expected = Rotation.from_euler('xyz', [15.0, -10.0, 5.0], degrees=True).as_matrix() @ nominal[:3, :3]
+    np.testing.assert_allclose(placed[:3, :3], expected, atol=1e-12)
+
+
+def test_translation_moves_the_target_by_exactly_the_offset():
+    nominal = _nominal_RG()
+    placement = {'name': 'both', 'translation': np.array([0.1, -0.2, 0.05]),
+                 'rotation_deg': np.array([15.0, 15.0, -15.0])}
+    placed = sweep.placement_transform(placement, nominal)
+    np.testing.assert_allclose(placed[:3, 3] - nominal[:3, 3], [0.1, -0.2, 0.05],
+                               atol=1e-12)
+
+
+def test_no_placement_moves_the_target_beyond_the_declared_translation():
+    nominal = _nominal_RG()
+    bound = sweep.PROVISIONAL_STAGE7_ENVELOPE_V2['translation_m']
+    for placement in sweep.placements():
+        shift = sweep.placement_transform(placement, nominal)[:3, 3] - nominal[:3, 3]
+        assert np.max(np.abs(shift)) <= bound + 1e-12, placement['name']
+
+
+def test_the_envelope_records_its_rotation_centre_and_axes():
+    envelope = sweep.PROVISIONAL_STAGE7_ENVELOPE_V2
+    assert 'target' in envelope['rotation_centre']
+    assert 'world' in envelope['rotation_axes']
+    assert envelope['name'] == 'PROVISIONAL_STAGE7_ENVELOPE_V2'
 
 
 # --------------------------------------------------------------------------
@@ -259,6 +305,36 @@ def test_jerk_is_reported_against_several_references(validator, ready, VELOCITY)
     assert result['feasible'] is True
     assert len(result['jerk_within_reference']) == len(sweep.JERK_REFERENCES_RAD_S3)
     assert 'peak_jerk' in result and 'integrated_jerk' in result
+
+
+def test_a_feasible_approach_names_its_binding_limit(validator, ready, VELOCITY):
+    """The minimum duration is where a bound becomes active, so the binding
+    joint and kind are named, with the limit's provenance status."""
+    target = ready.copy()
+    target[5] += 1.5                       # wrist_2, velocity-limited move
+    result = sweep.evaluate_approach(validator, ready, target, np.zeros(7),
+                                     np.zeros(7), VELOCITY, ACCELERATION)
+    assert result['feasible'] is True
+    binding = result['binding']
+    assert binding['active'] is True
+    assert binding['ratio'] == pytest.approx(1.0, abs=1e-3)
+    assert binding['joint'] in ('wrist_2_joint',)
+    assert binding['kind'] in ('velocity', 'acceleration')
+    expected = (motion_limits.ARM_VELOCITY['wrist_2_joint'].status
+                if binding['kind'] == 'velocity'
+                else motion_limits.ARM_ACCELERATION.status)
+    assert binding['status'] == expected
+
+
+def test_a_rail_binding_reports_the_rail_limits_status():
+    velocity = np.zeros((10, 7))
+    acceleration = np.zeros((10, 7))
+    acceleration[3, 0] = 5.0
+    binding = sweep.binding_limit(velocity, acceleration, np.ones(7),
+                                  np.full(7, 5.0), duration=2.0)
+    assert binding['joint'] == 'linear_rail_joint'
+    assert binding['kind'] == 'acceleration'
+    assert binding['status'] == motion_limits.RAIL_ACCELERATION.status
 
 
 def test_exceeding_the_assumed_jerk_reference_does_not_make_it_infeasible(
@@ -459,11 +535,11 @@ def test_branch_clusters_count_distinct_solutions_not_lifts():
 def test_ranking_puts_branch_connectivity_before_duration():
     """A single entry branch is fragile however fast it is."""
     records = [
-        {'name': 'one_branch_fast', 'connectivity': 1.0, 'worst_family_count': 1,
+        {'name': 'one_branch_fast', 'connectivity': 1.0, 'worst_family_fraction': 0.5,
          'worst_duration_s': 1.0, 'worst_peak_jerk': 10.0,
          'static_gates': {'passed': True}},
         {'name': 'three_branches_slow', 'connectivity': 1.0,
-         'worst_family_count': 3, 'worst_duration_s': 4.0,
+         'worst_family_fraction': 1.0, 'worst_duration_s': 4.0,
          'worst_peak_jerk': 80.0, 'static_gates': {'passed': True}},
     ]
     assert sweep.rank_ready_poses(records)[0]['name'] == 'three_branches_slow'

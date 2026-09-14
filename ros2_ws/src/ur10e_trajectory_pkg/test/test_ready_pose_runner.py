@@ -307,18 +307,21 @@ def test_the_run_is_deterministic(validator, placement, ready):
 def test_no_task_candidate_placements_do_not_count_against_a_ready_pose():
     per_placement = [
         {'classification': sweep.CONNECTED, 'connected_branches': 3,
-         'connected_families': 2,
+         'connected_families': 2, 'family_count': 4, 'placement': 'a',
          'best_duration_s': 2.0, 'best_max_peak_jerk': 40.0,
          'slowest_family_duration_s': 2.8, 'family_shortest_max_peak_jerk': 45.0},
         {'classification': sweep.NO_TASK_CANDIDATE},
         {'classification': sweep.CONNECTED, 'connected_branches': 1,
-         'connected_families': 1,
+         'connected_families': 1, 'family_count': 1, 'placement': 'b',
          'best_duration_s': 3.5, 'best_max_peak_jerk': 20.0,
          'slowest_family_duration_s': 3.5, 'family_shortest_max_peak_jerk': 20.0},
     ]
     summary = runner.summarise_ready_pose(per_placement)
     assert summary['connectivity'] == 1.0
     assert summary['worst_family_count'] == 1
+    # 2 of 4 is worse than 1 of 1: the fraction, not the count, ranks.
+    assert summary['worst_family_fraction'] == 0.5
+    assert summary['worst_duration_placement'] == 'b'
     assert summary['worst_branch_count'] == 1
     assert summary['worst_duration_s'] == 3.5
     assert summary['worst_peak_jerk'] == 45.0
@@ -347,8 +350,10 @@ def test_a_slow_family_outranks_one_fast_entry():
     fast approach must not hide a family that takes much longer."""
     def record(name, branches):
         per_placement = dict({'classification': sweep.CONNECTED,
+                              'placement': 'p',
                               'connected_branches': len(branches),
                               'connected_families': len({b['family'] for b in branches}),
+                              'family_count': len({b['family'] for b in branches}),
                               'best_duration_s': min(b['duration_s'] for b in branches),
                               'best_max_peak_jerk': 10.0},
                              **runner.family_approach_summary(branches))

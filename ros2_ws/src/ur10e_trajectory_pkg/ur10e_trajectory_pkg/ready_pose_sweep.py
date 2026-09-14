@@ -62,11 +62,22 @@ SCHEMA_VERSION = 1
 # Certification later needs the permitted arena volume, attitude range,
 # calibration uncertainty and an obstacle survey, none of which this
 # repository contains.
-PROVISIONAL_STAGE7_ENVELOPE_V1 = {
+# V2 rotates about the layer-0 TARGET, in world (rail-base) axes. V1 rotated
+# about the rail-base origin, so a 15 degree attitude change also translated
+# the target by up to 0.46 m: 14 of 29 placements moved it further than the
+# declared 0.25 m, three put it under the floor or into the wall, and the
+# ranking was largely set by those shifts. Artifacts from the two definitions
+# must not be compared.
+PROVISIONAL_STAGE7_ENVELOPE_V2 = {
     'translation_m': 0.25,
     'rotation_deg': 15.0,
     'coupled_samples': 16,
     'scale': 1.0,          # relative-motion scale does not move layer 0
+    'rotation_centre': 'layer-0 target (the placement origin; the trajectory '
+                       'holds position constant)',
+    'rotation_axes': 'world (rail-base frame), so placement names keep '
+                     'their meaning',
+    'name': 'PROVISIONAL_STAGE7_ENVELOPE_V2',
 }
 
 # Jerk references to report against. The 500 rad/s^3 figure is assumed, so a
@@ -92,7 +103,7 @@ def collision_step_bounds():
     return np.array([COLLISION_STEP_RAIL_M] + [COLLISION_STEP_ARM_RAD] * 6)
 
 
-def placements(envelope=PROVISIONAL_STAGE7_ENVELOPE_V1, seed=0):
+def placements(envelope=PROVISIONAL_STAGE7_ENVELOPE_V2, seed=0):
     """29 deterministic placements: nominal, 12 axis extrema, 16 coupled."""
     translation = envelope['translation_m']
     rotation = envelope['rotation_deg']
@@ -124,13 +135,27 @@ def placements(envelope=PROVISIONAL_STAGE7_ENVELOPE_V1, seed=0):
 
 
 def placement_transform(placement, nominal_RG):
-    """Apply a placement offset to the nominal layer-0 placement."""
+    """Apply a placement offset to the nominal layer-0 placement.
+
+        T = Trans(translation) . Trans(p0) . Rot . Trans(-p0) . nominal
+
+    with p0 the nominal target position and Rot about WORLD axes. Rotation
+    therefore turns the target's orientation in place and never moves it; only
+    the declared translation does.
+    """
     from scipy.spatial.transform import Rotation
-    offset = frames.make_transform(
+    nominal_RG = np.asarray(nominal_RG, dtype=float)
+    centre = nominal_RG[:3, 3]
+    rotation = frames.make_transform(
         rotation=Rotation.from_euler('xyz', placement['rotation_deg'],
                                      degrees=True).as_matrix(),
-        translation=placement['translation'])
-    return offset @ np.asarray(nominal_RG, dtype=float)
+        translation=np.zeros(3))
+    return (frames.make_transform(rotation=np.eye(3),
+                                  translation=np.asarray(placement['translation'])
+                                  + centre)
+            @ rotation
+            @ frames.make_transform(rotation=np.eye(3), translation=-centre)
+            @ nominal_RG)
 
 
 # --------------------------------------------------------------------------
@@ -623,6 +648,43 @@ REASON_JOINT_LIMITS = 'joint_limits'
 REASON_COLLISION = 'collision'
 
 
+def _limit_status(joint, kind):
+    """Provenance status of the limit on one joint, from motion_limits."""
+    if joint == RAIL_INDEX:
+        return (motion_limits.RAIL_VELOCITY if kind == 'velocity'
+                else motion_limits.RAIL_ACCELERATION).status
+    if kind == 'velocity':
+        return motion_limits.ARM_VELOCITY[JOINT_NAMES[joint]].status
+    return motion_limits.ARM_ACCELERATION.status
+
+
+def binding_limit(velocity, acceleration, velocity_limits, acceleration_limits,
+                  duration, lower=0.2, active=0.999):
+    """Which joint and which limit set this approach's duration.
+
+    The minimum duration is where some velocity or acceleration bound becomes
+    active, so the largest peak-to-limit ratio names it. Its provenance status
+    shows whether a certified limit or an assumed one is driving a ranking.
+    A duration at the lower bound with no active limit is reported as such.
+    """
+    velocity_ratio = (np.max(np.abs(velocity), axis=0)
+                      / np.asarray(velocity_limits, dtype=float))
+    acceleration_ratio = (np.max(np.abs(acceleration), axis=0)
+                          / np.asarray(acceleration_limits, dtype=float))
+    if velocity_ratio.max() >= acceleration_ratio.max():
+        kind, ratios = 'velocity', velocity_ratio
+    else:
+        kind, ratios = 'acceleration', acceleration_ratio
+    joint = int(np.argmax(ratios))
+    ratio = float(ratios[joint])
+    if ratio < active and duration <= lower + 1e-9:
+        kind = 'minimum_duration'
+    return {'joint': JOINT_NAMES[joint], 'kind': kind, 'ratio': ratio,
+            'active': bool(ratio >= active),
+            'status': (_limit_status(joint, kind) if kind != 'minimum_duration'
+                       else None)}
+
+
 def evaluate_approach(validator, ready, target, entry_velocity,
                       entry_acceleration, velocity_limits,
                       acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3,
@@ -681,6 +743,8 @@ def evaluate_approach(validator, ready, target, entry_velocity,
                      'duration_s': duration}, **stats)
 
     peak_jerk = np.max(np.abs(jerk), axis=0)
+    binding = binding_limit(velocity, acceleration, velocity_limits,
+                            acceleration_limits, duration)
     integrated = np.trapz(np.abs(jerk), dx=duration / (len(jerk) - 1), axis=0)
     return dict({
         'feasible': True,
@@ -697,6 +761,7 @@ def evaluate_approach(validator, ready, target, entry_velocity,
             str(reference): bool(np.max(peak_jerk[ARM_SLICE]) <= reference)
             for reference in jerk_references
         },
+        'binding': binding,
         'matches_entry_state': True,     # by construction of the quintic
     }, **stats)
 
@@ -958,9 +1023,11 @@ def rank_ready_poses(records):
         # Worst-case IK-FAMILY connectivity outranks duration: reaching one
         # layer-0 candidate is not the same as having alternatives, and a
         # ready pose with a single entry family is fragile however fast.
-        # Tolerance clusters are not counted: they split one family whenever
-        # the arm moves along the rail.
-        branches = record.get('worst_family_count', 0) or 0
+        # The FRACTION of each placement's families reached, minimum over
+        # placements: a raw count's minimum is set by whichever placement has
+        # fewest families, which says nothing about the pose. Tolerance
+        # clusters are not counted: they split one family along the rail.
+        branches = record.get('worst_family_fraction', 0.0) or 0.0
         return (-connectivity, -branches,
                 record['worst_duration_s'] if record['worst_duration_s'] is not None else np.inf,
                 record['worst_peak_jerk'] if record['worst_peak_jerk'] is not None else np.inf)
@@ -975,7 +1042,7 @@ def certification_note(validator=None):
     limits actually enforced rather than only the reference tables.
     """
     return {
-        'envelope': 'PROVISIONAL_STAGE7_ENVELOPE_V1, a software robustness '
+        'envelope': 'PROVISIONAL_STAGE7_ENVELOPE_V2, a software robustness '
                     'envelope rather than the physical operating envelope',
         'limits': motion_limits.certification_status(validator),
         'effective_limits': (None if validator is None
