@@ -260,33 +260,92 @@ def test_self_collision_is_a_hard_static_gate(validator):
     assert gates['passed'] is False
 
 
-def test_approach_collision_resolution_follows_the_move_size(validator, ready):
-    """A fixed stride coarsens silently as moves grow.
+def test_the_collision_resolution_bound_actually_holds(ready):
+    """Assert the bound directly, not a proxy for it.
 
-    A broadly sampled ready pose can sit most of a joint range from its
-    target, where 40 samples can step straight through an obstacle.
+    Estimating a count from total variation and sampling uniformly in time
+    does not bound the coordinate difference: a quintic has nonuniform speed,
+    so a uniform stride oversamples where the motion is slow and undersamples
+    exactly where it is fastest, which is where an obstacle is most likely to
+    be stepped over.
     """
-    small = np.stack([ready + i * 1e-4 for i in range(400)])
-    large = np.stack([ready + i * 5e-3 for i in range(400)])
-    calls = {'n': 0}
-    original = validator.check_all_collisions
+    target = ready + np.array([1.2, 2.0, -2.5, 1.8, -2.2, 2.4, -1.9])
+    coefficients = sweep.quintic_coefficients(ready, target, np.zeros(7),
+                                              np.zeros(7), 3.0)
+    _, position, _, _, _ = sweep.sample_quintic(coefficients, 3.0, samples=2000)
 
-    def counting(q, verbose=False):
-        calls['n'] += 1
-        return original(q, verbose)
+    for bound in (0.02, 0.05, 0.2):
+        indices = sweep.collision_check_indices(position, bound)
+        assert sweep.achieved_step(position, indices) <= bound + 1e-9, (
+            f'checked points differ by more than the {bound} rad bound'
+        )
 
-    validator.check_all_collisions = counting
-    try:
-        calls['n'] = 0
-        sweep.approach_collides(validator, small)
-        small_calls = calls['n']
-        calls['n'] = 0
-        sweep.approach_collides(validator, large)
-        large_calls = calls['n']
-    finally:
-        validator.check_all_collisions = original
 
-    assert large_calls > small_calls
+def test_a_tighter_bound_checks_more_points(ready):
+    target = ready + 1.0
+    coefficients = sweep.quintic_coefficients(ready, target, np.zeros(7),
+                                              np.zeros(7), 3.0)
+    _, position, _, _, _ = sweep.sample_quintic(coefficients, 3.0, samples=2000)
+    assert (len(sweep.collision_check_indices(position, 0.01))
+            > len(sweep.collision_check_indices(position, 0.2)))
+
+
+def test_resolution_follows_the_move_size(ready):
+    """A larger move must draw more checks at the same bound."""
+    small = sweep.sample_quintic(
+        sweep.quintic_coefficients(ready, ready + 0.02, np.zeros(7),
+                                   np.zeros(7), 3.0), 3.0, 2000)[1]
+    large = sweep.sample_quintic(
+        sweep.quintic_coefficients(ready, ready + 2.0, np.zeros(7),
+                                   np.zeros(7), 3.0), 3.0, 2000)[1]
+    assert (len(sweep.collision_check_indices(large, 0.05))
+            > len(sweep.collision_check_indices(small, 0.05)))
+
+
+# --------------------------------------------------------------------------
+# Entry state and winding expansion
+# --------------------------------------------------------------------------
+
+def test_the_entry_state_needs_three_layers_not_one():
+    """PCHIP fixes its initial derivatives from the first three points.
+
+    Matching only layer 0 is valid solely if the robot stops there and the
+    task starts from rest, which would need an explicit ramp-in; without one
+    it reintroduces the discontinuity the quintic exists to avoid.
+    """
+    prefix = np.stack([np.full(7, 0.1 * i) for i in range(3)])
+    velocity, acceleration = sweep.entry_state_from_prefix(prefix, 0.1)
+    assert velocity.shape == (7,)
+    assert acceleration.shape == (7,)
+    assert np.any(np.abs(velocity) > 1e-9), 'a moving task cannot enter at rest'
+
+    with pytest.raises(ValueError, match='three layers'):
+        sweep.entry_state_from_prefix(prefix[:2], 0.1)
+
+
+def test_the_entry_state_depends_on_the_continuation(ready):
+    """Two prefixes sharing layer 0 but diverging after it must differ.
+
+    This is why layer 0 alone is not enough to time the approach.
+    """
+    base = np.stack([ready, ready + 0.05, ready + 0.10])
+    other = np.stack([ready, ready + 0.05, ready + 0.30])
+    first, _ = sweep.entry_state_from_prefix(base, 0.1)
+    second, _ = sweep.entry_state_from_prefix(other, 0.1)
+    assert not np.allclose(first, second)
+
+
+def test_winding_expansion_belongs_to_the_runner(validator, ready):
+    """evaluate_approach evaluates one supplied representation.
+
+    Which lifts are reachable depends on where the approach starts and how
+    long it has, so they cannot be enumerated when a candidate is generated.
+    """
+    target = ready.copy()
+    target[4] += 2 * np.pi
+    lifts = sweep.destination_lifts(validator, target, ready, VELOCITY, 5.0)
+    assert lifts, 'the lifted destination is reachable and must be offered'
+    assert any(abs(lift[4] - ready[4]) < 0.5 for lift in lifts)
 
 
 def test_branch_clusters_count_distinct_solutions_not_lifts():

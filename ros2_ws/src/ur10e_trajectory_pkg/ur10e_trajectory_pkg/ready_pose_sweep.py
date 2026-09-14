@@ -277,24 +277,95 @@ DIRECT_APPROACH_UNCONNECTED = 'direct_approach_unconnected'
 CONNECTED = 'connected'
 
 
-def approach_collides(validator, position, max_step_rad=0.05):
-    """Collision along an approach, sampled by joint DISPLACEMENT.
+def collision_check_indices(position, max_step_rad=0.05):
+    """Indices to check so consecutive ones differ by at most max_step_rad.
 
-    The number of checks follows the path's length in joint space, so no two
-    consecutive checked configurations differ by more than max_step_rad on any
-    joint. A fixed stride coarsens silently as moves grow: a broadly sampled
-    ready pose can sit most of a joint range from its target, where forty
-    samples can step straight through an obstacle.
+    Walks the curve rather than estimating a count from total variation and
+    sampling uniformly in time. A quintic has nonuniform speed, so a uniform
+    time stride does NOT bound the coordinate difference: it oversamples where
+    the motion is slow and undersamples exactly where it is fastest, which is
+    where an obstacle is most likely to be stepped over.
+
+    Bounded by the supplied discretisation: if adjacent samples already exceed
+    the bound, every one is checked and the achieved step is reported so a
+    caller can tell.
     """
+    position = np.asarray(position, dtype=float)
+    chosen = [0]
+    for index in range(1, len(position)):
+        step = float(np.max(np.abs(position[index] - position[chosen[-1]])))
+        if step > max_step_rad:
+            # index is already too far, so take the LAST sample still inside
+            # the bound. Taking index itself would leave a gap wider than the
+            # bound, which is the error this function exists to prevent.
+            previous = index - 1
+            chosen.append(previous if previous > chosen[-1] else index)
+    if chosen[-1] != len(position) - 1:
+        chosen.append(len(position) - 1)
+    return np.asarray(chosen)
+
+
+def achieved_step(position, indices):
+    """Largest coordinate difference between consecutive CHECKED points."""
+    checked = np.asarray(position, dtype=float)[np.asarray(indices)]
+    if len(checked) < 2:
+        return 0.0
+    return float(np.max(np.abs(np.diff(checked, axis=0))))
+
+
+def approach_collides(validator, position, max_step_rad=0.05):
+    """Collision along an approach, at a bounded coordinate resolution."""
     position = np.asarray(position, dtype=float)
     if len(position) < 2:
         return bool(validator.check_all_collisions(position[0]))
-
-    path_length = float(np.sum(np.max(np.abs(np.diff(position, axis=0)), axis=1)))
-    needed = max(2, int(np.ceil(path_length / max_step_rad)) + 1)
-    indices = np.unique(
-        np.linspace(0, len(position) - 1, min(needed, len(position))).astype(int))
+    indices = collision_check_indices(position, max_step_rad)
     return any(validator.check_all_collisions(position[i]) for i in indices)
+
+
+def entry_state_from_prefix(prefix, dt):
+    """Velocity and acceleration the TASK starts with at layer 0.
+
+    Not a property of the layer-0 configuration. SciPy's PCHIP fixes its
+    initial derivatives from the first three points, so the entry state the
+    approach has to match depends on the continuation through layers 1 and 2.
+
+    Matching only layer 0 is valid solely if the robot stops there and the
+    task starts from rest, which would need an explicit task ramp-in;
+    without one it reintroduces the velocity and acceleration discontinuity
+    at handover that the quintic exists to avoid.
+    """
+    from scipy.interpolate import PchipInterpolator
+
+    prefix = np.asarray(prefix, dtype=float)
+    if len(prefix) < 3:
+        raise ValueError(
+            'entry state needs at least three layers: PCHIP derives its '
+            'initial derivatives from the first three configurations'
+        )
+    times = np.arange(len(prefix)) * dt
+    interpolator = PchipInterpolator(times, prefix, axis=0)
+    return (interpolator.derivative(1)(0.0), interpolator.derivative(2)(0.0))
+
+
+def destination_lifts(validator, target, ready, velocity_limits, duration):
+    """Feasible winding representations of a destination, from this ready pose.
+
+    Winding expansion belongs to the RUNNER, not to evaluate_approach, which
+    evaluates whichever single representation it is handed. Which lifts are
+    reachable depends on where the approach starts and how long it has, so
+    they cannot be enumerated when the candidate is generated.
+    """
+    from ur10e_trajectory_pkg.configurations import PERIODIC_JOINTS
+    from ur10e_trajectory_pkg.joint_coordinates import reachable_feasible_lifts
+
+    limits = (validator.robot.qlim[0][ARM_SLICE],
+              validator.robot.qlim[1][ARM_SLICE])
+    arms = reachable_feasible_lifts(
+        np.asarray(target)[ARM_SLICE], np.asarray(ready)[ARM_SLICE],
+        limits, PERIODIC_JOINTS[ARM_SLICE],
+        np.asarray(velocity_limits)[ARM_SLICE], duration)
+    return [np.concatenate(([np.asarray(target)[RAIL_INDEX]], arm))
+            for arm in arms]
 
 
 def evaluate_approach(validator, ready, target, entry_velocity,
