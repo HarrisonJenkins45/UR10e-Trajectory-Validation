@@ -167,6 +167,56 @@ def test_minimum_duration_is_the_same_policy_for_every_candidate(ready, VELOCITY
     assert np.all(np.abs(acceleration) <= ACCELERATION + 1e-6)
 
 
+def _quintic_feasible(start, end, ve, ae, duration, velocity, acceleration):
+    coefficients = sweep.quintic_coefficients(start, end, ve, ae, duration)
+    _, _, v, a, _ = sweep.sample_quintic(coefficients, duration)
+    return (np.all(np.abs(v) <= velocity + 1e-12)
+            and np.all(np.abs(a) <= acceleration + 1e-12))
+
+
+def test_a_moving_entry_is_timed_inside_its_window_not_missed(ready, VELOCITY):
+    """With a nonzero entry state a long approach swings away and back, so it
+    fails where a moderate one passes. Here a 1 m rail move entering with 40%
+    of the rail's acceleration limit is feasible only between about 2.3 and
+    7.8 s. Testing the upper bound first and bisecting down returned None."""
+    target = ready.copy()
+    target[0] += 1.0
+    zeros = np.zeros(7)
+    entry_acceleration = np.zeros(7)
+    entry_acceleration[0] = 0.4 * ACCELERATION[0]
+    assert not _quintic_feasible(ready, target, zeros, entry_acceleration, 20.0,
+                                 VELOCITY, ACCELERATION), 'fixture needs a window'
+
+    duration = sweep.minimum_duration(ready, target, zeros, entry_acceleration,
+                                      VELOCITY, ACCELERATION)
+    assert duration is not None
+    assert 2.0 < duration < 7.8
+    assert _quintic_feasible(ready, target, zeros, entry_acceleration, duration,
+                             VELOCITY, ACCELERATION)
+    # Nothing feasible more than one scan step shorter.
+    for shorter in np.arange(0.2, duration / sweep.DURATION_SCAN_RATIO, 0.01):
+        assert not _quintic_feasible(ready, target, zeros, entry_acceleration,
+                                     shorter, VELOCITY, ACCELERATION)
+
+
+def test_an_entry_state_beyond_the_limits_has_no_duration(ready, VELOCITY):
+    """No quintic can end in a state the joints cannot hold."""
+    entry_velocity = np.zeros(7)
+    entry_velocity[0] = 1.2 * VELOCITY[0]
+    assert sweep.minimum_duration(ready, ready + 0.1, entry_velocity,
+                                  np.zeros(7), VELOCITY, ACCELERATION) is None
+
+
+def test_no_duration_is_shorter_than_the_average_speed_bound(ready, VELOCITY):
+    """No joint can average more than its limit, which is what lets the scan
+    start above the lower bound rather than at it."""
+    target = ready.copy()
+    target[4] += 2 * np.pi
+    duration = sweep.minimum_duration(ready, target, np.zeros(7), np.zeros(7),
+                                      VELOCITY, ACCELERATION)
+    assert duration >= 2 * np.pi / VELOCITY[4]
+
+
 # --------------------------------------------------------------------------
 # Jerk ranks, never rejects
 # --------------------------------------------------------------------------

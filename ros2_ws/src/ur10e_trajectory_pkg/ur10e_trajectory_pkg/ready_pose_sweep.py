@@ -252,15 +252,44 @@ def sample_quintic(coefficients, duration, samples=400):
     return times, evaluate(0), evaluate(1), evaluate(2), evaluate(3)
 
 
+# Geometric step of the upward duration scan. A feasible window narrower than
+# this ratio can be missed; the narrowest measured on the nominal pilot spanned
+# a ratio of about 1.7.
+DURATION_SCAN_RATIO = 1.1
+
+
 def minimum_duration(start, end, end_velocity, end_acceleration,
                      velocity_limits, acceleration_limits,
-                     lower=0.2, upper=20.0, tolerance=0.01):
+                     lower=0.2, upper=20.0, tolerance=0.01,
+                     scan_ratio=DURATION_SCAN_RATIO):
     """Shortest duration satisfying velocity and provisional acceleration.
 
     The same policy for every candidate, which is what makes their jerk
     comparable: jerk scales strongly with duration, so candidates timed
     differently cannot be ranked against each other at all.
+
+    Feasibility is NOT monotone in duration once the entry state is nonzero.
+    The quintic's ve*T and ae*T^2 terms make a long approach swing away and
+    back so that it can arrive moving, so the feasible durations form a
+    window and a long approach can fail where a moderate one passes. This
+    function used to test the upper bound first and bisect down from it,
+    which returned None for approaches with a perfectly good window: on the
+    nominal pilot, every winding of 5 of 34 candidates, one of them the only
+    member of its branch. So instead:
+
+      1. the entry state must itself be within the limits, or no duration can
+         end in it
+      2. scan upward geometrically from a rigorous lower bound, the largest
+         per-joint displacement over its velocity limit, since no joint can
+         average more than its limit
+      3. bisect between the last infeasible and first feasible scan points
     """
+    velocity_limits = np.asarray(velocity_limits, dtype=float)
+    acceleration_limits = np.asarray(acceleration_limits, dtype=float)
+    if (np.any(np.abs(end_velocity) > velocity_limits)
+            or np.any(np.abs(end_acceleration) > acceleration_limits)):
+        return None
+
     def feasible(duration):
         coefficients = quintic_coefficients(start, end, end_velocity,
                                             end_acceleration, duration)
@@ -268,11 +297,28 @@ def minimum_duration(start, end, end_velocity, end_acceleration,
         return (np.all(np.abs(velocity) <= velocity_limits)
                 and np.all(np.abs(acceleration) <= acceleration_limits))
 
-    if not feasible(upper):
+    displacement = np.abs(np.asarray(end, float) - np.asarray(start, float))
+    first = max(lower, float(np.max(displacement / velocity_limits)))
+    if first > upper:
         return None
-    low, high = lower, upper
-    if feasible(low):
-        return low
+    scan = []
+    duration = first
+    while duration < upper:
+        scan.append(duration)
+        duration *= scan_ratio
+    scan.append(upper)
+
+    previous = None
+    for duration in scan:
+        if feasible(duration):
+            break
+        previous = duration
+    else:
+        return None
+    if previous is None:
+        return duration
+
+    low, high = previous, duration
     while high - low > tolerance:
         middle = 0.5 * (low + high)
         if feasible(middle):
@@ -487,7 +533,8 @@ REASON_COLLISION = 'collision'
 def evaluate_approach(validator, ready, target, entry_velocity,
                       entry_acceleration, velocity_limits,
                       acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3,
-                      step_bounds=None, collision_counter=None):
+                      step_bounds=None, collision_counter=None,
+                      duration=None):
     """One ready pose to one layer-0 candidate, under the standard retiming.
 
     Feasibility here means velocity, acceleration, collision and joint limits.
@@ -503,10 +550,15 @@ def evaluate_approach(validator, ready, target, entry_velocity,
     is nonzero, through its ve*T and ae*T^2 terms. Changing velocity limits
     changes the duration and so can change the collision and joint-limit
     verdicts, not just the timing.
+
+    duration, when given, is a minimum duration the caller already computed
+    under the same limits, so a runner sorting alternatives by duration does
+    not repeat the bisection for the ones it then collision-checks.
     """
-    duration = minimum_duration(ready, target, entry_velocity,
-                                entry_acceleration, velocity_limits,
-                                acceleration_limits)
+    if duration is None:
+        duration = minimum_duration(ready, target, entry_velocity,
+                                    entry_acceleration, velocity_limits,
+                                    acceleration_limits)
     if duration is None:
         return {'feasible': False, 'reason_code': REASON_NO_DURATION,
                 'reason': 'no duration satisfies velocity and acceleration '
