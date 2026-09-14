@@ -255,6 +255,7 @@ class TrajectoryValidator:
             rail_link = self.robot.links[self._link_index_by_name[self._q_link_names[0]]]
             rail_qdlim = getattr(rail_link, 'qdlim', None)
             self._rail_urdf_vel_limit = float(rail_qdlim) if rail_qdlim else None
+            self._rail_vel_cap = RAIL_VEL_SAFETY_CAP
             self._rail_vel_limit = (min(float(rail_qdlim), RAIL_VEL_SAFETY_CAP)
                                     if rail_qdlim else RAIL_VEL_SAFETY_CAP)
 
@@ -315,6 +316,21 @@ class TrajectoryValidator:
         arm's are Universal Robots' own values, unmodified.
         """
         return np.concatenate(([self._rail_vel_limit], self._arm_vel_limits))
+
+    def set_rail_velocity_cap(self, cap):
+        """Replace RAIL_VEL_SAFETY_CAP for THIS instance, for sensitivity studies.
+
+        Not an operating limit: the enforced rail velocity becomes
+        min(URDF, cap), exactly as with the module cap, and effective_limits
+        records the override so no artifact can pass it off as the default.
+        """
+        self._rail_vel_cap = float(cap)
+        self._rail_vel_limit = (min(self._rail_urdf_vel_limit, self._rail_vel_cap)
+                                if self._rail_urdf_vel_limit else self._rail_vel_cap)
+
+    @property
+    def rail_velocity_cap(self):
+        return self._rail_vel_cap
 
     @property
     def urdf_velocity_limits(self):

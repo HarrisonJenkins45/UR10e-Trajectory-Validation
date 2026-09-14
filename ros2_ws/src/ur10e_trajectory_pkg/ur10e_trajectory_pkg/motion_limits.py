@@ -219,13 +219,19 @@ def effective_limits(validator):
     joints = []
     for index, name in enumerate(JOINT_NAMES):
         if index == 0:
+            cap = getattr(validator, 'rail_velocity_cap', RAIL_VEL_SAFETY_CAP)
+            overridden = cap != RAIL_VEL_SAFETY_CAP
             joints.append({
                 'joint': name, 'units': 'm/s',
                 'effective': float(velocity[0]),
                 'urdf': urdf[0],
-                'safety_cap': RAIL_VEL_SAFETY_CAP,
-                'source': 'min(URDF <limit velocity>, RAIL_VEL_SAFETY_CAP)',
-                'status': RAIL_VELOCITY.status,
+                'safety_cap': cap,
+                'cap_overridden': overridden,
+                'source': ('min(URDF <limit velocity>, sensitivity cap override)'
+                           if overridden else
+                           'min(URDF <limit velocity>, RAIL_VEL_SAFETY_CAP)'),
+                # An override is a what-if, never the provisional safety cap.
+                'status': ASSUMED if overridden else RAIL_VELOCITY.status,
             })
         else:
             joints.append({

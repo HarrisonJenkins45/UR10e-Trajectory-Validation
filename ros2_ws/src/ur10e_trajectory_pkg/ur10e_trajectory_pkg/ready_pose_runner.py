@@ -850,6 +850,63 @@ def stability_check(base_results, extra_results, shared_results,
     }
 
 
+def build_placements(validator, names, meter, candidates=None, csv_path=None):
+    """Generate every named placement through the one path.
+
+    names is a list of envelope names or "all". Nominal is generated first,
+    unseeded, even when not listed, because its layers seed the rest;
+    candidates substitutes a committed generator output for nominal.
+    Returns (placements, context).
+    """
+    from ur10e_trajectory_pkg.failure_census import load_trajectory
+
+    positions, quaternions, dt, trajectory_metadata = load_trajectory(
+        csv_path, PREFIX_LAYERS, with_metadata=True)
+    nominal_RG = trajectory_metadata['placement_RG']
+    envelope = {p['name']: p for p in sweep.placements()}
+    if names == 'all':
+        names = [p['name'] for p in sweep.placements()]
+    candidates_document = {}
+    if candidates:
+        layers, candidates_document = load_candidates(
+            candidates, PREFIX_LAYERS, include_oracle=False)
+        nominal = {'name': 'nominal', 'layers': layers, 'positions': positions,
+                   'quaternions': quaternions, 'dt': dt,
+                   'generation': {'source': 'committed full-length generator '
+                                            'output (--candidates)'}}
+    else:
+        with counting_collisions(validator, meter):
+            nominal = generated_placement(validator, envelope['nominal'],
+                                          nominal_RG, meter)
+        layers = nominal['layers']
+    placements = []
+    for name in names:
+        if name == 'nominal':
+            placements.append(nominal)
+            continue
+        with counting_collisions(validator, meter):
+            placements.append(generated_placement(
+                validator, envelope[name], nominal_RG, meter,
+                nominal_layers=layers))
+    return placements, {'candidates_document': candidates_document,
+                        'trajectory_metadata': trajectory_metadata,
+                        'nominal_RG': nominal_RG, 'dt': dt}
+
+
+def load_poses(path):
+    """Ready poses to evaluate, from a JSON list of configurations or records."""
+    with open(path, encoding='utf-8') as handle:
+        entries = json.load(handle)
+    out = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            entry = {'configuration': entry}
+        out.append({'configuration': np.asarray(entry['configuration'], dtype=float),
+                    'provenance': entry.get('provenance', 'given'),
+                    'anchor_name': entry.get('anchor_name')})
+    return out
+
+
 def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
     """A small spread of ready poses over rail position and provenance."""
     edges = np.linspace(0.0, rail_travel, strata + 1)
@@ -1118,6 +1175,13 @@ def main(argv=None):
     parser.add_argument('--stability', nargs=3, metavar=('BASE', 'NEW', 'SHARED'),
                         default=None,
                         help='apply STABILITY_CRITERIA to three artifacts and exit')
+    parser.add_argument('--poses-json', default=None,
+                        help='evaluate exactly these ready poses instead of '
+                             'a selection from the pool')
+    parser.add_argument('--rail-velocity-cap', type=float, default=None,
+                        help='sensitivity study: replace RAIL_VEL_SAFETY_CAP '
+                             'for this run, before generation, so '
+                             'continuations are re-derived under it')
     parser.add_argument('--all-pool', action='store_true',
                         help='evaluate every ready pose in the pool, not a '
                              'pilot selection')
@@ -1148,9 +1212,8 @@ def main(argv=None):
 
     total_start = time.perf_counter()
     validator = _validator(args.urdf, get_package_share_directory('ur_description'))
-    positions, quaternions, dt, trajectory_metadata = load_trajectory(
-        None, PREFIX_LAYERS, with_metadata=True)
-    nominal_RG = trajectory_metadata['placement_RG']
+    if args.rail_velocity_cap is not None:
+        validator.set_rail_velocity_cap(args.rail_velocity_cap)
     envelope = {p['name']: p for p in sweep.placements()}
     names = ([p['name'] for p in sweep.placements()]
              if args.placements.strip() == 'all'
@@ -1160,29 +1223,10 @@ def main(argv=None):
         parser.error(f'unknown placements {unknown}')
 
     generation_meter = Meter()
-    candidates_document = {}
-    if args.candidates:
-        layers, candidates_document = load_candidates(
-            args.candidates, PREFIX_LAYERS, include_oracle=False)
-        nominal = {'name': 'nominal', 'layers': layers, 'positions': positions,
-                   'quaternions': quaternions, 'dt': dt,
-                   'generation': {'source': 'committed full-length generator '
-                                            'output (--candidates)'}}
-    else:
-        # Always generated, even when not evaluated: its layers seed the rest.
-        with counting_collisions(validator, generation_meter):
-            nominal = generated_placement(validator, envelope['nominal'],
-                                          nominal_RG, generation_meter)
-        layers = nominal['layers']
-    placements = []
-    for name in names:
-        if name == 'nominal':
-            placements.append(nominal)
-            continue
-        with counting_collisions(validator, generation_meter):
-            placements.append(generated_placement(
-                validator, envelope[name], nominal_RG, generation_meter,
-                nominal_layers=layers))
+    placements, context = build_placements(validator, names, generation_meter,
+                                           args.candidates)
+    candidates_document = context['candidates_document']
+    trajectory_metadata, dt = context['trajectory_metadata'], context['dt']
     generated = [p['generation']['seconds'] for p in placements
                  if 'seconds' in p['generation']]
 
@@ -1201,8 +1245,11 @@ def main(argv=None):
                        if args.skip_poses_in else None),
             only_keys=(artifact_pose_keys(args.only_poses_in)
                        if args.only_poses_in else None))
-    pilot = list(pool) if args.all_pool else pilot_ready_poses(pool,
-                                                               args.pilot_count)
+    if args.poses_json:
+        pilot = load_poses(args.poses_json)
+    else:
+        pilot = list(pool) if args.all_pool else pilot_ready_poses(
+            pool, args.pilot_count)
 
     runs = []
     for _ in range(args.repeats):
@@ -1258,6 +1305,8 @@ def main(argv=None):
                      counts=pool_meter.counts),
         'ready_pose_selection': ('entire pool' if args.all_pool
                                  else PILOT_SELECTION_RULE),
+        'rail_velocity_cap_override': args.rail_velocity_cap,
+        'poses_json': args.poses_json,
         'pose_filter': {'skip_poses_in': args.skip_poses_in,
                         'only_poses_in': args.only_poses_in,
                         'pool_size_before_filter': full_pool_size,
