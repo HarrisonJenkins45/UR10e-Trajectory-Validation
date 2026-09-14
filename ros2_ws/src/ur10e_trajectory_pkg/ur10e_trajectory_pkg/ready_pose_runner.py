@@ -109,6 +109,7 @@ Usage:
     full sweep  python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
                     --placements all --all-pool --repeats 1 \\
                     --no-exhaustive-check --out sweep.json
+    stability   the same with --pool-samples 8192 --pool-finalists 128
 """
 import argparse
 import heapq
@@ -891,9 +892,9 @@ def manifest(args, validator, candidates_document, trajectory_metadata, dt,
             'placements_evaluated': placement_names,
         },
         'pool': {
-            'global_samples': sweep.GLOBAL_SAMPLES,
+            'global_samples': args.pool_samples,
             'sobol_seed': 0,
-            'broad_finalists': sweep.BROAD_FINALISTS,
+            'broad_finalists': args.pool_finalists,
             'rail_strata': sweep.RAIL_STRATA,
             'anchor_postures_deg': [list(a) for a in sweep.ANCHOR_POSTURES_DEG],
             'anchor_rail_positions_m': [0.5, 1.5, 2.5],
@@ -939,6 +940,11 @@ def main(argv=None):
     parser.add_argument('--placements', default='nominal',
                         help='comma-separated placement names from the '
                              'envelope, or "all"')
+    parser.add_argument('--pool-samples', type=int, default=sweep.GLOBAL_SAMPLES,
+                        help='Sobol samples screened by the static gates; '
+                             'double it for the pool stability check')
+    parser.add_argument('--pool-finalists', type=int,
+                        default=sweep.BROAD_FINALISTS)
     parser.add_argument('--all-pool', action='store_true',
                         help='evaluate every ready pose in the pool, not a '
                              'pilot selection')
@@ -993,7 +999,8 @@ def main(argv=None):
     pool_meter = Meter()
     with counting_collisions(validator, pool_meter), \
             counting_static_gates(pool_meter), pool_meter.phase('pool'):
-        pool, pool_summary = sweep.build_candidate_pool(validator)
+        pool, pool_summary = sweep.build_candidate_pool(
+            validator, count=args.pool_samples, finalists=args.pool_finalists)
     # The pilot selection keeps one anchor per rail position, so asking it
     # for the whole pool would silently drop the others.
     pilot = list(pool) if args.all_pool else pilot_ready_poses(pool,
