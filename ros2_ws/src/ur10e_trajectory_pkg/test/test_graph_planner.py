@@ -108,6 +108,32 @@ def test_a_successor_keeps_the_winding_it_was_reached_by(validator, oracle):
 # Edge cost
 # --------------------------------------------------------------------------
 
+def test_the_graph_uses_the_validators_velocity_limits_by_default(validator):
+    """The URDF's per-joint values and the rail's cap, the same limits the
+    tracker it is compared with enforces. A uniform 2.0 rad/s default once
+    pruned, lifted and costed against a different robot."""
+    graph = graph_planner.LayeredGraph(validator, [[]], 1, dt=0.1)
+    np.testing.assert_array_equal(graph.velocity_limits,
+                                  validator.velocity_limits)
+
+
+def test_an_explicit_limit_vector_overrides_the_default(validator):
+    limits = np.array([0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    graph = graph_planner.LayeredGraph(validator, [[]], 1, dt=0.1,
+                                       velocity_limits=limits)
+    np.testing.assert_array_equal(graph.velocity_limits, limits)
+
+
+def test_path_cost_charges_the_first_edge_at_the_transition_duration():
+    limits = np.array([1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    start = np.zeros(7)
+    path = [np.full(7, 0.1), np.full(7, 0.15)]
+    expected = (graph_planner.edge_cost(start, path[0], limits,
+                                        graph_planner.TRANSITION_SECONDS)
+                + graph_planner.edge_cost(path[0], path[1], limits, 0.1))
+    assert graph_planner.path_cost(start, path, limits, 0.1) == pytest.approx(expected)
+
+
 def test_cost_normalises_each_joint_by_its_own_budget():
     """The rail's metres and the arm's radians are not comparable raw.
 
@@ -157,7 +183,7 @@ def test_rail_displacement_is_rejected_before_anything_else(validator, oracle):
 
 def test_an_unreachable_joint_step_is_pruned(validator, oracle):
     far = np.asarray(oracle[0]).copy()
-    far[2] += 1.0                              # far beyond 2.0 rad/s * 0.1 s
+    far[2] += 1.0                  # far beyond 120 deg/s * 0.1 s = 0.21 rad
     layers = [[far] for _ in range(LAYERS)]
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
 

@@ -90,6 +90,9 @@ def test_hardware_certification_is_blocked_and_says_by_what():
 
 
 def test_limit_vectors_follow_the_shared_joint_ordering(validator):
+    """By NAME, not just shape. A URDF that swapped two arm joints would
+    still produce seven values, each applied to the wrong joint."""
+    assert validator.joint_names == tuple(JOINT_NAMES)
     for vector in (ml.velocity_vector(validator), ml.acceleration_vector(),
                    ml.jerk_vector()):
         assert vector.shape == (NUM_JOINTS,)
@@ -101,7 +104,69 @@ def test_the_rail_keeps_its_deliberate_safety_cap(validator):
     We have no trustworthy data for the rail drive, so its URDF figure is
     clamped on purpose rather than trusted.
     """
-    from ur10e_trajectory_pkg.validation_core import RAIL_VEL_SAFETY_CAP
-    assert ml.velocity_vector(validator)[0] <= RAIL_VEL_SAFETY_CAP
+    urdf_rail = validator.urdf_velocity_limits[0]
+    assert urdf_rail is not None
+    assert ml.velocity_vector(validator)[0] == pytest.approx(
+        min(urdf_rail, ml.RAIL_VEL_SAFETY_CAP))
+
+
+def test_the_rail_cap_is_defined_once():
+    """The validator's cap and the Limit describing it cannot disagree."""
+    from ur10e_trajectory_pkg import validation_core
+    assert validation_core.RAIL_VEL_SAFETY_CAP is ml.RAIL_VEL_SAFETY_CAP
+    assert ml.RAIL_VELOCITY.value == ml.RAIL_VEL_SAFETY_CAP
+
+
+def test_certification_reports_the_worst_status_not_the_best():
+    """min() over a boolean key returned certified if ANY joint was."""
+    assert ml.worst_status([ml.CERTIFIED, ml.ASSUMED, ml.PROVISIONAL]) == ml.ASSUMED
+    assert ml.worst_status([ml.PROVISIONAL, ml.CERTIFIED]) == ml.PROVISIONAL
+    assert ml.worst_status([ml.CERTIFIED, ml.CERTIFIED]) == ml.CERTIFIED
+
+
+def test_arm_velocity_is_unverified_until_its_source_is_checked(validator):
+    """Without a validator nothing was read, so the reference table's status
+    would describe a number the code does not use."""
+    assert ml.certification_status()['limits']['arm_velocity'] == ml.UNVERIFIED
+    assert (ml.certification_status(validator)['limits']['arm_velocity']
+            == ml.CERTIFIED)
+
+
+def test_an_edited_urdf_loses_arm_velocity_certification(validator):
+    from types import SimpleNamespace
+
+    edited = np.array(validator.velocity_limits, dtype=float)
+    edited[5] *= 0.9
+    fake = SimpleNamespace(velocity_limits=edited,
+                           urdf_velocity_limits=edited.tolist(),
+                           joint_names=validator.joint_names)
+    assert ml.urdf_agrees_with_published(fake)['wrist_2_joint'] is False
+    assert ml.certification_status(fake)['limits']['arm_velocity'] == ml.ASSUMED
+    entry = ml.effective_limits(fake)['velocity'][5]
+    assert entry['agrees_with_published'] is False
+    assert entry['status'] == ml.ASSUMED
+
+
+def test_effective_limits_record_what_was_enforced(validator):
+    """An artifact must record the values the code USED, beside the raw URDF
+    values and the cap, not the reference table."""
+    import json
+
+    document = ml.effective_limits(validator)
+    np.testing.assert_array_equal(document['velocity_vector'],
+                                  validator.velocity_limits)
+    assert document['joint_names'] == list(JOINT_NAMES)
+    rail = document['velocity'][0]
+    assert rail['effective'] == pytest.approx(min(rail['urdf'], rail['safety_cap']))
+    for entry in document['velocity'][1:]:
+        assert entry['effective'] == pytest.approx(entry['urdf'])
+        assert entry['agrees_with_published'] is True
+    np.testing.assert_array_equal(document['acceleration_vector'],
+                                  ml.acceleration_vector())
+
+    assert ml.manifest()['effective'] is None
+    with_validator = ml.manifest(validator)
+    assert with_validator['effective']['velocity_vector'] == document['velocity_vector']
+    json.dumps(with_validator)
 
 

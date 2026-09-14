@@ -259,6 +259,33 @@ def test_schema_is_versioned():
     assert isinstance(failure_census.SCHEMA_VERSION, int)
 
 
+def test_tracking_defers_velocity_limits_to_the_validator():
+    """A literal 2.0 here once reached every offline tool built on
+    run_tracking while the service used the URDF."""
+    assert failure_census._thresholds(None)['max_joint_vel_threshold'] is None
+    assert failure_census._thresholds('arm_velocity')['max_joint_vel_threshold'] == float('inf')
+
+
+def test_tracking_is_sensitive_to_the_enforced_arm_limits(validator, trajectory):
+    """500/500 cannot detect a limit change: its fastest accepted secant is
+    about 6% of any limit in use. So shrink the enforced limits below this
+    arc's joint speeds and require the gate to fire, which proves the value
+    the validator enforces is the value tracking uses."""
+    positions, quaternions = trajectory
+    baseline, _ = failure_census.run_tracking(validator, positions, quaternions,
+                                              DT, LEGACY_MATLAB_START_Q)
+    assert not [r for r in baseline if r['gate_arm_velocity'] is True]
+
+    original = validator._arm_vel_limits
+    validator._arm_vel_limits = np.full(6, 1e-3)
+    try:
+        shrunk, _ = failure_census.run_tracking(validator, positions, quaternions,
+                                                DT, LEGACY_MATLAB_START_Q)
+    finally:
+        validator._arm_vel_limits = original
+    assert [r for r in shrunk if r['gate_arm_velocity'] is True]
+
+
 def test_wide_seed_bank_is_fixed_and_explicit():
     """Part of the record, not a detail of whoever ran it.
 

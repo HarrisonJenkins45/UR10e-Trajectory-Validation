@@ -7,11 +7,13 @@ Playback follows a PCHIP interpolant, a different joint-space curve through
 the same endpoints, so the graph's verdict is about its edges rather than
 about the motion performed.
 
-Run against the first full graph path, the trajectory proper passed every
-check while the APPROACH failed three: peak velocity 1.158 times the limit,
-a singular configuration between the endpoints, and a commanded-twist margin
-of 0.864. Assigning the approach two seconds makes it admissible under a
-secant check; it does not construct a dynamically smooth motion.
+Run against the graph path, the trajectory proper passes every check, and the
+APPROACH from the legacy start fails on conditioning and twist: it begins at a
+singular configuration, where alpha* is exactly 0. Under the retired uniform
+2.0 rad/s cap it also exceeded velocity, peaking at 1.157 times that cap on
+wrist_1; under the URDF's per-joint limits the same approach peaks at 0.737.
+Assigning the approach two seconds makes it admissible under a secant check;
+it does not construct a dynamically smooth motion.
 """
 import numpy as np
 import pytest
@@ -306,12 +308,60 @@ def test_command_stream_jerk_exceeds_the_interpolant_derivative(smooth_path):
     assert np.max(commanded['jerk']) > np.max(analytic['jerk'])
 
 
-def test_declared_higher_order_limits_are_starting_values_not_inherited():
-    """Nothing upstream ever bounded acceleration or jerk, so these are to be
-    measured against rather than trusted."""
-    assert cv.ARM_ACCELERATION_LIMIT_RAD_S2 > 0
-    assert cv.ARM_JERK_LIMIT_RAD_S3 > cv.ARM_ACCELERATION_LIMIT_RAD_S2
-    assert cv.RAIL_ACCELERATION_LIMIT_M_S2 > 0
+def test_higher_order_limits_come_from_motion_limits():
+    """One table, with provenance. A second one here once said 15 rad/s^2
+    while motion_limits said 13.96, so Stage 7 and Stage 6 disagreed."""
+    from ur10e_trajectory_pkg import motion_limits
+
+    acceleration = motion_limits.acceleration_vector()
+    jerk = motion_limits.jerk_vector()
+    assert not hasattr(cv, 'ARM_ACCELERATION_LIMIT_RAD_S2')
+
+    within = {'velocity': np.zeros(7), 'acceleration': acceleration * 0.99,
+              'jerk': jerk * 0.99}
+    assert cv.limit_violations(within, LIMITS) == {}
+
+    over = {'velocity': np.zeros(7), 'acceleration': acceleration * 0.99,
+            'jerk': jerk * 0.99}
+    over['acceleration'][4] = acceleration[4] * 1.01
+    assert 'acceleration' in cv.limit_violations(over, LIMITS)['wrist_1_joint']
+
+
+def test_a_sample_on_a_knot_belongs_to_the_interval_it_starts():
+    """Half-open intervals. searchsorted's default left side put the knot in
+    the interval ENDING there, which at the approach boundary scored the first
+    trajectory sample against the approach's twist."""
+    times = [0.0, 2.0, 2.1, 2.2]
+    assert cv.segment_index(times, 0.0) == 0
+    assert cv.segment_index(times, 1.999) == 0
+    assert cv.segment_index(times, 2.0) == 1
+    assert cv.segment_index(times, 2.05) == 1
+    assert cv.segment_index(times, 2.1) == 2
+    assert cv.segment_index(times, 2.2) == 2     # the final knot clips
+
+
+def test_alpha_star_at_a_knot_uses_the_following_interval_twist(
+        validator, smooth_path, monkeypatch):
+    times = _times(len(smooth_path))
+    _, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+    twists = [np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.001 * (i + 1)])
+              for i in range(len(times) - 1)]
+    seen = []
+
+    def recording(jacobian, twist, limits):
+        seen.append(np.asarray(twist))
+        return {'alpha': 5.0, 'status': 'ok', 'solved': True,
+                'equality_residual': 0.0}
+
+    monkeypatch.setattr(cv, 'twist_alpha_star', recording)
+    report = cv.conditioning_and_twist(
+        # Two samples: the knot itself, then one inside the same interval.
+        validator, interpolator, np.array([times[1], times[1] + 0.25 * DT]),
+        LIMITS,
+        task_twists=twists, waypoint_times=times)
+    np.testing.assert_array_equal(seen[0], twists[1])
+    assert report['min_alpha_star_segment'] == 1
+    assert report['min_alpha_star_at_time_s'] == pytest.approx(times[1])
 
 
 def test_an_unsolved_lp_makes_the_trajectory_indeterminate_not_passing(validator,

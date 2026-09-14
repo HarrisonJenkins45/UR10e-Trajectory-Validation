@@ -13,9 +13,12 @@ from spatialgeometry import Cuboid
 
 from ur10e_trajectory_pkg.configurations import (
     ARM_SLICE,
+    JOINT_NAMES,
     NUM_JOINTS,
     PERIODIC_JOINTS,
 )
+# The cap lives with the other limits; re-exported here for existing callers.
+from ur10e_trajectory_pkg.motion_limits import RAIL_VEL_SAFETY_CAP  # noqa: F401
 from ur10e_trajectory_pkg.joint_coordinates import (
     nearest_feasible_lift,
     winding_numbers,
@@ -30,13 +33,8 @@ import matplotlib.pyplot as plt
 
 EE_LINK = "tool0"
 
-# Deliberate safety derate, NOT the rig's capability. The hardware ceiling is
-# read from the URDF at startup (see self._rail_vel_limit in __init__) and the
-# validator enforces the LOWER of the two, so this can only ever be more
-# conservative than the rail. Raise the rig's real limit by editing the URDF's
-# <limit velocity="..."> on linear_rail_joint; raise what we are willing to
-# command by editing this. As of writing the URDF says 5.0 m/s.
-RAIL_VEL_SAFETY_CAP = 1.0  # m/s
+# RAIL_VEL_SAFETY_CAP is defined in motion_limits: a deliberate derate, and
+# the validator enforces min(URDF, cap) for the rail (see __init__).
 
 # Seed for the waypoint-recovery perturbations. Fixed so that the same input
 # gives the same verdict: without it the retries drew from numpy's global
@@ -234,6 +232,21 @@ class TrajectoryValidator:
                 )
             self._rail_limits = (float(self.robot.qlim[0][0]), float(self.robot.qlim[1][0]))
 
+            # The WHOLE ordering, not just the rail. Every per-joint vector in
+            # this package -- limits, lifts, periodicity -- is indexed by
+            # JOINT_NAMES, and a URDF that reordered two arm joints would
+            # silently apply each one's limit to the other.
+            self._joint_names = [
+                getattr(self.robot.links[self._link_index_by_name[name]],
+                        '_joint_name', None)
+                for name in self._q_link_names
+            ]
+            if tuple(self._joint_names) != tuple(JOINT_NAMES):
+                raise ValueError(
+                    f'URDF joint order {self._joint_names} does not match '
+                    f'JOINT_NAMES {list(JOINT_NAMES)}'
+                )
+
             # Rail velocity ceiling, read from the URDF's <limit velocity="...">
             # via the same link the position limits above came from, then
             # clamped by the safety cap. This is the single source of truth for
@@ -241,6 +254,7 @@ class TrajectoryValidator:
             # file happened to agree, and the URDF's value was never read at all.
             rail_link = self.robot.links[self._link_index_by_name[self._q_link_names[0]]]
             rail_qdlim = getattr(rail_link, 'qdlim', None)
+            self._rail_urdf_vel_limit = float(rail_qdlim) if rail_qdlim else None
             self._rail_vel_limit = (min(float(rail_qdlim), RAIL_VEL_SAFETY_CAP)
                                     if rail_qdlim else RAIL_VEL_SAFETY_CAP)
 
@@ -301,6 +315,20 @@ class TrajectoryValidator:
         arm's are Universal Robots' own values, unmodified.
         """
         return np.concatenate(([self._rail_vel_limit], self._arm_vel_limits))
+
+    @property
+    def urdf_velocity_limits(self):
+        """The URDF's own values before any cap, None where it declares none.
+
+        Recorded beside velocity_limits so an artifact shows both what the
+        hardware description says and what was enforced.
+        """
+        return [self._rail_urdf_vel_limit] + self._arm_vel_limits.tolist()
+
+    @property
+    def joint_names(self):
+        """Joint names in q_full order, as read from the URDF."""
+        return tuple(self._joint_names)
 
     def _init_pybullet_collision_model(self):
         """Load the same URDF into a headless pybullet client, purely for
@@ -1065,20 +1093,13 @@ class TrajectoryValidator:
                         label=arm_joint_labels[i],
                     )
 
-                ax.axhline(
-                    y=0.1,
-                    color='r',
-                    linestyle='--',
-                    alpha=0.7,
-                    label='Arm Limit (+)',
-                )
-                ax.axhline(
-                    y=-0.2,#max_joint_vel_threshold,
-                    color='r',
-                    linestyle='--',
-                    alpha=0.7,
-                    label='Arm Limit (-)',
-                )
+                # The enforced per-joint limits, one pair of lines per
+                # distinct value, rather than typed-in placeholders.
+                for limit in np.unique(self._arm_vel_limits):
+                    label = f'Arm limit {np.rad2deg(limit):.0f} deg/s'
+                    ax.axhline(y=limit, color='r', linestyle='--', alpha=0.7,
+                               label=label)
+                    ax.axhline(y=-limit, color='r', linestyle='--', alpha=0.7)
 
                 ax.set_title(
                     'Feasible Segment Arm Joint Velocities',
@@ -1112,14 +1133,14 @@ class TrajectoryValidator:
                 )
 
                 ax.axhline(
-                    y=0.1,#max_rail_vel_threshold,
+                    y=self._rail_vel_limit,
                     color='m',
                     linestyle='--',
                     alpha=0.7,
                     label='Rail Limit (+)',
                 )
                 ax.axhline(
-                    y=-0.1,
+                    y=-self._rail_vel_limit,
                     color='m',
                     linestyle='--',
                     alpha=0.7,

@@ -32,28 +32,34 @@ Acceleration, jerk and continuous singularity margin are deliberately absent.
 They belong to the trajectory optimisation that follows, not in first-order
 graph state.
 
-First full run, 500 layers, both builds:
+Full run, 500 layers, both builds, under the validator's own limits (URDF
+per-joint arm values, rail capped at 1.0 m/s):
 
     build        complete  cost     pairs      rail-pruned  edges
-    validation   yes       2.1761   2,751,040  2,092,045    558,239
-    generator    yes       2.1761   2,614,817  1,970,616    546,965
+    validation   yes       1.0055   4,830,414  3,683,412    957,698
+    generator    yes       1.0055   4,591,681  3,472,076    938,059
 
-    greedy tracker, same cost function            2.3310
+    greedy tracker, same cost function            1.1082
 
 Two results worth keeping. The generator-only build reaches the SAME optimum
 as the build with the greedy path injected, so independent candidate
 generation is sufficient on this trajectory and the oracle added nothing it
-did not already contain. And the graph path costs 6.6% less than the greedy
+did not already contain. And the graph path costs 9.3% less than the greedy
 tracker's, which is global branch choice buying something a greedy tracker
 cannot, on a trajectory where both succeed.
 
-Swept collision rejected 13 edges of 558,239. Cheap kinematic pruning removed
+Swept collision rejected 74 edges of 957,698. Cheap kinematic pruning removed
 76% of pairs before any physics query, which is what makes a dense build
 affordable at this size.
 
-The frontier stays bounded near 80 states per layer rather than growing with
-depth: 2.75M pairs over 500 layers is about 5,500 per layer against roughly
-68 candidates. No beam or dominance rule is needed at this scale.
+Costs are only comparable under the same velocity limits, since the limits
+ARE the normalisation. An earlier run used a uniform 2.0 rad/s arm cap and
+recorded 2.1761 against a greedy 2.3310; the path it chose is identical in all
+501 states to the one above, but those figures cannot be set beside these.
+
+The frontier stays bounded rather than growing with depth: 4.8M pairs over
+500 layers is under 10,000 per layer against roughly 68 candidates. No beam or
+dominance rule is needed at this scale.
 """
 import argparse
 import json
@@ -61,7 +67,7 @@ import sys
 
 import numpy as np
 
-from ur10e_trajectory_pkg import environment
+from ur10e_trajectory_pkg import environment, motion_limits
 from ur10e_trajectory_pkg.configurations import (
     ARM_SLICE,
     LEGACY_MATLAB_START_Q,
@@ -71,7 +77,8 @@ from ur10e_trajectory_pkg.configurations import (
 )
 from ur10e_trajectory_pkg.joint_coordinates import reachable_feasible_lifts
 
-SCHEMA_VERSION = 1
+# 2: records the effective velocity limits and the greedy reference cost.
+SCHEMA_VERSION = 2
 
 # Duration of the approach from q_start to the first waypoint. This is NOT the
 # 0.1 s trajectory step: the arm has to get to the trajectory's start, and
@@ -93,6 +100,22 @@ def state_key(configuration):
     return tuple(np.round(np.asarray(configuration, dtype=float), STATE_DECIMALS))
 
 
+def path_cost(q_start, path, velocity_limits, dt,
+              transition_seconds=TRANSITION_SECONDS):
+    """Total edge cost of a path under the graph's own cost function.
+
+    What makes a greedy path and a graph path comparable: the same limits and
+    the same normalisation. Costs computed under different velocity limits are
+    NOT comparable, since the limits are the normalisation.
+    """
+    total, previous = 0.0, np.asarray(q_start, dtype=float)
+    for index, configuration in enumerate(path):
+        step = transition_seconds if index == 0 else dt
+        total += edge_cost(previous, configuration, velocity_limits, step)
+        previous = np.asarray(configuration, dtype=float)
+    return total
+
+
 def edge_cost(predecessor, successor, velocity_limits, dt):
     """Normalised squared motion, each joint against its own budget.
 
@@ -108,7 +131,7 @@ def edge_cost(predecessor, successor, velocity_limits, dt):
 class LayeredGraph:
     def __init__(self, validator, candidates, num_layers,
                  dt=0.1, transition_seconds=TRANSITION_SECONDS,
-                 arm_velocity_limit=2.0, swept_samples=SWEPT_SAMPLES):
+                 velocity_limits=None, swept_samples=SWEPT_SAMPLES):
         self.validator = validator
         self.candidates = candidates
         self.num_layers = num_layers
@@ -117,8 +140,14 @@ class LayeredGraph:
         self.swept_samples = swept_samples
 
         self.limits = (validator.robot.qlim[0], validator.robot.qlim[1])
-        self.velocity_limits = np.array(
-            [validator._rail_vel_limit] + [arm_velocity_limit] * 6)
+        # The validator's own limits unless told otherwise: the URDF's
+        # per-joint arm values and the rail's capped value. A uniform arm
+        # figure here once made the graph prune, lift and cost against a
+        # different robot than the tracker it is compared with.
+        self.velocity_limits = (
+            np.asarray(validator.velocity_limits, dtype=float)
+            if velocity_limits is None
+            else np.asarray(velocity_limits, dtype=float))
         self.counters = {
             'pairs_considered': 0,
             'pruned_rail': 0,
@@ -271,6 +300,7 @@ def main(argv=None):
     layers, _ = load_candidates(args.candidates, args.layers,
                                 include_oracle=False)
 
+    reference_cost = None
     if args.build == 'validation':
         records, _ = run_tracking(validator, targets, quaternions, dt,
                                   LEGACY_MATLAB_START_Q)
@@ -286,6 +316,9 @@ def main(argv=None):
         layers = inject_oracle(layers, oracle)
 
     graph = LayeredGraph(validator, layers, args.layers, dt=dt)
+    if args.build == 'validation':
+        reference_cost = path_cost(LEGACY_MATLAB_START_Q, oracle,
+                                   graph.velocity_limits, dt)
     result, first_empty, _ = graph.shortest_path(LEGACY_MATLAB_START_Q)
 
     document = {
@@ -294,6 +327,10 @@ def main(argv=None):
         'build': args.build,
         'layers': args.layers,
         'counters': graph.counters,
+        'velocity_limits': motion_limits.effective_limits(validator),
+        'edge_velocity_limits': graph.velocity_limits.tolist(),
+        'transition_seconds': graph.transition_seconds,
+        'greedy_reference_cost': reference_cost,
         'complete_path': result is not None,
         'first_disconnected_layer': first_empty,
         'path_cost': None if result is None else result[1],
@@ -307,6 +344,8 @@ def main(argv=None):
         print(f'first disconnected layer: {first_empty}')
     else:
         print(f'path cost: {result[1]:.4f} over {len(result[0])} states')
+    if reference_cost is not None:
+        print(f'greedy tracker cost, same function: {reference_cost:.4f}')
     for name, value in graph.counters.items():
         print(f'  {name:26s} {value}')
     return 0

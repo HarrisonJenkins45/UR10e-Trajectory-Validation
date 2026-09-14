@@ -48,7 +48,7 @@ import sys
 
 import numpy as np
 
-from ur10e_trajectory_pkg import environment
+from ur10e_trajectory_pkg import environment, motion_limits
 from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q, NUM_JOINTS
 from ur10e_trajectory_pkg.pose_metrics import (
     IK_ORIENTATION_TOL_RAD,
@@ -59,7 +59,6 @@ from ur10e_trajectory_pkg.pose_metrics import (
 from ur10e_trajectory_pkg.validation_core import (
     IK_SEARCH_LIMIT,
     IK_SOLVER_TOL,
-    RAIL_VEL_SAFETY_CAP,
     TrajectoryValidator,
 )
 
@@ -80,7 +79,8 @@ from ur10e_trajectory_pkg.validation_core import (
 #    production acceptance INCLUDING the forward-kinematics pose check.
 #    Version 1 artifacts stay interpretable because they retained raw pose
 #    errors, so the new flags can be recomputed from them.
-SCHEMA_VERSION = 3
+# 4: the manifest records effective per-joint velocity limits.
+SCHEMA_VERSION = 4
 
 # Fixed and explicit, so the bank is part of the record rather than a detail
 # of whoever ran it. These are diagnostic probes for whether a viable branch
@@ -170,9 +170,9 @@ def manifest(args, validator, trajectory_metadata, modes, dt):
         },
         'gate_thresholds': {
             'condition_number': 50.0,
-            'arm_velocity_rad_s': 2.0,
-            'rail_velocity_m_s': validator._rail_vel_limit,
-            'rail_velocity_safety_cap_m_s': RAIL_VEL_SAFETY_CAP,
+            # What the validator ENFORCED, per joint, beside the raw URDF
+            # values and the rail cap. This once recorded a typed 2.0 rad/s.
+            'velocity_limits': motion_limits.effective_limits(validator),
             'rail_position_limits_m': list(validator._rail_limits),
             'pose_position_m': IK_POSITION_TOL_M,
             'pose_orientation_rad': IK_ORIENTATION_TOL_RAD,
@@ -205,7 +205,11 @@ def _validator(urdf_path, mesh_path, skip_gate=None, solver_tol=None):
 
 def _thresholds(skip_gate):
     """Gate thresholds, with one relaxed to effectively off."""
-    values = dict(condition_number_threshold=50.0, max_joint_vel_threshold=2.0)
+    # None defers to the validator, which resolves it to the URDF's per-joint
+    # arm limits. A literal here once forced 2.0 rad/s into every offline tool
+    # built on run_tracking -- the census, candidate generation, the graph
+    # oracle and the tolerance sweep -- while the service used the URDF.
+    values = dict(condition_number_threshold=50.0, max_joint_vel_threshold=None)
     if skip_gate == 'singular':
         values['condition_number_threshold'] = float('inf')
     if skip_gate == 'arm_velocity':

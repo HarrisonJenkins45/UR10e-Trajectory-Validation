@@ -31,7 +31,13 @@ What is actually known:
   rail, all         ASSUMED. The URDF's 5 m/s carries a TODO and the README
                     marks its acceleration figures as uncertain. Nothing about
                     the rail is trustworthy until the drive, gearing, carriage
-                    load and vendor limits are obtained.
+                    load and vendor limits are obtained. Its velocity is
+                    commanded at RAIL_VEL_SAFETY_CAP, a deliberate derate.
+
+A number in a table is not the number the code uses. effective_limits()
+records what a validator ACTUALLY enforces, next to the raw URDF values and
+the cap they were clamped by, and every artifact records that rather than
+this module's reference tables.
 
 Certification needs a chosen UR execution controller and payload
 configuration, and the rail's actual hardware data. Until then peak
@@ -44,6 +50,30 @@ from ur10e_trajectory_pkg.configurations import JOINT_NAMES
 CERTIFIED = 'certified'
 PROVISIONAL = 'provisional'
 ASSUMED = 'assumed'
+# A limit whose operative source was not checked. Worse than assumed for
+# certification purposes: an assumption is at least a stated value.
+UNVERIFIED = 'unverified'
+
+# Worst last. certification_status reports the WORST status in a group, and
+# ordering by an explicit severity is what stops min() over a boolean key from
+# returning the best one instead.
+_SEVERITY = {CERTIFIED: 0, PROVISIONAL: 1, ASSUMED: 2, UNVERIFIED: 3}
+
+
+def worst_status(statuses):
+    return max(statuses, key=_SEVERITY.__getitem__)
+
+
+# Deliberate safety derate on the rail, NOT the rig's capability. The hardware
+# ceiling is read from the URDF and the validator enforces the LOWER of the
+# two, so this can only ever be more conservative than the rail. Raise the
+# rig's real limit by editing the URDF's <limit velocity="..."> on
+# linear_rail_joint; raise what we are willing to command by editing this.
+# As of writing the URDF says 5.0 m/s.
+#
+# Defined here, the one module that owns limits, and imported by the
+# validator, so the cap and the Limit describing it cannot disagree.
+RAIL_VEL_SAFETY_CAP = 1.0  # m/s
 
 
 class Limit:
@@ -89,7 +119,7 @@ ARM_VELOCITY = {
 ARM_ACCELERATION = Limit(np.deg2rad(800.0), 'rad/s^2', PROVISIONAL, _UR_DEPLOYMENT)
 ARM_JERK = Limit(500.0, 'rad/s^3', ASSUMED, _NO_PUBLIC_JERK)
 
-RAIL_VELOCITY = Limit(1.0, 'm/s', PROVISIONAL,
+RAIL_VELOCITY = Limit(RAIL_VEL_SAFETY_CAP, 'm/s', PROVISIONAL,
                       'RAIL_VEL_SAFETY_CAP, a deliberate derate below the '
                       'URDF value rather than a measured capability')
 RAIL_ACCELERATION = Limit(5.0, 'm/s^2', ASSUMED, _RAIL_UNKNOWN)
@@ -124,12 +154,33 @@ def jerk_vector():
     return np.array([RAIL_JERK.value] + [ARM_JERK.value] * 6)
 
 
-def certification_status():
+def urdf_agrees_with_published(validator, rel=1e-9):
+    """Per arm joint, whether the URDF still carries the published value."""
+    from_urdf = validator.velocity_limits
+    return {
+        name: bool(abs(from_urdf[index] - ARM_VELOCITY[name].value)
+                   <= rel * ARM_VELOCITY[name].value)
+        for index, name in enumerate(JOINT_NAMES[1:], start=1)
+    }
+
+
+def _arm_velocity_status(validator):
+    """Certified only if the value actually enforced was checked.
+
+    Without a validator nothing has been read, so the published table's
+    status would describe a number the code does not use.
+    """
+    if validator is None:
+        return UNVERIFIED
+    agreement = urdf_agrees_with_published(validator)
+    return (worst_status(ARM_VELOCITY[n].status for n in JOINT_NAMES[1:])
+            if all(agreement.values()) else ASSUMED)
+
+
+def certification_status(validator=None):
     """What may and may not be certified with what is currently known."""
     entries = {
-        'arm_velocity': min((ARM_VELOCITY[n].status for n in JOINT_NAMES[1:]),
-                            key=lambda s: (s != CERTIFIED)),
-        'urdf_arm_velocity': CERTIFIED,
+        'arm_velocity': _arm_velocity_status(validator),
         'arm_acceleration': ARM_ACCELERATION.status,
         'arm_jerk': ARM_JERK.status,
         'rail_velocity': RAIL_VELOCITY.status,
@@ -144,26 +195,79 @@ def certification_status():
     }
 
 
-def may_certify_for_hardware():
-    """False while any limit is provisional or assumed.
+def may_certify_for_hardware(validator=None):
+    """False while any limit is provisional, assumed or unverified.
 
     Deliberately a function rather than a comment. A selection made under
     provisional limits is provisional, and this is what a caller checks
     instead of remembering.
     """
-    return certification_status()['all_certified']
+    return certification_status(validator)['all_certified']
 
 
-def manifest():
-    """Every limit with its provenance, for an artifact to record."""
+def effective_limits(validator):
+    """The limits a validator ACTUALLY enforces, with where each came from.
+
+    What an artifact must record. The reference tables above say what the
+    limits should be; this says what the code used, which is the only thing a
+    result can be interpreted against. Recording the typed table instead is
+    how a manifest came to report 2.0 rad/s for a run that used the URDF.
+    """
+    urdf = validator.urdf_velocity_limits
+    agreement = urdf_agrees_with_published(validator)
+    velocity = validator.velocity_limits
+    joints = []
+    for index, name in enumerate(JOINT_NAMES):
+        if index == 0:
+            joints.append({
+                'joint': name, 'units': 'm/s',
+                'effective': float(velocity[0]),
+                'urdf': urdf[0],
+                'safety_cap': RAIL_VEL_SAFETY_CAP,
+                'source': 'min(URDF <limit velocity>, RAIL_VEL_SAFETY_CAP)',
+                'status': RAIL_VELOCITY.status,
+            })
+        else:
+            joints.append({
+                'joint': name, 'units': 'rad/s',
+                'effective': float(velocity[index]),
+                'urdf': urdf[index],
+                'published_reference': ARM_VELOCITY[name].value,
+                'agrees_with_published': agreement[name],
+                'source': 'URDF <limit velocity>, unclamped',
+                'status': (ARM_VELOCITY[name].status if agreement[name]
+                           else ASSUMED),
+            })
     return {
-        'arm_velocity': {name: ARM_VELOCITY[name].as_dict()
-                         for name in JOINT_NAMES[1:]},
+        'joint_names': list(validator.joint_names),
+        'velocity': joints,
+        'velocity_vector': velocity.tolist(),
+        'acceleration_vector': acceleration_vector().tolist(),
+        'acceleration': {'rail': RAIL_ACCELERATION.as_dict(),
+                         'arm': ARM_ACCELERATION.as_dict()},
+        'jerk_vector': jerk_vector().tolist(),
+        'jerk': {'rail': RAIL_JERK.as_dict(), 'arm': ARM_JERK.as_dict()},
+        'certification': certification_status(validator),
+    }
+
+
+def manifest(validator=None):
+    """Every limit with its provenance, for an artifact to record.
+
+    Pass the validator that produced the result. Without it only the
+    reference tables can be recorded, and the entry says so.
+    """
+    document = {
+        'arm_velocity_reference': {name: ARM_VELOCITY[name].as_dict()
+                                   for name in JOINT_NAMES[1:]},
         'retired_uniform_cap': RETIRED_UNIFORM_CAP.as_dict(),
         'arm_acceleration': ARM_ACCELERATION.as_dict(),
         'arm_jerk': ARM_JERK.as_dict(),
         'rail_velocity': RAIL_VELOCITY.as_dict(),
         'rail_acceleration': RAIL_ACCELERATION.as_dict(),
         'rail_jerk': RAIL_JERK.as_dict(),
-        'certification': certification_status(),
+        'certification': certification_status(validator),
+        'effective': (None if validator is None
+                      else effective_limits(validator)),
     }
+    return document

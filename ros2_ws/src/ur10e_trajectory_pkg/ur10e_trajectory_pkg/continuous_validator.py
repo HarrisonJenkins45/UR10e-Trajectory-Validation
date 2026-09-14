@@ -30,18 +30,27 @@ hide that.
 Nothing here is a graph cost. A trajectory that passes the graph and fails
 this is a real finding about the discrete model, which is the point.
 
-First full measurement on the graph path, with the corrected world-frame task
-twist, split at the approach boundary:
+Measurement on the graph path, world-frame task twist, split at the approach
+boundary with the boundary knot in the trajectory. Reproduce with
+python3 -m ur10e_trajectory_pkg.continuous_validator --graph <graph.json>
+(200 Hz, every 5th sample):
 
-    interval      twist   min alpha*  unsolved  max cond   at t
-    approach      fail        0.000          0       inf   0.00
-    trajectory    pass        1.277          0      10.4  51.90
+    interval     limits           twist  min alpha*  at t    unsolved  max cond
+    approach     either           fail       0.000    0.00         0       inf
+    trajectory   URDF per-joint   pass      31.49     3.075        0      10.4
+    trajectory   retired 2.0 cap  pass      20.48     2.025        0      10.4
 
-The trajectory passes: every LP solved and the minimum scaling is above 1.
-The margin is 1.277, not the 15.7 reported before the twist was corrected --
-that figure came from a twist derived from the joint velocity being
-evaluated, which was producible by construction. The real task demands
-roughly 78% of what the arm can deliver at the tightest point.
+The trajectory's twist demand is small next to what the arm can deliver: at
+its tightest sample it could be scaled about 31 times before a joint limit
+binds. Its angular demand peaks near 0.08 rad/s.
+
+CORRECTION. Earlier revisions recorded 1.277, and 1.897 under URDF limits,
+read as "the task demands 78% of the arm's authority". Both were a single
+sample exactly ON the t = 2.0 s knot scored against the APPROACH twist
+(0.58 m/s, 1.21 rad/s), because the interval lookup assigned a knot to the
+interval ending there. segment_index now uses half-open intervals, and the
+report names the time and interval of the binding sample so a misassignment
+is visible.
 
 The approach fails for a real reason rather than a numerical one: zero
 unsolved LPs, and an alpha* of exactly 0 at the singular start, where the
@@ -52,6 +61,7 @@ from scipy.interpolate import PchipInterpolator
 from scipy.optimize import linprog
 from scipy.spatial.transform import Rotation, Slerp
 
+from ur10e_trajectory_pkg import motion_limits
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, JOINT_NAMES
 from ur10e_trajectory_pkg.pose_metrics import (
     IK_ORIENTATION_TOL_RAD,
@@ -67,13 +77,10 @@ EE_LINK = 'tool0'
 # BETWEEN waypoints, so the check has to look there.
 CONTROLLER_HZ = 500.0
 
-# Limits beyond the first-order ones the graph enforces. Declared here because
-# nothing upstream has ever bounded them, so these are starting values to be
-# measured against rather than inherited numbers.
-ARM_ACCELERATION_LIMIT_RAD_S2 = 15.0
-ARM_JERK_LIMIT_RAD_S3 = 500.0
-RAIL_ACCELERATION_LIMIT_M_S2 = 5.0
-RAIL_JERK_LIMIT_M_S3 = 100.0
+# Acceleration and jerk limits come from motion_limits, with their provenance.
+# A second table here once said 15 rad/s^2 while motion_limits said 800 deg/s^2
+# (13.96), so Stage 7 timed approaches against one figure and this module
+# validated against another.
 
 # Sample counts for the collision convergence test. A single fixed count
 # cannot distinguish "no collision" from "not sampled finely enough".
@@ -106,11 +113,13 @@ def derivative_extremes(interpolator, dense_times):
     }
 
 
-def limit_violations(extremes, velocity_limits):
+def limit_violations(extremes, velocity_limits, acceleration_limits=None,
+                     jerk_limits=None):
     """Per joint, which of the four limits the interpolant exceeds."""
-    acceleration_limits = np.array(
-        [RAIL_ACCELERATION_LIMIT_M_S2] + [ARM_ACCELERATION_LIMIT_RAD_S2] * 6)
-    jerk_limits = np.array([RAIL_JERK_LIMIT_M_S3] + [ARM_JERK_LIMIT_RAD_S3] * 6)
+    if acceleration_limits is None:
+        acceleration_limits = motion_limits.acceleration_vector()
+    if jerk_limits is None:
+        jerk_limits = motion_limits.jerk_vector()
 
     out = {}
     for index, name in enumerate(JOINT_NAMES):
@@ -173,6 +182,19 @@ def collision_convergence(validator, interpolator, times,
     }
 
 
+def segment_index(times, instant):
+    """The waypoint interval [t_i, t_i+1) containing an instant.
+
+    Half-open, so a sample exactly ON a knot belongs to the interval that
+    STARTS there. searchsorted's default left side assigns it to the interval
+    that ends there instead, and at the approach boundary that scored the
+    first trajectory sample against the approach's twist.
+    """
+    times = np.asarray(times, dtype=float)
+    return int(np.clip(np.searchsorted(times, instant, side='right') - 1,
+                       0, len(times) - 2))
+
+
 def desired_pose_at(times, positions, quaternions, instant):
     """Desired pose between waypoints, interpolated on SE(3).
 
@@ -181,7 +203,7 @@ def desired_pose_at(times, positions, quaternions, instant):
     the task never asked for.
     """
     times = np.asarray(times, dtype=float)
-    index = int(np.clip(np.searchsorted(times, instant) - 1, 0, len(times) - 2))
+    index = segment_index(times, instant)
     span = times[index + 1] - times[index]
     fraction = 0.0 if span <= 0 else (instant - times[index]) / span
 
@@ -331,6 +353,8 @@ def conditioning_and_twist(validator, interpolator, dense_times,
     """
     conditions = np.empty(len(dense_times))
     alphas = []
+    alpha_times = []
+    alpha_segments = []
     unsolved = 0
     for index, instant in enumerate(dense_times):
         configuration = interpolator(instant)
@@ -340,13 +364,15 @@ def conditioning_and_twist(validator, interpolator, dense_times,
                              else np.inf)
         if task_twists is None:
             continue
-        segment = int(np.clip(np.searchsorted(waypoint_times, instant) - 1,
-                              0, len(task_twists) - 1))
+        segment = min(segment_index(waypoint_times, instant),
+                      len(task_twists) - 1)
         result = twist_alpha_star(
             validator.compute_system_jacobian(configuration),
             task_twists[segment], velocity_limits)
         if result['solved'] and result['alpha'] is not None:
             alphas.append(result['alpha'])
+            alpha_times.append(float(instant))
+            alpha_segments.append(segment)
         else:
             unsolved += 1
 
@@ -380,6 +406,13 @@ def conditioning_and_twist(validator, interpolator, dense_times,
     else:
         report['min_alpha_star'] = float(min(alphas))
         report['twist_status'] = 'pass' if min(alphas) >= 1.0 else 'fail'
+    # Where the binding sample is, and which task interval it was scored
+    # against. A minimum sitting on a knot, scored against the wrong
+    # interval, is exactly what these would have exposed.
+    if alphas:
+        worst_alpha = int(np.argmin(alphas))
+        report['min_alpha_star_at_time_s'] = alpha_times[worst_alpha]
+        report['min_alpha_star_segment'] = alpha_segments[worst_alpha]
     report['twist_feasible'] = (report['twist_status'] == 'pass'
                                 if report['twist_status'] in ('pass', 'fail')
                                 else None)
@@ -407,9 +440,15 @@ def command_stream_derivatives(dense_times, dense_path):
 
 
 def validate(validator, path, waypoint_times, positions, quaternions,
-             velocity_limits, rate_hz=CONTROLLER_HZ, condition_threshold=50.0,
-             recovery_mode=False):
-    """Full continuous check of one command trajectory."""
+             velocity_limits=None, rate_hz=CONTROLLER_HZ,
+             condition_threshold=50.0, recovery_mode=False):
+    """Full continuous check of one command trajectory.
+
+    velocity_limits defaults to what the validator enforces: the URDF's
+    per-joint arm values and the rail's capped value.
+    """
+    if velocity_limits is None:
+        velocity_limits = validator.velocity_limits
     dense_times, interpolator, dense_path = interpolate(
         path, waypoint_times, rate_hz)
 
@@ -463,3 +502,96 @@ def validate(validator, path, waypoint_times, positions, quaternions,
         and conditioning['twist_status'] in ('pass', 'not_applicable')
     )
     return report
+
+
+# --------------------------------------------------------------------------
+# Committed measurement, so recorded figures can be reproduced
+# --------------------------------------------------------------------------
+
+def graph_path_twist_margins(validator, path, waypoint_times, positions,
+                             quaternions, velocity_limits, rate_hz, stride,
+                             boundary_s):
+    """alpha* and conditioning on each side of the approach boundary.
+
+    The approach is [0, boundary) and the trajectory [boundary, end), with the
+    boundary knot itself belonging to the trajectory: segment_index assigns it
+    to the interval it starts.
+    """
+    dense_times, interpolator, _ = interpolate(path, waypoint_times, rate_hz)
+    twists = [task_twist(waypoint_times, positions, quaternions, i,
+                         waypoint_times[i + 1] - waypoint_times[i])
+              for i in range(len(waypoint_times) - 1)]
+    out = {}
+    for label, selected in (
+            ('approach', dense_times[dense_times < boundary_s]),
+            ('trajectory', dense_times[dense_times >= boundary_s])):
+        out[label] = conditioning_and_twist(
+            validator, interpolator, selected[::stride], velocity_limits,
+            task_twists=twists, waypoint_times=waypoint_times)
+    return out
+
+
+def main(argv=None):
+    import argparse
+    import json
+
+    from ament_index_python.packages import get_package_share_directory
+
+    from ur10e_trajectory_pkg.failure_census import _validator, load_trajectory
+    from ur10e_trajectory_pkg.graph_planner import TRANSITION_SECONDS
+
+    parser = argparse.ArgumentParser(
+        description='Twist margin and conditioning along a graph path, split '
+                    'at the approach boundary.')
+    parser.add_argument('--graph', required=True,
+                        help='graph_planner output containing a path')
+    parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
+    parser.add_argument('--rate', type=float, default=200.0)
+    parser.add_argument('--stride', type=int, default=5)
+    parser.add_argument('--limits', choices=['urdf', 'retired_uniform_cap'],
+                        default='urdf')
+    parser.add_argument('--out', default=None)
+    args = parser.parse_args(argv)
+
+    validator = _validator(args.urdf, get_package_share_directory('ur_description'))
+    with open(args.graph, encoding='utf-8') as handle:
+        path = np.asarray(json.load(handle)['path'], dtype=float)
+    layers = len(path) - 1
+    targets, quaternions, dt, _ = load_trajectory(None, layers, with_metadata=True)
+
+    start = validator.robot.fkine(path[0], end=EE_LINK)
+    positions = np.vstack([start.t, targets])
+    quaternions = np.vstack([np.roll(np.array(start.UnitQuaternion().A), -1),
+                             quaternions])
+    times = np.concatenate(([0.0], TRANSITION_SECONDS + np.arange(layers) * dt))
+
+    if args.limits == 'urdf':
+        limits = validator.velocity_limits
+    else:
+        limits = np.concatenate((
+            [validator.velocity_limits[0]],
+            [motion_limits.RETIRED_UNIFORM_CAP.value] * 6))
+
+    report = graph_path_twist_margins(validator, path, times, positions,
+                                      quaternions, limits, args.rate,
+                                      args.stride, TRANSITION_SECONDS)
+    document = {'limits': args.limits, 'velocity_limits': limits.tolist(),
+                'rate_hz': args.rate, 'stride': args.stride,
+                'intervals': report}
+    for label, entry in report.items():
+        print(f"{label:10s} twist={entry['twist_status']:13s} "
+              f"min_alpha*={entry['min_alpha_star']} "
+              f"at t={entry.get('min_alpha_star_at_time_s')} "
+              f"segment={entry.get('min_alpha_star_segment')} "
+              f"unsolved={entry['twist_unsolved_samples']} "
+              f"max_cond={entry['max_condition_number']:.1f} "
+              f"at t={entry['max_condition_at_time_s']:.2f}")
+    if args.out:
+        with open(args.out, 'w', encoding='utf-8') as handle:
+            json.dump(document, handle, indent=1)
+    return 0
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())
