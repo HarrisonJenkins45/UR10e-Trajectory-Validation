@@ -65,6 +65,35 @@ def make_transform(rotation=None, translation=None):
     return matrix
 
 
+def validate_transform(transform, name='transform'):
+    """Reject anything that is not a finite member of SE(3).
+
+    Shape alone is not enough. A calibration with a scaled, skewed or
+    reflected rotation block still multiplies cleanly and produces targets
+    that look plausible, so the error surfaces as a trajectory that misses
+    rather than as an exception. Checks orthonormality, a determinant of +1
+    which rules out reflections, and the homogeneous bottom row.
+    """
+    matrix = np.asarray(transform, dtype=float)
+    if matrix.shape != (4, 4):
+        raise ValueError(f'{name} must be 4x4, got shape {matrix.shape}')
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f'{name} contains non-finite values')
+
+    rotation = matrix[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-8):
+        raise ValueError(f'{name} rotation block is not orthonormal')
+    determinant = float(np.linalg.det(rotation))
+    if not np.isclose(determinant, 1.0, atol=1e-8):
+        raise ValueError(
+            f'{name} rotation has determinant {determinant:.6f}, expected +1; '
+            'a value near -1 is a reflection, not a rotation'
+        )
+    if not np.allclose(matrix[3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-12):
+        raise ValueError(f'{name} bottom row is not [0, 0, 0, 1]')
+    return matrix
+
+
 def invert(transform):
     """Inverse of a homogeneous transform, without a general matrix inverse.
 
@@ -166,6 +195,7 @@ def arena_to_rail_base(poses_IG, calibration_IR):
             'calibration must be one static 4x4 arena-to-rail-base transform, '
             f'got shape {calibration_IR.shape}; the rail base does not move'
         )
+    validate_transform(calibration_IR, 'calibration')
     rail_from_arena = invert(calibration_IR)
     return np.stack([rail_from_arena @ pose
                      for pose in np.asarray(poses_IG, dtype=float)])

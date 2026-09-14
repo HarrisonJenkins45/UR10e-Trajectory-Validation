@@ -126,17 +126,13 @@ def test_failed_solves_are_recorded_not_dropped(validator, trajectory):
     assert records
     assert all(record['position_error_m'] is not None for record in records)
 
-    # The pipeline ACCEPTS some of these: the acceptance gate checks the
-    # solver's success flag but never that forward kinematics reproduces the
-    # commanded pose, and that flag measures convergence of the local search
-    # rather than distance to target. This is the stage 2b gap, and it is
-    # exactly the contamination the census exists to quantify.
-    accepted = [record for record in records if record['accepted']]
-    assert accepted, 'expected the acceptance gap to show on an unreachable target'
-    assert all(record['position_error_m'] > 1.0 for record in accepted)
-
-    # viable() applies the check the pipeline is missing, so the census does
-    # not inherit the same blind spot.
+    # These used to be ACCEPTED. The solver reports success from a local
+    # minimum metres away, because its flag measures convergence of the local
+    # search rather than distance to target, and acceptance checked only that
+    # flag. The stage 2b pose gate closes it.
+    assert not any(record['accepted'] for record in records)
+    assert all(record['gate_pose_position'] for record in records)
+    assert all(record['position_error_m'] > 1.0 for record in records)
     assert not any(failure_census.viable(record) for record in records)
 
 
@@ -192,6 +188,8 @@ def _record(**overrides):
         gate_solver_failed=False,
         position_error_m=0.0,
         orientation_error_rad=0.0,
+        gate_pose_position=False,
+        gate_pose_orientation=False,
         gate_singular=False,
         gate_arm_velocity=None,
         gate_rail_velocity=None,
@@ -206,8 +204,10 @@ def test_viable_requires_both_pose_errors_and_all_gates():
 
 
 @pytest.mark.parametrize('overrides', [
-    {'position_error_m': PROVISIONAL_POSITION_TOL_M * 10},
-    {'orientation_error_rad': PROVISIONAL_ORIENTATION_TOL_RAD * 10},
+    {'position_error_m': PROVISIONAL_POSITION_TOL_M * 10,
+     'gate_pose_position': True},
+    {'orientation_error_rad': PROVISIONAL_ORIENTATION_TOL_RAD * 10,
+     'gate_pose_orientation': True},
     {'gate_singular': True},
     {'gate_collision': True},
     {'gate_arm_velocity': True},
@@ -229,7 +229,8 @@ def test_any_single_failure_makes_a_record_non_viable(overrides):
 def test_good_conditioning_with_a_missed_target_is_not_viable():
     """The specific shape of the earlier overclaim, pinned."""
     assert not failure_census.viable(
-        _record(gate_singular=False, position_error_m=0.0075)
+        _record(gate_singular=False, position_error_m=0.0075,
+                gate_pose_position=True)
     )
 
 

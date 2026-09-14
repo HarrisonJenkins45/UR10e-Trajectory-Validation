@@ -134,18 +134,15 @@ def test_reported_success_does_not_mean_the_target_was_reached(validator,
     assert solution.residual < 1e-3
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='Known defect: _solve_waypoint_with_recovery.evaluate() gates on '
-           'sol.success alone and never checks that forward kinematics '
-           'reproduces the commanded pose, so a local minimum metres from '
-           'the target can be accepted. Belongs with stage 5, whose gate is '
-           'that every accepted solution independently reproduces its target.',
-)
 def test_recovery_rejects_solutions_that_do_not_reach_the_target(validator,
                                                                  nominal_pose):
     """A configuration that does not reach the commanded pose is not a
-    solution, whatever the solver reports."""
+    solution, whatever the solver reports.
+
+    Was a strict xfail until the stage 2b pose gate landed: acceptance used to
+    check only the solver's success flag, which measures convergence of its
+    local search rather than distance to target.
+    """
     position, quaternion = nominal_pose
     target = np.array([UNREACHABLE_X, position[1], position[2]])
     validator.reset_rng()
@@ -157,7 +154,7 @@ def test_recovery_rejects_solutions_that_do_not_reach_the_target(validator,
         reached = validator.robot.fkine(result['q_full'], end='tool0').t
         assert np.linalg.norm(reached - target) < 1e-3
     else:
-        assert 'reach' in (result['reason'] or '').lower()
+        assert 'POSE_MISMATCH' in (result['reason'] or '')
 
 
 def test_waypoint_recovery_is_reproducible(validator, nominal_pose):

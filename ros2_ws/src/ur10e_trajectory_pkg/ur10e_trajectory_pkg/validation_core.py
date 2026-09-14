@@ -12,7 +12,11 @@ from spatialmath import SE3, UnitQuaternion
 from spatialgeometry import Cuboid
 
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, NUM_JOINTS
-from ur10e_trajectory_pkg.pose_metrics import pose_error
+from ur10e_trajectory_pkg.pose_metrics import (
+    PROVISIONAL_ORIENTATION_TOL_RAD,
+    PROVISIONAL_POSITION_TOL_M,
+    pose_error,
+)
 from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 
@@ -80,6 +84,66 @@ IK_SEARCH_LIMIT = 1
 # distribution. Acceptance must still check position and orientation errors
 # explicitly: this is a scalar on a weighted sum, not a bound on either.
 IK_SOLVER_TOL = 5e-7
+
+# Acceptance limits on the REACHED pose, checked explicitly rather than being
+# inferred from IK_SOLVER_TOL, which bounds a weighted sum of both errors
+# rather than either one.
+IK_POSITION_TOL_M = PROVISIONAL_POSITION_TOL_M
+IK_ORIENTATION_TOL_RAD = PROVISIONAL_ORIENTATION_TOL_RAD
+
+# Independent failure flags. Never collapsed: a configuration can miss its
+# target AND collide, and knowing both is the difference between "the
+# requested pose collides" and "somewhere else collides".
+FAILURE_FLAGS = (
+    'solver_failed',
+    'pose_position_failed',
+    'pose_orientation_failed',
+    'collision',
+    'singular',
+    'arm_velocity_failed',
+    'rail_velocity_failed',
+)
+
+# Order for the PRIMARY reason only; every set flag is reported.
+#
+# Pose mismatch outranks collision, singularity and velocity because those
+# describe a configuration that is not a solution to the commanded target at
+# all. Saying a trajectory is singular, when the configuration measured was
+# metres from where it was asked to be, describes the wrong thing.
+FAILURE_PRECEDENCE = (
+    'solver_failed',
+    'pose_position_failed',
+    'pose_orientation_failed',
+    'collision',
+    'singular',
+    'arm_velocity_failed',
+    'rail_velocity_failed',
+)
+
+
+def format_failure(flags, details, suffix=''):
+    """Render set flags as a human string.
+
+    A formatter over the flags, deliberately not an if/elif classifier: the
+    old one returned the first matching condition and discarded the rest, so
+    simultaneous failures were invisible.
+    """
+    set_flags = [name for name in FAILURE_PRECEDENCE if flags.get(name)]
+    if not set_flags:
+        return f'Unknown failure{suffix}'
+
+    primary = set_flags[0]
+    if primary in ('pose_position_failed', 'pose_orientation_failed'):
+        headline = f'POSE_MISMATCH: {details.get("pose", "")}'
+        others = [f for f in set_flags
+                  if f not in ('pose_position_failed', 'pose_orientation_failed')]
+    else:
+        headline = details.get(primary, primary)
+        others = set_flags[1:]
+
+    if others:
+        headline += f' Also failed: {", ".join(others)}.'
+    return headline + suffix
 
 class TrajectoryValidator:
     def __init__(self, urdf_path, mesh_base_path=None, framerate=30,
@@ -420,21 +484,52 @@ class TrajectoryValidator:
         """
         return self.compute_system_jacobian(q_full)[:, ARM_SLICE]
 
-    def _failure_reason(self, sol, res, condition_number_threshold,max_rail_vel_threshold,
-                         max_joint_vel_threshold, rail_fallback_exhausted):
-        suffix = ' (rail-assisted recovery also exhausted)' if rail_fallback_exhausted else ''
+    def _failure_reason(self, sol, res, condition_number_threshold,
+                        max_rail_vel_threshold, max_joint_vel_threshold,
+                        rail_fallback_exhausted):
+        """Human string built from the flags, preserving every failure.
+
+        The previous version was an if/elif chain returning the first match,
+        so a configuration that both missed its target and collided was
+        reported as one or the other. It also had no pose class at all.
+        """
+        suffix = (' (rail-assisted recovery also exhausted)'
+                  if rail_fallback_exhausted else '')
         if res is None:
-            return f'IK did not converge (reason={sol.reason}){suffix}'
-        if res['low_cond']:
-            return f"Singularity: condition number {res['cond_num']:.2f} > {condition_number_threshold}{suffix}"
-        if res['jump']:
-            bad_arm = np.where(res['joint_vel'][1:] > max_joint_vel_threshold)[0].tolist()
-            rail_bad = res['joint_vel'][0] > max_rail_vel_threshold
-            return (f"Joint/Rail velocity exceeded limits: Rail exceeded={rail_bad} "
-            f"(vel={res['joint_vel'][0]:.3f} m/s), Arm indices={bad_arm}{suffix}")
-        if res['collide']:
-            return f"Collision: q={np.round(res['q_full'], 3)}{suffix}"
-        return f'Unknown failure{suffix}'
+            return format_failure(
+                {'solver_failed': True},
+                {'solver_failed': f'IK did not converge (reason={sol.reason}).'},
+                suffix)
+
+        bad_arm = np.where(
+            res['joint_vel'][1:] > max_joint_vel_threshold)[0].tolist()
+        details = {
+            'pose': (
+                f"position {res['position_error_m']:.6f} m "
+                f"{'>' if res['flags']['pose_position_failed'] else '<='} "
+                f"{IK_POSITION_TOL_M:.6f} m; orientation "
+                f"{np.rad2deg(res['orientation_error_rad']):.4f} deg "
+                f"{'>' if res['flags']['pose_orientation_failed'] else '<='} "
+                f"{np.rad2deg(IK_ORIENTATION_TOL_RAD):.4f} deg."
+            ),
+            'collision': (
+                'Collision at reached target configuration: '
+                f"q={np.round(res['q_full'], 3)}."
+            ),
+            'singular': (
+                f"Singularity: condition number {res['cond_num']:.2f} > "
+                f'{condition_number_threshold}.'
+            ),
+            'arm_velocity_failed': (
+                f'Arm velocity exceeded {max_joint_vel_threshold} rad/s at '
+                f'joint indices {bad_arm}.'
+            ),
+            'rail_velocity_failed': (
+                f"Rail velocity {res['joint_vel'][0]:.3f} m/s exceeded "
+                f'{max_rail_vel_threshold} m/s.'
+            ),
+        }
+        return format_failure(res['flags'], details, suffix)
 
     def _solve_waypoint_with_recovery(self, target_pos, target_quat, seed_arm, rail_pos, prev_rail=None,
                                        prev_arm=None, check_jump=False,
@@ -468,6 +563,18 @@ class TrajectoryValidator:
             if not sol.success:
                 return None
             q_full = np.concatenate(([rail], q_arm))
+
+            # Does this configuration actually reach the commanded pose?
+            # ikine_LM's success flag measures convergence of its local
+            # search, not distance to target, so it reports success from a
+            # local minimum metres away. Checked first because a
+            # configuration that misses its target is not a solution, whatever
+            # else is true of it.
+            position_err, orientation_err = pose_error(
+                self.robot.fkine(q_full, end=EE_LINK), target_pos, target_quat)
+            pose_position_failed = position_err > IK_POSITION_TOL_M
+            pose_orientation_failed = orientation_err > IK_ORIENTATION_TOL_RAD
+
             J = self.compute_arm_jacobian(q_full)
             singular_values = np.linalg.svd(J, compute_uv=False)
             cond_num = (singular_values[0] / singular_values[-1]
@@ -490,19 +597,34 @@ class TrajectoryValidator:
                     rail_jump = False
 
                 jump = arm_jump or rail_jump
-                
+
                 # Concatenate joint velocities for reporting: [rail_vel, arm_vel...]
                 joint_vel = np.concatenate(([rail_vel if prev_rail is not None else 0.0], arm_vel))
             else:
                 joint_vel = np.zeros(7)
-                jump = False
+                jump = arm_jump = rail_jump = False
 
             if len(q_full) != 7:
                 raise ValueError(f"Expected q_full length 7, got {len(q_full)}")
                 
             collide = self.check_all_collisions(q_full, verbose=verbose)
+            flags = {
+                'solver_failed': False,
+                'pose_position_failed': bool(pose_position_failed),
+                'pose_orientation_failed': bool(pose_orientation_failed),
+                'collision': bool(collide),
+                'singular': bool(low_cond),
+                'arm_velocity_failed': bool(arm_jump),
+                'rail_velocity_failed': bool(rail_jump),
+            }
             return dict(q_full=q_full, cond_num=cond_num, low_cond=low_cond,
-                        jump=jump, collide=collide, joint_vel=joint_vel)
+                        jump=jump, collide=collide, joint_vel=joint_vel,
+                        position_error_m=position_err,
+                        orientation_error_rad=orientation_err,
+                        pose_failed=bool(pose_position_failed
+                                         or pose_orientation_failed),
+                        flags=flags,
+                        ok=not any(flags.values()))
 
         # True 7DOF rail solve
         search_radius = 0.05
@@ -568,13 +690,18 @@ class TrajectoryValidator:
                 arm_condition_number=cond,
                 arm_singular_values=singular_values,
                 gate_solver_failed=not bool(sol.success),
+                gate_pose_position=(
+                    None if position_err is None
+                    else bool(position_err > IK_POSITION_TOL_M)),
+                gate_pose_orientation=(
+                    None if orientation_err is None
+                    else bool(orientation_err > IK_ORIENTATION_TOL_RAD)),
                 gate_singular=(None if cond is None
                                else bool(cond > condition_number_threshold)),
                 gate_arm_velocity=arm_violation,
                 gate_rail_velocity=rail_violation,
                 gate_collision=(None if res is None else bool(res['collide'])),
-                accepted=bool(res is not None and not (
-                    res['low_cond'] or res['jump'] or res['collide'])),
+                accepted=bool(res is not None and res['ok']),
             ))
 
         for attempt in range(max_rail_attempts + 1):
@@ -584,7 +711,7 @@ class TrajectoryValidator:
             res = evaluate(q_arm, sol, new_rail)
             if recorder is not None:
                 emit(attempt, this_seed, new_rail, q_arm, sol, res)
-            if res is not None and not (res['low_cond'] or res['jump'] or res['collide']):
+            if res is not None and res['ok']:
                 if verbose:
                     print(f'{label}rail-assisted recovery succeeded '
                           f'(rail {rail_pos:.3f} -> {new_rail:.3f})')

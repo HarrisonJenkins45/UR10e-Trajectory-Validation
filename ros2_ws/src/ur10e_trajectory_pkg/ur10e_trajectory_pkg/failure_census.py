@@ -55,7 +55,11 @@ from ur10e_trajectory_pkg.pose_metrics import (
 )
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
-SCHEMA_VERSION = 1
+# 2: adds gate_pose_position and gate_pose_orientation, and `accepted` now
+# means production acceptance INCLUDING the forward-kinematics pose check.
+# Version 1 artifacts stay interpretable because they retained raw pose
+# errors, so the new flags can be recomputed from them.
+SCHEMA_VERSION = 2
 
 # Fixed and explicit, so the bank is part of the record rather than a detail
 # of whoever ran it. These are diagnostic probes for whether a viable branch
@@ -74,6 +78,8 @@ WIDE_SEED_BANK_DEG = (
 
 GATE_KEYS = (
     'gate_solver_failed',
+    'gate_pose_position',
+    'gate_pose_orientation',
     'gate_singular',
     'gate_arm_velocity',
     'gate_rail_velocity',
