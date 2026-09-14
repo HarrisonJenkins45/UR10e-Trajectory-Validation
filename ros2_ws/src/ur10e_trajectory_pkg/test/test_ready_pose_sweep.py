@@ -188,9 +188,16 @@ def test_no_task_candidate_is_not_a_statement_about_the_ready_pose():
     assert sweep.classify([], []) == sweep.NO_TASK_CANDIDATE
 
 
-def test_approach_unconnected_is_a_statement_about_the_ready_pose():
+def test_a_colliding_quintic_only_proves_the_DIRECT_approach_fails():
+    """Named precisely, because it does not prove what the shorter name would.
+
+    A colliding direct quintic says nothing about whether a collision-free
+    approach exists around the obstacle; establishing that needs a planner
+    that searches, which this does not do.
+    """
     assert sweep.classify([object()], [{'feasible': False}]) == \
-        sweep.APPROACH_UNCONNECTED
+        sweep.DIRECT_APPROACH_UNCONNECTED
+    assert 'direct' in sweep.DIRECT_APPROACH_UNCONNECTED
 
 
 def test_connected_requires_only_one_valid_approach():
@@ -205,7 +212,7 @@ def test_connectivity_ignores_placements_with_nothing_to_connect_to():
                        sweep.NO_TASK_CANDIDATE]
     assert sweep.connectivity_score(classifications) == pytest.approx(1.0)
 
-    mixed = [sweep.CONNECTED, sweep.APPROACH_UNCONNECTED,
+    mixed = [sweep.CONNECTED, sweep.DIRECT_APPROACH_UNCONNECTED,
              sweep.NO_TASK_CANDIDATE]
     assert sweep.connectivity_score(mixed) == pytest.approx(0.5)
 
@@ -237,3 +244,113 @@ def test_a_candidate_failing_static_gates_is_not_ranked_at_all():
     records = [{'name': 'unsafe', 'connectivity': 1.0, 'worst_duration_s': 1.0,
                 'worst_peak_jerk': 1.0, 'static_gates': {'passed': False}}]
     assert sweep.rank_ready_poses(records) == []
+
+
+# --------------------------------------------------------------------------
+# The four fixes
+# --------------------------------------------------------------------------
+
+def test_self_collision_is_a_hard_static_gate(validator):
+    """collision_distance sees the environment only, not the arm folded into
+    itself, and a broadly sampled pool is full of such configurations."""
+    folded = np.concatenate(([1.5], np.deg2rad([0.0, 80.0, 0.0, 0.0, 0.0, 0.0])))
+    assert validator.check_all_collisions(folded)
+    gates = sweep.static_gates(validator, folded)
+    assert gates['in_collision'] is True
+    assert gates['passed'] is False
+
+
+def test_approach_collision_resolution_follows_the_move_size(validator, ready):
+    """A fixed stride coarsens silently as moves grow.
+
+    A broadly sampled ready pose can sit most of a joint range from its
+    target, where 40 samples can step straight through an obstacle.
+    """
+    small = np.stack([ready + i * 1e-4 for i in range(400)])
+    large = np.stack([ready + i * 5e-3 for i in range(400)])
+    calls = {'n': 0}
+    original = validator.check_all_collisions
+
+    def counting(q, verbose=False):
+        calls['n'] += 1
+        return original(q, verbose)
+
+    validator.check_all_collisions = counting
+    try:
+        calls['n'] = 0
+        sweep.approach_collides(validator, small)
+        small_calls = calls['n']
+        calls['n'] = 0
+        sweep.approach_collides(validator, large)
+        large_calls = calls['n']
+    finally:
+        validator.check_all_collisions = original
+
+    assert large_calls > small_calls
+
+
+def test_branch_clusters_count_distinct_solutions_not_lifts():
+    """Reaching one candidate is not connectivity; the graph needs
+    alternatives, and two lifts of one configuration are not two."""
+    base = np.concatenate(([1.0], np.deg2rad([0.0, -120.0, 90.0, -80.0, 60.0, 0.0])))
+    lifted = base.copy()
+    lifted[4] += 2 * np.pi
+    other = np.concatenate(([1.0], np.deg2rad([60.0, -90.0, -60.0, 40.0, -70.0, 120.0])))
+
+    assert sweep.branch_clusters([base, lifted]) == 1
+    assert sweep.branch_clusters([base, other]) == 2
+
+
+def test_ranking_puts_branch_connectivity_before_duration():
+    """A single entry branch is fragile however fast it is."""
+    records = [
+        {'name': 'one_branch_fast', 'connectivity': 1.0, 'worst_branch_count': 1,
+         'worst_duration_s': 1.0, 'worst_peak_jerk': 10.0,
+         'static_gates': {'passed': True}},
+        {'name': 'three_branches_slow', 'connectivity': 1.0,
+         'worst_branch_count': 3, 'worst_duration_s': 4.0,
+         'worst_peak_jerk': 80.0, 'static_gates': {'passed': True}},
+    ]
+    assert sweep.rank_ready_poses(records)[0]['name'] == 'three_branches_slow'
+
+
+# --------------------------------------------------------------------------
+# The candidate pool
+# --------------------------------------------------------------------------
+
+def test_sampling_avoids_duplicate_winding_representations(validator):
+    """Sampling the full +/-2*pi range would spend the budget on the same
+    physical posture under different windings.
+
+    The windings that matter depend on the destination, so they are enumerated
+    during approach evaluation instead.
+    """
+    samples = sweep.sample_pool(validator, count=64, seed=0)
+    assert np.all(np.abs(samples[:, 1:]) <= np.pi + 1e-9)
+
+
+def test_sampling_is_deterministic(validator):
+    first = sweep.sample_pool(validator, count=32, seed=0)
+    np.testing.assert_allclose(first, sweep.sample_pool(validator, 32, seed=0))
+
+
+def test_finalists_are_stratified_across_the_rail(validator):
+    """Diversity alone can cluster every finalist at one end of the travel."""
+    rng = np.random.default_rng(0)
+    candidates = np.column_stack([
+        rng.uniform(0.0, 3.0, 400),
+        rng.uniform(-np.pi, np.pi, (400, 6)).reshape(400, 6),
+    ])
+    finalists = sweep.select_finalists(candidates, count=24, strata=6)
+    occupied = np.unique(np.clip((finalists[:, 0] / 3.0 * 6).astype(int), 0, 5))
+    assert len(occupied) >= 5
+
+
+def test_anchors_are_tagged_and_never_replace_broad_finalists():
+    """Controls, kept visible. If a sampler or evaluator breaks, these are the
+    rows whose behaviour is already understood."""
+    anchors = sweep.anchor_pool()
+    assert anchors
+    assert all(a['provenance'] == 'anchor' for a in anchors)
+    assert all(a['anchor_name'] for a in anchors)
+    assert len({a['anchor_name'] for a in anchors}) == len(sweep.ANCHOR_POSTURES_DEG)

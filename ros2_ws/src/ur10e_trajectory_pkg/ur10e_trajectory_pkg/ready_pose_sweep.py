@@ -168,15 +168,25 @@ def collision_distance(validator, configuration, max_distance=0.5):
 
 def static_gates(validator, configuration, min_clearance_m=0.02,
                  min_limit_fraction=0.05, min_posture_margin=0.02):
-    """Whether a candidate ready pose is admissible at all."""
+    """Whether a candidate ready pose is admissible at all.
+
+    collision_distance measures robot-to-ENVIRONMENT clearance only, so it
+    cannot see the arm folded into itself. A broadly sampled pool contains
+    plenty of self-colliding configurations, so the boolean self-collision
+    check is a hard gate here rather than something the approach discovers
+    later.
+    """
+    in_collision = bool(validator.check_all_collisions(configuration))
     clearance = collision_distance(validator, configuration)
     limits = joint_limit_clearance(validator, configuration)
     margin = posture_margin(validator, configuration)
     return {
+        'in_collision': in_collision,
         'collision_distance_m': clearance,
         'joint_limit_clearance': limits,
         'posture_margin': margin,
-        'passed': bool(clearance >= min_clearance_m
+        'passed': bool(not in_collision
+                       and clearance >= min_clearance_m
                        and limits >= min_limit_fraction
                        and margin >= min_posture_margin),
     }
@@ -263,8 +273,28 @@ def minimum_duration(start, end, end_velocity, end_acceleration,
 # --------------------------------------------------------------------------
 
 NO_TASK_CANDIDATE = 'no_task_candidate'
-APPROACH_UNCONNECTED = 'approach_unconnected'
+DIRECT_APPROACH_UNCONNECTED = 'direct_approach_unconnected'
 CONNECTED = 'connected'
+
+
+def approach_collides(validator, position, max_step_rad=0.05):
+    """Collision along an approach, sampled by joint DISPLACEMENT.
+
+    The number of checks follows the path's length in joint space, so no two
+    consecutive checked configurations differ by more than max_step_rad on any
+    joint. A fixed stride coarsens silently as moves grow: a broadly sampled
+    ready pose can sit most of a joint range from its target, where forty
+    samples can step straight through an obstacle.
+    """
+    position = np.asarray(position, dtype=float)
+    if len(position) < 2:
+        return bool(validator.check_all_collisions(position[0]))
+
+    path_length = float(np.sum(np.max(np.abs(np.diff(position, axis=0)), axis=1)))
+    needed = max(2, int(np.ceil(path_length / max_step_rad)) + 1)
+    indices = np.unique(
+        np.linspace(0, len(position) - 1, min(needed, len(position))).astype(int))
+    return any(validator.check_all_collisions(position[i]) for i in indices)
 
 
 def evaluate_approach(validator, ready, target, entry_velocity,
@@ -294,10 +324,15 @@ def evaluate_approach(validator, ready, target, entry_velocity,
         return {'feasible': False, 'reason': 'approach leaves joint limits',
                 'duration_s': duration}
 
-    for configuration in position[::10]:
-        if validator.check_all_collisions(configuration):
-            return {'feasible': False, 'reason': 'approach collides',
-                    'duration_s': duration}
+    # Resolution scaled to the actual joint displacement rather than a fixed
+    # stride. A broadly sampled ready pose can be most of a joint range away
+    # from its target, and 40 samples over a large move can step straight
+    # through an obstacle.
+    if approach_collides(validator, position):
+        return {'feasible': False,
+                'reason': 'direct quintic collides; a collision-free approach '
+                          'may still exist around the obstacle',
+                'duration_s': duration}
 
     peak_jerk = np.max(np.abs(jerk), axis=0)
     integrated = np.trapz(np.abs(jerk), dx=duration / (len(jerk) - 1), axis=0)
@@ -319,16 +354,43 @@ def evaluate_approach(validator, ready, target, entry_velocity,
     }
 
 
+def branch_clusters(configurations, tolerance=0.35):
+    """Distinct solution branches among reached configurations.
+
+    Wrapped joint distance, so two lifts of one configuration count once.
+    Reaching one layer-0 candidate is not connectivity: the graph needs
+    alternatives, and a ready pose that can only enter through a single
+    branch is fragile however cheap that entry is.
+    """
+    representatives = []
+    for configuration in configurations:
+        arm = np.asarray(configuration, dtype=float)[ARM_SLICE]
+        rail = float(np.asarray(configuration)[RAIL_INDEX])
+        for other_rail, other_arm in representatives:
+            wrapped = np.abs(np.angle(np.exp(1j * (arm - other_arm))))
+            if (np.max(wrapped) <= tolerance
+                    and abs(rail - other_rail) / 3.0 <= tolerance):
+                break
+        else:
+            representatives.append((rail, arm))
+    return len(representatives)
+
+
 def classify(task_candidates, approaches):
     """Three outcomes, kept distinct because they mean different things.
 
     no_task_candidate is NOT a statement about the ready pose, and must not
     count against its connectivity: there was nothing there to reach.
+
+    direct_approach_unconnected is named precisely. A colliding direct quintic
+    proves only that THIS approach fails, not that no collision-free approach
+    exists; establishing the latter needs a planner that searches around the
+    obstacle, which this does not do.
     """
     if not task_candidates:
         return NO_TASK_CANDIDATE
     if not any(a['feasible'] for a in approaches):
-        return APPROACH_UNCONNECTED
+        return DIRECT_APPROACH_UNCONNECTED
     return CONNECTED
 
 
@@ -351,8 +413,13 @@ def rank_ready_poses(records):
     already feasible and equally connected.
     """
     def key(record):
-        connectivity = record['connectivity'] if record['connectivity'] is not None else -1.0
-        return (-connectivity,
+        connectivity = (record['connectivity']
+                        if record['connectivity'] is not None else -1.0)
+        # Worst-case BRANCH connectivity outranks duration: reaching one
+        # layer-0 candidate is not the same as having alternatives, and a
+        # ready pose with a single entry branch is fragile however fast.
+        branches = record.get('worst_branch_count', 0) or 0
+        return (-connectivity, -branches,
                 record['worst_duration_s'] if record['worst_duration_s'] is not None else np.inf,
                 record['worst_peak_jerk'] if record['worst_peak_jerk'] is not None else np.inf)
 
@@ -368,3 +435,121 @@ def certification_note():
         'may_certify_for_hardware': motion_limits.may_certify_for_hardware(),
         'result_status': 'provisional',
     }
+
+
+# --------------------------------------------------------------------------
+# Candidate pool: broad sampling, with tagged anchors as controls
+# --------------------------------------------------------------------------
+
+GLOBAL_SAMPLES = 4096
+BROAD_FINALISTS = 64
+RAIL_STRATA = 8
+
+# Known postures kept as CONTROLS, never as replacements for broad finalists.
+# If a sampler or evaluator breaks, these are the rows whose behaviour is
+# already understood, so a nonsensical global result shows up against them.
+# Their provenance is recorded so their influence stays visible.
+ANCHOR_POSTURES_DEG = (
+    ('upstream_default', (0.0, -90.0, 0.0, -90.0, 0.0, 0.0)),
+    ('legacy_off_degeneracy', (0.0, -135.0, 90.0, -90.0, 45.0, 0.0)),
+    ('elbow_up_wrist_turned', (90.0, -60.0, 60.0, -90.0, 90.0, 0.0)),
+    ('elbow_down_mirrored', (-90.0, -120.0, -60.0, -60.0, -90.0, 45.0)),
+    ('reach_forward', (0.0, -100.0, 110.0, -120.0, 60.0, -90.0)),
+    ('reach_back', (-45.0, -160.0, 120.0, -40.0, -60.0, 90.0)),
+    ('shoulder_reversed', (180.0, -90.0, 90.0, -90.0, 90.0, 180.0)),
+    ('compact', (0.0, -75.0, 100.0, -115.0, -80.0, 0.0)),
+)
+
+
+def sample_pool(validator, count=GLOBAL_SAMPLES, seed=0):
+    """Deterministic low-discrepancy samples over rail and CANONICAL arm space.
+
+    Arm joints are sampled in [-pi, pi] rather than over their full +/-2*pi
+    range. Sampling the wider range would produce the same physical posture
+    several times under different windings, wasting the budget on duplicates;
+    the feasible windings that matter are enumerated per destination during
+    approach evaluation, where they actually depend on something.
+    """
+    from scipy.stats import qmc
+
+    lower, upper = validator.robot.qlim
+    engine = qmc.Sobol(d=7, scramble=True, seed=seed)
+    unit = engine.random(count)
+
+    low = np.concatenate(([lower[RAIL_INDEX]], np.full(6, -np.pi)))
+    high = np.concatenate(([upper[RAIL_INDEX]], np.full(6, np.pi)))
+    return qmc.scale(unit, low, high)
+
+
+def wrapped_distance(first, second, rail_travel=3.0):
+    """Normalised distance: wrapped angles, rail scaled by its own travel."""
+    first, second = np.asarray(first, float), np.asarray(second, float)
+    arm = np.abs(np.angle(np.exp(1j * (first[ARM_SLICE] - second[ARM_SLICE]))))
+    rail = abs(first[RAIL_INDEX] - second[RAIL_INDEX]) / rail_travel
+    return float(np.sqrt(rail ** 2 + np.sum(arm ** 2)))
+
+
+def select_finalists(candidates, count=BROAD_FINALISTS, strata=RAIL_STRATA,
+                     rail_travel=3.0):
+    """Diverse finalists, stratified across the rail.
+
+    Farthest-point selection within each stratum, so the finalists spread over
+    posture space AND over rail position. Without stratification the diversity
+    measure alone can cluster every finalist at one end of the travel.
+    """
+    candidates = np.asarray(candidates, dtype=float)
+    per_stratum = max(1, count // strata)
+    edges = np.linspace(0.0, rail_travel, strata + 1)
+
+    chosen = []
+    for index in range(strata):
+        members = candidates[(candidates[:, RAIL_INDEX] >= edges[index])
+                             & (candidates[:, RAIL_INDEX] <= edges[index + 1])]
+        if not len(members):
+            continue
+        picked = [members[0]]
+        while len(picked) < per_stratum and len(picked) < len(members):
+            distances = [min(wrapped_distance(m, p, rail_travel) for p in picked)
+                         for m in members]
+            picked.append(members[int(np.argmax(distances))])
+        chosen.extend(picked)
+    return np.asarray(chosen)
+
+
+def anchor_pool(rail_positions=(0.5, 1.5, 2.5)):
+    """Tagged control configurations, with provenance.
+
+    Deliberately separate from the broad finalists so their influence on any
+    selection stays visible. They must never replace a broad finalist.
+    """
+    out = []
+    for name, arm_deg in ANCHOR_POSTURES_DEG:
+        for rail in rail_positions:
+            out.append({
+                'configuration': np.concatenate(([rail], np.deg2rad(arm_deg))),
+                'provenance': 'anchor',
+                'anchor_name': name,
+            })
+    return out
+
+
+def build_candidate_pool(validator, count=GLOBAL_SAMPLES,
+                         finalists=BROAD_FINALISTS, seed=0):
+    """Broad finalists plus tagged anchors, each carrying its provenance.
+
+    Operationally odd global samples are meant to be rejected by the explicit
+    clearance, posture, joint-limit and connectivity criteria, NOT by biasing
+    the sampler toward configurations this trajectory already visits. That
+    bias is how a fixture-specific constant gets created.
+    """
+    sampled = sample_pool(validator, count, seed)
+    admissible = [q for q in sampled if static_gates(validator, q)['passed']]
+    broad = select_finalists(admissible, finalists) if admissible else np.empty((0, 7))
+
+    pool = [{'configuration': q, 'provenance': 'broad_sample',
+             'anchor_name': None} for q in broad]
+    pool += [a for a in anchor_pool()
+             if static_gates(validator, a['configuration'])['passed']]
+    return pool, {'sampled': int(count), 'passed_static_gates': len(admissible),
+                  'broad_finalists': len(broad),
+                  'anchors_retained': len(pool) - len(broad)}
