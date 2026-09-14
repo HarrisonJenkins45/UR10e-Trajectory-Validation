@@ -3,6 +3,7 @@ import rclpy
 import pandas as pd
 from rclpy.node import Node
 from ur10e_interfaces.srv import ValidateTrajectory
+from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
 from scipy.spatial.transform import Rotation as R
 
@@ -48,6 +49,10 @@ class TrajectoryClientNode(Node):
         # rather than defaulting, so the assumption lives here at the call
         # site rather than inside the server.
         req.q_start = Q_START if q_start is None else list(q_start)
+        # Targets are in the fixed rail-base frame, never the moving
+        # carriage frame. Declared so the server can reject a mismatch
+        # instead of silently validating the wrong trajectory.
+        req.target_frame = frames.TARGET_FRAME
 
         self.future = self.cli.call_async(req)
         return self.future
@@ -99,52 +104,79 @@ class TrajectoryClientNode(Node):
 
 
 
-# Hand-placement offset applied after the frame conversion, to lift the
-# trajectory off the floor until the real arena placement is measured. This
-# is a placeholder, not a calibration: see the README's hardware section.
-PLACEMENT_OFFSET_M = np.array([0.0, 0.5, 0.5])
+
+# Placement of the trajectory's FIRST pose in the rail-base frame: where the
+# reproduced relative motion is put in the arena. Six free degrees of freedom,
+# and the thing a later placement optimisation varies.
+#
+# These numbers reproduce the legacy pipeline exactly, so the 419-waypoint
+# baseline is preserved. They are a fixture, not a calibration: the old code
+# reached the same place through a stand-in arm-base pose, an identity
+# rotation and a separate hand-tuned +0.5 m offset in Y and Z applied after
+# the conversion, which together hid the placement rather than stating it.
+LEGACY_PLACEMENT_POSITION_RG = np.array([1.0, 0.5, 0.5])
 
 DEFAULT_CSV_PATH = ('/root/ros2_ws/src/ur10e_trajectory_pkg/'
                     'ur10e_trajectory_pkg/camera_traj.csv')
 DEFAULT_NUM_WAYPOINTS = 500
 
-# Fits the trajectory inside a 1 m radius. Position only; orientation is
-# unscaled, which is what makes a pure-tumble trajectory meaningful.
+# Fits the relative motion's TRANSLATION inside this radius. Rotation is never
+# scaled: the tumble is the thing being reproduced. The current trajectory
+# holds position constant, so this is inactive and the factor comes out 1.0.
 TARGET_BOUND_M = 1.0
 
 
+def legacy_placement(first_quaternion):
+    """The placement the old pipeline implied, stated outright.
+
+    Rotation is taken from the trajectory's first sample so that
+    T_RG(0) @ dT(t) reproduces the original absolute orientations, which the
+    old code passed through unchanged under an identity calibration.
+    """
+    return frames.make_transform(rotation=first_quaternion,
+                                 translation=LEGACY_PLACEMENT_POSITION_RG)
+
+
 def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
-                             num_waypoints=DEFAULT_NUM_WAYPOINTS):
-    """End-effector targets for the service, from the SISIFOS trajectory.
+                             num_waypoints=DEFAULT_NUM_WAYPOINTS,
+                             placement_RG=None, bound_m=TARGET_BOUND_M):
+    """End-effector targets in the RAIL-BASE frame, per the frame contract.
 
-    Extracted from main() so that diagnostics measure the same targets the
-    service is actually sent. The failure census previously rebuilt this and
-    omitted PLACEMENT_OFFSET_M, which put every target in the floor and made
-    collision fire on all 5500 attempts.
+    Reproduces relative motion, then places it:
 
-    Returns (x, y, z, quaternions, times); quaternions are [x, y, z, w] per
-    waypoint.
+        dT(t)   = inv(T_IG(0)) @ T_IG(t)
+        T_RG(t) = T_RG(0) @ dT(t)
+
+    The rail coordinate never appears. It belongs inside forward kinematics,
+    and subtracting it here is what made the client and solver disagree.
+
+    Extracted from main() so diagnostics measure the same targets the service
+    is sent. Returns (x, y, z, quaternions, times).
     """
     frame = pd.read_csv(csv_path)
-    q_I_G = frame[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(
+    quaternions_I = frame[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(
         dtype=np.float64)[:num_waypoints]
 
-    # Target position is held constant for now: the near-term goal is pure
-    # tumbling motion, so only the orientation varies along the trajectory.
-    p_G_I = frame[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(
+    # Position is held constant: the near-term goal is pure tumbling motion,
+    # so only orientation varies along the trajectory.
+    position_I = frame[['p_G_I_x', 'p_G_I_y', 'p_G_I_z']].to_numpy(
         dtype=np.float64)[0]
-    p_G_I = np.tile(p_G_I, (num_waypoints, 1))
+    positions_I = np.tile(position_I, (num_waypoints, 1))
     sim_time = frame['timestamp'].to_numpy(dtype=np.float64)[:num_waypoints]
 
-    # TODO: replace with real VICON readings once integrated.
-    p_B_I = p_G_I[0] - np.array([1.0, 0.0, 0.0])
-    q_I_B = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64),
-                    (num_waypoints, 1))
+    poses_I = frames.poses_from_positions_quaternions(positions_I, quaternions_I)
+    motion = frames.relative_motion(poses_I)
 
-    p_G_B, q_B_G = TrajectoryClientNode.get_end_effector_in_base_frame(
-        p_G_I, q_I_G, p_B_I, q_I_B, TARGET_BOUND_M)
-    placed = p_G_B + PLACEMENT_OFFSET_M
-    return placed[:, 0], placed[:, 1], placed[:, 2], q_B_G, sim_time
+    if placement_RG is None:
+        placement_RG = legacy_placement(quaternions_I[0])
+    poses_RG, _ = frames.place_relative_motion(motion, placement_RG, bound_m)
+
+    positions_RG = poses_RG[:, :3, 3]
+    quaternions_RG = np.stack([
+        frames.to_position_quaternion(pose)[1] for pose in poses_RG
+    ])
+    return (positions_RG[:, 0], positions_RG[:, 1], positions_RG[:, 2],
+            quaternions_RG, sim_time)
 
 
 def main(args=None):

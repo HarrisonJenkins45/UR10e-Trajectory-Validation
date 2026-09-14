@@ -4,6 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState  # Standard ROS msg for joint encoders
 from ur10e_interfaces.srv import ValidateTrajectory
 
+from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
@@ -16,6 +17,27 @@ MIN_SEGMENT_LENGTH = 10       # shortest run of feasible waypoints accepted as a
 DEFAULT_T_TRAJ = 10.0         # matches process_matlab_validation's own default t_traj;
                                # used to derive dt_waypoint for the segment-finder path,
                                # since incoming requests carry positions but not timing
+
+
+def resolve_target_frame(target_frame_field):
+    """Reject targets that are not in the fixed rail-base frame.
+
+    Validated rather than trusted. The rail base does not move; the UR
+    base_link rides the carriage, so targets expressed against it disagree
+    with the solver by the rail position plus the carriage mount height. That
+    mismatch produces confident, wrong answers with nothing to notice it by.
+    """
+    if not target_frame_field:
+        raise ValueError(
+            f'target_frame is required and must be "{frames.TARGET_FRAME}"'
+        )
+    if target_frame_field != frames.TARGET_FRAME:
+        raise ValueError(
+            f'targets must be expressed in "{frames.TARGET_FRAME}", got '
+            f'"{target_frame_field}". The carriage frame moves with the rail '
+            'and cannot be the frame a target is expressed in'
+        )
+    return target_frame_field
 
 
 def resolve_start_pose(q_start_field):
@@ -112,6 +134,7 @@ class TrajectoryValidationNode(Node):
         self.get_logger().info('Received trajectory validation request...')
 
         try:
+            resolve_target_frame(request.target_frame)
             q_start, start_desc = resolve_start_pose(request.q_start)
         except ValueError as exc:
             self.get_logger().error(f'Validation failed: {exc}')

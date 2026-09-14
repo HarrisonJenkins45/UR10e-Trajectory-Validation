@@ -280,7 +280,7 @@ def test_census_targets_match_what_the_client_sends():
     builder, and this pins that it keeps doing so.
     """
     from ur10e_trajectory_pkg.ClientNode import (
-        PLACEMENT_OFFSET_M,
+        LEGACY_PLACEMENT_POSITION_RG,
         build_trajectory_targets,
     )
 
@@ -297,7 +297,7 @@ def test_census_targets_match_what_the_client_sends():
     np.testing.assert_allclose(census_quaternions, quaternions)
     assert dt == pytest.approx(float(times[1] - times[0]))
 
-    # The offset is a placeholder standing in for arena placement, not a
-    # calibration, and it is load-bearing: without it the targets are in the
-    # floor.
-    assert np.any(PLACEMENT_OFFSET_M != 0.0)
+    # The placement is a fixture standing in for a calibrated arena pose, not
+    # a measurement, and it is load-bearing: at the origin the targets sit in
+    # the floor and collision fires on every attempt.
+    assert np.any(LEGACY_PLACEMENT_POSITION_RG != 0.0)

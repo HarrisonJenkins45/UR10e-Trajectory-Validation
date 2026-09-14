@@ -25,6 +25,17 @@ float64[] sim_time
 # regression callers pass configurations.LEGACY_MATLAB_START_Q explicitly.
 float64[] q_start
 
+# Frame the ee_positions_* and ee_quat targets are expressed in. REQUIRED, and
+# validated rather than assumed: the only accepted value is "rail_base_link".
+#
+# This is a field rather than a comment because getting it wrong is silent.
+# The rail base is FIXED; the UR base_link rides the carriage and moves with
+# the rail, so targets expressed relative to it disagree with the solver by
+# the rail position plus the 25 mm carriage mount height. That is the
+# discrepancy the solver docstring carried as a known issue, and a frame-free
+# array of numbers gives nobody a way to notice it.
+string target_frame
+
 ---
 # 2. RESPONSE (Output sent back to the main script)
 bool success
