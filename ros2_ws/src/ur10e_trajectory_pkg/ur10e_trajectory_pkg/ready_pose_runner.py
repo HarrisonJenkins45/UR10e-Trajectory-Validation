@@ -14,7 +14,11 @@ Per placement, once:
      limit cannot be matched by any approach from rest. A candidate with no
      such continuation is dropped before anything is classified: it is not a
      task candidate, and it must not count against any ready pose
-  3. branch labels over the surviving candidates
+  3. tolerance-cluster labels, then IK families joined by rail continuation
+     (ready_pose_sweep.ik_family_labels). Families are the branches ranking
+     counts, over the FULL valid set, seeded candidates included: a seeded
+     candidate passing every gate proves there is something to connect to.
+     Clusters, and families only extra seeds reached, are diagnostics
 
 Per ready pose and branch:
 
@@ -37,7 +41,8 @@ exhaustive=True times every alternative before any collision check; the pilot
 runs it once and requires the same branch outcomes.
 
 A placement whose candidates all fail steps 1-2 is no_task_candidate and no
-ready pose is evaluated against it. Otherwise a ready pose is connected if any
+ready pose is evaluated against it; generator_alone_found_nothing records the
+separate fact that no unseeded candidate survived. Otherwise a ready pose is connected if any
 branch has a feasible approach, and direct_approach_unconnected if none does,
 with the causes kept in failure_breakdown.
 
@@ -45,9 +50,11 @@ Layers for a placement come from the candidate generator run on layers 0-2
 of THAT placement's targets, with the nominal candidates added only as extra
 seeds tagged with their origin. Seeds alone could only rediscover nominal's
 branches, undercounting branches, a primary ranking key, and blurring
-no_task_candidate into "nominal's branches do not carry over". The nominal
-placement can use the committed full-length generator output instead. A
-placement with no layers is refused rather than given invented ones.
+no_task_candidate into "nominal's branches do not carry over". Every placement goes
+through that one path, nominal included, generated first and without seeds so
+its layers can seed the rest; --candidates substitutes the committed
+full-length output for nominal as a check. A placement with no layers is
+refused rather than given invented ones.
 
 Continuation policy and the plan: for the one layer-0 candidate the Stage 5
 graph path uses, its layers 1-2 are exactly the cheapest two-step
@@ -60,38 +67,37 @@ full sweep and a doubled-pool stability check.
 
 Pilot, 8 ready poses (3 anchors, 5 broad finalists across the rail) from a
 pool of 73 (900 of 4096 samples passed the static gates), against nominal and
-two generated placements. Two repeats identical; the exhaustive run agrees on
-every branch outcome:
+two placements, all generated at their placement (about 2 s each), nominal
+first and unseeded, the others with nominal's candidates as tagged extra
+seeds. Two repeats identical; the exhaustive run agrees on every branch
+outcome:
 
-    placement      layer-0  valid  seed-only  branches  independent
-    nominal        36       33     0          11        11
-    translate_x+   74       70     34         13        11
-    rotate_r+      58       55     33         15         8
+    placement      layer-0  valid  seed-only  clusters  families  unseeded
+    nominal        36       33     0          11        5         5
+    translate_x+   74       70     34         13        5         5
+    rotate_r+      58       55     33         15        5         4
 
-  nominal reads the committed full-length generator output; the other two are
-  generated at their placement in 1.9 s each, with nominal's candidates as
-  tagged extra seeds. Regenerating nominal the same way without seeds
-  reproduces the committed layers 0-2 exactly. Dropped before classifying:
-  2, 4 and 2 candidates with no continuation; 1 at nominal and 1 at rotate_r+
-  entering beyond the rail cap.
+  Clusters overcount: family links joined clusters 0.10 to 1.46 m apart on the
+  rail. The family only nominal's seeds reached at rotate_r+ is the one with
+  elbow and wrist_2 signs both positive, which the generator finds unseeded at
+  the other two placements. Some links pass condition numbers up to 171, above
+  the task gate, so a link is kinematic, not a task-admissible move.
 
-  Every ready pose connects at every placement. Worst branch count 10-11 over
-  all branches, but 8 for every pose once branches reached only through
-  nominal's seeds are excluded: at rotate_r+, 7 of 15 branches exist only
-  through them. Which count ranks is a decision the sweep needs.
+  Every ready pose reaches all 5 families at every placement, including poses
+  that miss a cluster, so family count does not separate this pilot and
+  ranking falls to worst duration (1.09 to 2.58 s), then jerk.
 
-  Windings 40,448: 16,351 timed (982 no duration, 367 leave joint limits),
-  24,097 left untimed by the bound, 481 collision-checked (174 collide).
-  Collision queries per approach p50 72, p95 114, max 211.
-  0.85 s per ready pose and placement at p50, 1.46 s at p95.
+  0.86 s per ready pose and placement at p50, 1.51 s at p95; families take
+  about 0.2 s per placement. Regenerating nominal unseeded reproduces the
+  committed full-length generator's layers 0-2 exactly.
 
 Projected full sweep, 29 placements against the 73-pose pool, generation
-included: 31 min at p50, 53 min at p95.
+included: 32 min at p50, 55 min at p95.
 
 Earlier pilots of this runner are superseded. The first reported 10 of 11
 branches for every pose, which was minimum_duration missing windows; the
 second used an upward scan that still missed 16 windings and was recorded as
-finding none.
+finding none; the third ranked on tolerance clusters, which split families.
 
 Usage (pilot):
     python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
@@ -358,6 +364,22 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
         {v['branch'] for v in valid if not v['extra_seed_only']})
     counts['valid_candidates_extra_seed_only'] = sum(
         1 for v in valid if v['extra_seed_only'])
+    counts['generator_alone_found_nothing'] = all(
+        v['extra_seed_only'] for v in valid)
+
+    with meter.phase('families'):
+        families, report = sweep.ik_family_labels(
+            validator, [v['configuration'] for v in valid], labels,
+            positions[0], quaternions[0])
+    for entry, family in zip(valid, families):
+        entry['family'] = family
+    counts['ik_families'] = report['families']
+    counts['ik_families_independent'] = len(
+        {v['family'] for v in valid if not v['extra_seed_only']})
+    counts['ik_families_only_from_extra_seeds'] = sorted(
+        {v['family'] for v in valid}
+        - {v['family'] for v in valid if not v['extra_seed_only']})
+    counts['family_report'] = report
     state.update(status='ready', valid=valid, dt=dt,
                  velocity_limits=velocity_limits)
     return state
@@ -496,6 +518,7 @@ def evaluate_ready_pose(validator, ready, placement, meter,
             'members': len(by_branch[label]),
             'independent': any(not e['extra_seed_only']
                                for e in by_branch[label]),
+            'family': by_branch[label][0]['family'],
             'alternatives': len(alternatives),
             'alternatives_timed': cursor,
             'rejected_before_collision': len(rejected),
@@ -523,6 +546,8 @@ def evaluate_ready_pose(validator, ready, placement, meter,
         'connected_branches': len(connected),
         'connected_independent_branches': sum(1 for b in connected
                                               if b['independent']),
+        'family_count': len({b['family'] for b in branches}),
+        'connected_families': len({b['family'] for b in connected}),
         'best_duration_s': None if shortest is None else shortest['duration_s'],
         'best_max_peak_jerk': (None if shortest is None
                                else shortest['max_peak_jerk']),
@@ -536,7 +561,7 @@ def branch_outcomes(results):
     """What the ranking consumes, without the counts that depend on pruning."""
     return [
         [{'placement': r['placement'], 'classification': r['classification'],
-          'branches': [{k: b.get(k) for k in ('branch', 'connected',
+          'branches': [{k: b.get(k) for k in ('branch', 'family', 'connected',
                                                'duration_s', 'candidate_index',
                                                'winding')}
                        for b in r['branches']]}
@@ -560,6 +585,8 @@ def summarise_ready_pose(per_placement):
             [r['classification'] for r in per_placement
              if r['classification'] != NO_LAYERS]),
         'worst_branch_count': (min(r['connected_branches'] for r in eligible)
+                               if eligible else None),
+        'worst_family_count': (min(r['connected_families'] for r in eligible)
                                if eligible else None),
         'worst_independent_branch_count': (
             min(r.get('connected_independent_branches', r['connected_branches'])
@@ -795,7 +822,8 @@ def manifest(args, validator, candidates_document, trajectory_metadata, dt,
             'urdf_path': args.urdf,
             'urdf_sha256': file_digest(args.urdf),
             'candidates_path': args.candidates,
-            'candidates_sha256': file_digest(args.candidates),
+            'candidates_sha256': (file_digest(args.candidates)
+                                  if args.candidates else None),
             'candidates_repository_revision':
                 candidate_manifest.get('repository_revision'),
             'candidates_trajectory': candidate_manifest.get('trajectory'),
@@ -846,8 +874,9 @@ def manifest(args, validator, candidates_document, trajectory_metadata, dt,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--candidates', required=True,
-                        help='candidate_generator output at the NOMINAL placement')
+    parser.add_argument('--candidates', default=None,
+                        help='substitute this committed generator output for '
+                             'the generated nominal layers, as a check')
     parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
     parser.add_argument('--pilot-count', type=int, default=8)
     parser.add_argument('--repeats', type=int, default=2)
@@ -855,9 +884,6 @@ def main(argv=None):
     parser.add_argument('--out', default='pilot.json')
     parser.add_argument('--placements', default='nominal',
                         help='comma-separated placement names from the envelope')
-    parser.add_argument('--generate-nominal', action='store_true',
-                        help='generate nominal layers instead of reading '
-                             '--candidates (for checking the generator)')
     parser.add_argument('--no-exhaustive-check', action='store_true',
                         help='skip the exhaustive run that verifies pruning')
     args = parser.parse_args(argv)
@@ -870,8 +896,6 @@ def main(argv=None):
     validator = _validator(args.urdf, get_package_share_directory('ur_description'))
     positions, quaternions, dt, trajectory_metadata = load_trajectory(
         None, PREFIX_LAYERS, with_metadata=True)
-    layers, candidates_document = load_candidates(
-        args.candidates, PREFIX_LAYERS, include_oracle=False)
     nominal_RG = trajectory_metadata['placement_RG']
     envelope = {p['name']: p for p in sweep.placements()}
     names = [n.strip() for n in args.placements.split(',') if n.strip()]
@@ -880,19 +904,29 @@ def main(argv=None):
         parser.error(f'unknown placements {unknown}')
 
     generation_meter = Meter()
+    candidates_document = {}
+    if args.candidates:
+        layers, candidates_document = load_candidates(
+            args.candidates, PREFIX_LAYERS, include_oracle=False)
+        nominal = {'name': 'nominal', 'layers': layers, 'positions': positions,
+                   'quaternions': quaternions, 'dt': dt,
+                   'generation': {'source': 'committed full-length generator '
+                                            'output (--candidates)'}}
+    else:
+        # Always generated, even when not evaluated: its layers seed the rest.
+        with counting_collisions(validator, generation_meter):
+            nominal = generated_placement(validator, envelope['nominal'],
+                                          nominal_RG, generation_meter)
+        layers = nominal['layers']
     placements = []
     for name in names:
-        if name == 'nominal' and not args.generate_nominal:
-            placements.append({
-                'name': 'nominal', 'layers': layers, 'positions': positions,
-                'quaternions': quaternions, 'dt': dt,
-                'generation': {'source': 'committed full-length generator '
-                                         'output (--candidates)'}})
-        else:
-            with counting_collisions(validator, generation_meter):
-                placements.append(generated_placement(
-                    validator, envelope[name], nominal_RG, generation_meter,
-                    nominal_layers=None if name == 'nominal' else layers))
+        if name == 'nominal':
+            placements.append(nominal)
+            continue
+        with counting_collisions(validator, generation_meter):
+            placements.append(generated_placement(
+                validator, envelope[name], nominal_RG, generation_meter,
+                nominal_layers=layers))
     generated = [p['generation']['seconds'] for p in placements
                  if 'seconds' in p['generation']]
 

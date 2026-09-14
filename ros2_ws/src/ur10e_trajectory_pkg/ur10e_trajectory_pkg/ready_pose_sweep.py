@@ -21,6 +21,12 @@ mean different things and one of them is not about the ready pose at all:
                          failure_breakdown rather than being collapsed
   connected              at least one valid approach exists
 
+A branch is an IK FAMILY (ik_family_labels): with the rail fixed the arm has a
+handful of solutions for a pose, and as the rail moves each traces a
+continuous curve. Tolerance clusters (branch_assignments) split one family
+into several whenever the arm moves more than the tolerance along the rail,
+so they are kept as a diagnostic and families are what ranking counts.
+
 A placement classified no_task_candidate must not count against a ready
 pose's connectivity score. There was nothing there to connect to.
 
@@ -746,6 +752,152 @@ def branch_clusters(configurations, tolerance=0.35):
     return len(set(branch_assignments(configurations, tolerance)))
 
 
+# Rail continuation that decides whether two clusters are one IK family.
+FAMILY_RAIL_STEP_M = 0.01
+FAMILY_ARRIVAL_TOL_RAD = 1e-6
+FAMILY_SOLVE_TOL = 1e-11          # converged fixed-rail solve, error norm
+FAMILY_LOST_ERROR = 1e-7          # a step that cannot re-solve loses the family
+FAMILY_LOST_CONDITION = 1e4       # nor may it pass through a singularity
+FAMILY_SOLVE_ITERATIONS = 60
+FAMILY_MAX_JOINT_STEP_RAD = 0.2
+
+
+def arm_only_ik(validator, configuration, position, rotation):
+    """Fixed-rail, damped Gauss-Newton solve from a nearby configuration.
+
+    Returns (configuration, error norm, arm condition number). Used only to
+    follow a solution continuously along the rail, where the previous step is
+    always an excellent seed; it is not a general IK solver.
+    """
+    from scipy.spatial.transform import Rotation
+
+    q = np.asarray(configuration, dtype=float).copy()
+    error = np.inf
+    for _ in range(FAMILY_SOLVE_ITERATIONS):
+        pose = validator.robot.fkine(q, end='tool0')
+        residual = np.concatenate([
+            np.asarray(position) - pose.t,
+            Rotation.from_matrix(rotation @ pose.R.T).as_rotvec()])
+        error = float(np.linalg.norm(residual))
+        if error < FAMILY_SOLVE_TOL:
+            break
+        jacobian = validator.compute_arm_jacobian(q)
+        step = np.linalg.solve(jacobian.T @ jacobian + 1e-10 * np.eye(6),
+                               jacobian.T @ residual)
+        norm = np.linalg.norm(step)
+        q[ARM_SLICE] += (step if norm < FAMILY_MAX_JOINT_STEP_RAD
+                         else step * FAMILY_MAX_JOINT_STEP_RAD / norm)
+    singular = np.linalg.svd(validator.compute_arm_jacobian(q), compute_uv=False)
+    return q, error, float(singular[0] / max(singular[-1], 1e-15))
+
+
+def _continues_to(validator, start, target, position, rotation):
+    """Follow start along the rail to target's rail; does it arrive at target?"""
+    q = np.asarray(start, dtype=float).copy()
+    lower, upper = validator.robot.qlim
+    worst = 0.0
+    span = abs(target[RAIL_INDEX] - start[RAIL_INDEX])
+    rails = np.linspace(start[RAIL_INDEX], target[RAIL_INDEX],
+                        max(2, int(np.ceil(span / FAMILY_RAIL_STEP_M)) + 1))
+    for rail in rails[1:]:
+        q[RAIL_INDEX] = rail
+        q, error, condition = arm_only_ik(validator, q, position, rotation)
+        worst = max(worst, condition)
+        # Only the elbow is bounded short of a full turn; the periodic joints
+        # are compared wrapped, so their windings do not matter here.
+        if (error > FAMILY_LOST_ERROR or condition > FAMILY_LOST_CONDITION
+                or q[3] < lower[3] or q[3] > upper[3]):
+            return False, worst
+    arrival = np.max(np.abs(np.angle(np.exp(1j * (q[ARM_SLICE]
+                                                  - target[ARM_SLICE])))))
+    return bool(arrival < FAMILY_ARRIVAL_TOL_RAD), worst
+
+
+def _family_signature(configuration):
+    """Signs no continuous path can flip without passing a singularity."""
+    return (int(np.sign(np.sin(configuration[3]))),
+            int(np.sign(np.sin(configuration[5]))))
+
+
+def ik_family_labels(validator, configurations, cluster_labels, position,
+                     quaternion):
+    """IK family per configuration, joining clusters by rail continuation.
+
+    Each cluster is represented by its canonical-order first member, refined
+    by a fixed-rail solve. Two clusters with the same elbow and wrist_2 signs
+    are one family if either representative, followed along the rail to the
+    other's rail position, arrives at it without losing the solution or
+    passing a singularity. A cluster is assumed to lie within one family; its
+    members are within the clustering tolerance of each other.
+
+    Family links are KINEMATIC. They ignore collision, and a connecting path
+    may pass condition numbers above the task gate, so "one family" does not
+    mean the task can move between the two entries. A failed continuation is
+    treated as two families, so counts can only come out high, never low.
+
+    Returns (labels, report). Labels are ranks of each family's smallest
+    cluster label, so they are invariant under input order.
+    """
+    from scipy.spatial.transform import Rotation
+
+    rotation = Rotation.from_quat(quaternion).as_matrix()
+    arrays = [np.asarray(c, dtype=float) for c in configurations]
+    clusters = sorted(set(cluster_labels))
+    representatives = {}
+    refinement = 0.0
+    for cluster in clusters:
+        members = [a for a, label in zip(arrays, cluster_labels) if label == cluster]
+        first = min(members, key=lambda c: tuple(np.round(c, 9)))
+        representatives[cluster] = arm_only_ik(validator, first, position,
+                                               rotation)[0]
+        # Candidates are solutions of this pose already, so refinement should
+        # barely move them. A large value means a configuration was passed
+        # that is not a solution, and it may have been refined onto another
+        # family.
+        refinement = max(refinement, float(np.max(np.abs(np.angle(np.exp(
+            1j * (representatives[cluster][ARM_SLICE] - first[ARM_SLICE])))))))
+
+    parent = {c: c for c in clusters}
+
+    def root(cluster):
+        while parent[cluster] != cluster:
+            cluster = parent[cluster]
+        return cluster
+
+    links, attempts = [], 0
+    for index, a in enumerate(clusters):
+        for b in clusters[index + 1:]:
+            if root(a) == root(b):
+                continue
+            if (_family_signature(representatives[a])
+                    != _family_signature(representatives[b])):
+                continue
+            attempts += 1
+            same, worst = _continues_to(validator, representatives[a],
+                                        representatives[b], position, rotation)
+            if not same:
+                same, other = _continues_to(validator, representatives[b],
+                                            representatives[a], position,
+                                            rotation)
+                worst = max(worst, other)
+            if same:
+                parent[max(root(a), root(b))] = min(root(a), root(b))
+                links.append({'clusters': [a, b],
+                              'rail_gap_m': float(abs(
+                                  representatives[a][RAIL_INDEX]
+                                  - representatives[b][RAIL_INDEX])),
+                              'worst_condition': worst})
+
+    roots = sorted({root(c) for c in clusters})
+    rank = {r: i for i, r in enumerate(roots)}
+    labels = [rank[root(label)] for label in cluster_labels]
+    return labels, {'families': len(roots), 'continuations_attempted': attempts,
+                    'max_refinement_rad': refinement,
+                    'links': links,
+                    'signatures': {rank[r]: list(_family_signature(representatives[r]))
+                                   for r in roots}}
+
+
 def classify(task_candidates, approaches):
     """Three outcomes, kept distinct because they mean different things.
 
@@ -800,10 +952,12 @@ def rank_ready_poses(records):
     def key(record):
         connectivity = (record['connectivity']
                         if record['connectivity'] is not None else -1.0)
-        # Worst-case BRANCH connectivity outranks duration: reaching one
+        # Worst-case IK-FAMILY connectivity outranks duration: reaching one
         # layer-0 candidate is not the same as having alternatives, and a
-        # ready pose with a single entry branch is fragile however fast.
-        branches = record.get('worst_branch_count', 0) or 0
+        # ready pose with a single entry family is fragile however fast.
+        # Tolerance clusters are not counted: they split one family whenever
+        # the arm moves along the rail.
+        branches = record.get('worst_family_count', 0) or 0
         return (-connectivity, -branches,
                 record['worst_duration_s'] if record['worst_duration_s'] is not None else np.inf,
                 record['worst_peak_jerk'] if record['worst_peak_jerk'] is not None else np.inf)

@@ -36,8 +36,19 @@ def branch_a():
 
 
 @pytest.fixture(scope='module')
-def branch_b():
-    return np.concatenate(([1.0], np.deg2rad([40.0, -100.0, 70.0, -60.0, 80.0, 30.0])))
+def branch_b(validator, branch_a):
+    """branch_a's other-shoulder solution for the SAME pose at the same rail.
+
+    Layer-0 candidates are solutions of the layer-0 pose by construction, and
+    IK families are found by re-solving that pose, so a fixture posture that
+    is not a solution would be refined onto another family and merged.
+    """
+    pose = validator.robot.fkine(branch_a, end='tool0')
+    seed = np.concatenate(([branch_a[0]],
+                           [-2.0933, -2.6974, 1.3721, -0.5829, 2.1016, 1.9063]))
+    solution, error, _ = sweep.arm_only_ik(validator, seed, pose.t, pose.R)
+    assert error < 1e-9
+    return solution
 
 
 @pytest.fixture(scope='module')
@@ -93,6 +104,22 @@ def test_the_cheapest_continuation_is_kept_and_alternatives_counted(prepared, br
 def test_surviving_candidates_carry_branch_labels(prepared):
     assert prepared['counts']['branch_clusters'] == 2
     assert {v['branch'] for v in prepared['valid']} == {0, 1}
+    # Two different postures at one rail position: two families.
+    assert {v['family'] for v in prepared['valid']} == {0, 1}
+    assert prepared['counts']['ik_families'] == 2
+
+
+def test_a_placement_found_only_through_seeds_is_still_a_task_placement(
+        validator, placement):
+    """A seeded candidate passing every gate proves there is something to
+    connect to; that the generator alone found nothing is its own record."""
+    state = runner.prepare_placement(
+        validator, placement['name'], placement['layers'],
+        placement['positions'], placement['quaternions'], DT, runner.Meter(),
+        layer0_extra_seed_only=[True, True, True])
+    assert state['status'] == 'ready'
+    assert state['counts']['generator_alone_found_nothing'] is True
+    assert state['counts']['ik_families'] == 2
 
 
 def test_a_twist_the_arm_cannot_make_leaves_no_task_candidate(validator, placement,
@@ -145,10 +172,17 @@ def test_branches_reached_only_through_extra_seeds_are_counted_apart(
     assert state['counts']['branch_clusters'] == 2
     assert state['counts']['branch_clusters_independent'] == 1
     assert state['counts']['valid_candidates_extra_seed_only'] == 1
+    assert state['counts']['generator_alone_found_nothing'] is False
+    # Families count over the full valid set; the seed-only one is a
+    # diagnostic, not excluded.
+    assert state['counts']['ik_families'] == 2
+    assert state['counts']['ik_families_independent'] == 1
+    assert len(state['counts']['ik_families_only_from_extra_seeds']) == 1
 
     result = runner.evaluate_ready_pose(validator, ready, state, meter)
     assert result['connected_branches'] == 2
     assert result['connected_independent_branches'] == 1
+    assert result['connected_families'] == 2
     summary = runner.summarise_ready_pose([result])
     assert summary['worst_branch_count'] == 2
     assert summary['worst_independent_branch_count'] == 1
@@ -273,13 +307,16 @@ def test_the_run_is_deterministic(validator, placement, ready):
 def test_no_task_candidate_placements_do_not_count_against_a_ready_pose():
     per_placement = [
         {'classification': sweep.CONNECTED, 'connected_branches': 3,
+         'connected_families': 2,
          'best_duration_s': 2.0, 'best_max_peak_jerk': 40.0},
         {'classification': sweep.NO_TASK_CANDIDATE},
         {'classification': sweep.CONNECTED, 'connected_branches': 1,
+         'connected_families': 1,
          'best_duration_s': 3.5, 'best_max_peak_jerk': 20.0},
     ]
     summary = runner.summarise_ready_pose(per_placement)
     assert summary['connectivity'] == 1.0
+    assert summary['worst_family_count'] == 1
     assert summary['worst_branch_count'] == 1
     assert summary['worst_duration_s'] == 3.5
     assert summary['worst_peak_jerk'] == 40.0

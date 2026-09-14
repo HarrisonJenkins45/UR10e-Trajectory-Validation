@@ -459,11 +459,11 @@ def test_branch_clusters_count_distinct_solutions_not_lifts():
 def test_ranking_puts_branch_connectivity_before_duration():
     """A single entry branch is fragile however fast it is."""
     records = [
-        {'name': 'one_branch_fast', 'connectivity': 1.0, 'worst_branch_count': 1,
+        {'name': 'one_branch_fast', 'connectivity': 1.0, 'worst_family_count': 1,
          'worst_duration_s': 1.0, 'worst_peak_jerk': 10.0,
          'static_gates': {'passed': True}},
         {'name': 'three_branches_slow', 'connectivity': 1.0,
-         'worst_branch_count': 3, 'worst_duration_s': 4.0,
+         'worst_family_count': 3, 'worst_duration_s': 4.0,
          'worst_peak_jerk': 80.0, 'static_gates': {'passed': True}},
     ]
     assert sweep.rank_ready_poses(records)[0]['name'] == 'three_branches_slow'
@@ -704,4 +704,74 @@ def test_a_lift_whose_continuation_leaves_the_limits_is_invalid(validator, ready
     destination = prefix[0].copy()
     destination[4] += 2 * np.pi
     assert sweep.lifted_prefix(validator, prefix, destination) is None
+
+
+# --------------------------------------------------------------------------
+# IK families
+# --------------------------------------------------------------------------
+
+def _pose(validator, configuration):
+    from scipy.spatial.transform import Rotation
+    pose = validator.robot.fkine(configuration, end='tool0')
+    return pose.t, Rotation.from_matrix(pose.R).as_quat(), pose.R
+
+
+def test_two_rail_samples_of_one_family_share_a_label(validator, ready):
+    """Tolerance clusters split a family whenever the arm moves along the
+    rail; continuation along the rail joins them again."""
+    position, quaternion, rotation = _pose(validator, ready)
+    moved = ready.copy()
+    moved[0] += 0.6
+    moved, error, _ = sweep.arm_only_ik(validator, moved, position, rotation)
+    assert error < 1e-9
+    assert np.max(np.abs(moved[1:] - ready[1:])) > 0.35, 'must be two clusters'
+
+    configurations = [ready, moved]
+    clusters = sweep.branch_assignments(configurations)
+    assert clusters[0] != clusters[1]
+    families, report = sweep.ik_family_labels(validator, configurations, clusters,
+                                              position, quaternion)
+    assert families[0] == families[1]
+    assert report['families'] == 1
+    assert report['links'][0]['rail_gap_m'] == pytest.approx(0.6, abs=1e-9)
+
+
+def test_same_rail_solutions_with_different_shoulders_are_two_families(validator,
+                                                                       ready):
+    """Same pose, same rail, same elbow and wrist_2 signs, 2.1 rad apart:
+    no rail continuation turns one into the other."""
+    position, quaternion, rotation = _pose(validator, ready)
+    seed = np.concatenate(([ready[0]],
+                           [-2.0933, -2.6974, 1.3721, -0.5829, 2.1016, 1.9063]))
+    other, error, _ = sweep.arm_only_ik(validator, seed, position, rotation)
+    assert error < 1e-9
+    assert sweep._family_signature(other) == sweep._family_signature(ready)
+    assert np.max(np.abs(np.angle(np.exp(1j * (other[1:] - ready[1:]))))) > 2.0
+
+    configurations = [ready, other]
+    clusters = sweep.branch_assignments(configurations)
+    families, report = sweep.ik_family_labels(validator, configurations, clusters,
+                                              position, quaternion)
+    assert families[0] != families[1]
+    assert report['continuations_attempted'] == 1
+
+
+def test_family_labels_are_invariant_under_input_order(validator, ready):
+    position, quaternion, rotation = _pose(validator, ready)
+    moved = ready.copy()
+    moved[0] += 0.6
+    moved = sweep.arm_only_ik(validator, moved, position, rotation)[0]
+    seed = np.concatenate(([ready[0]],
+                           [-2.0933, -2.6974, 1.3721, -0.5829, 2.1016, 1.9063]))
+    other = sweep.arm_only_ik(validator, seed, position, rotation)[0]
+
+    configurations = [ready, moved, other]
+    reference, _ = sweep.ik_family_labels(
+        validator, configurations, sweep.branch_assignments(configurations),
+        position, quaternion)
+    shuffled = [other, ready, moved]
+    labels, _ = sweep.ik_family_labels(
+        validator, shuffled, sweep.branch_assignments(shuffled),
+        position, quaternion)
+    assert labels == [reference[2], reference[0], reference[1]]
 
