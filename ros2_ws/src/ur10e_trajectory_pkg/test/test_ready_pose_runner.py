@@ -308,18 +308,60 @@ def test_no_task_candidate_placements_do_not_count_against_a_ready_pose():
     per_placement = [
         {'classification': sweep.CONNECTED, 'connected_branches': 3,
          'connected_families': 2,
-         'best_duration_s': 2.0, 'best_max_peak_jerk': 40.0},
+         'best_duration_s': 2.0, 'best_max_peak_jerk': 40.0,
+         'slowest_family_duration_s': 2.8, 'family_shortest_max_peak_jerk': 45.0},
         {'classification': sweep.NO_TASK_CANDIDATE},
         {'classification': sweep.CONNECTED, 'connected_branches': 1,
          'connected_families': 1,
-         'best_duration_s': 3.5, 'best_max_peak_jerk': 20.0},
+         'best_duration_s': 3.5, 'best_max_peak_jerk': 20.0,
+         'slowest_family_duration_s': 3.5, 'family_shortest_max_peak_jerk': 20.0},
     ]
     summary = runner.summarise_ready_pose(per_placement)
     assert summary['connectivity'] == 1.0
     assert summary['worst_family_count'] == 1
     assert summary['worst_branch_count'] == 1
     assert summary['worst_duration_s'] == 3.5
-    assert summary['worst_peak_jerk'] == 40.0
+    assert summary['worst_peak_jerk'] == 45.0
+    assert summary['worst_shortest_approach_s'] == 3.5
+    assert summary['worst_shortest_approach_jerk'] == 40.0
+
+
+def _branch(label, family, duration, jerk, connected=True):
+    return {'branch': label, 'family': family, 'connected': connected,
+            'duration_s': duration if connected else None,
+            'max_peak_jerk': jerk if connected else None}
+
+
+def test_a_familys_shortest_approach_is_the_minimum_over_its_branches():
+    summary = runner.family_approach_summary([
+        _branch(0, 0, 1.2, 30.0), _branch(1, 0, 0.9, 50.0),
+        _branch(2, 1, 2.4, 10.0), _branch(3, 1, 0.5, 90.0, connected=False),
+    ])
+    assert summary['family_shortest_duration_s'] == {'0': 0.9, '1': 2.4}
+    assert summary['slowest_family_duration_s'] == 2.4
+    assert summary['family_shortest_max_peak_jerk'] == 50.0
+
+
+def test_a_slow_family_outranks_one_fast_entry():
+    """Ranking asks whether a pose reaches several families cheaply. One very
+    fast approach must not hide a family that takes much longer."""
+    def record(name, branches):
+        per_placement = dict({'classification': sweep.CONNECTED,
+                              'connected_branches': len(branches),
+                              'connected_families': len({b['family'] for b in branches}),
+                              'best_duration_s': min(b['duration_s'] for b in branches),
+                              'best_max_peak_jerk': 10.0},
+                             **runner.family_approach_summary(branches))
+        return dict(runner.summarise_ready_pose([per_placement]), name=name,
+                    static_gates={'passed': True})
+
+    one_fast_entry = record('one_fast_entry', [_branch(0, 0, 0.8, 20.0),
+                                               _branch(1, 1, 3.0, 20.0)])
+    evenly_fast = record('evenly_fast', [_branch(0, 0, 1.5, 20.0),
+                                         _branch(1, 1, 1.6, 20.0)])
+    assert one_fast_entry['worst_shortest_approach_s'] < evenly_fast['worst_shortest_approach_s']
+    ranked = sweep.rank_ready_poses([one_fast_entry, evenly_fast])
+    assert [r['name'] for r in ranked] == ['evenly_fast', 'one_fast_entry']
 
 
 def test_pilot_selection_spans_rail_and_provenance():

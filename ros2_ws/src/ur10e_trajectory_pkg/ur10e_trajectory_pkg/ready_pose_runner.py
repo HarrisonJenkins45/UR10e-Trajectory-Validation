@@ -85,7 +85,11 @@ outcome:
 
   Every ready pose reaches all 5 families at every placement, including poses
   that miss a cluster, so family count does not separate this pilot and
-  ranking falls to worst duration (1.09 to 2.58 s), then jerk.
+  ranking falls to worst duration, then jerk. Taken on the slowest family's
+  shortest approach, worst durations are 2.28 to 4.00 s and the order is
+  1, 0, 5, 4, 3, 6, 2, 7. Taken on the single fastest approach, as before,
+  they were 1.09 to 2.58 s and pose 3 ranked first despite a 2.67 s family
+  and the pilot's highest jerk, 153.7.
 
   0.86 s per ready pose and placement at p50, 1.51 s at p95; families take
   about 0.2 s per placement. Regenerating nominal unseeded reproduces the
@@ -99,9 +103,12 @@ branches for every pose, which was minimum_duration missing windows; the
 second used an upward scan that still missed 16 windings and was recorded as
 finding none; the third ranked on tolerance clusters, which split families.
 
-Usage (pilot):
-    python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
-        --candidates candidates.json --out pilot.json
+Usage:
+    pilot       python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
+                    --placements nominal,translate_x+,rotate_r+ --out pilot.json
+    full sweep  python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
+                    --placements all --all-pool --repeats 1 \\
+                    --no-exhaustive-check --out sweep.json
 """
 import argparse
 import heapq
@@ -539,7 +546,7 @@ def evaluate_ready_pose(validator, ready, placement, meter,
     classification = sweep.classify(placement['valid'], all_outcomes)
     connected = [b for b in branches if b['connected']]
     shortest = min(connected, key=lambda b: b['duration_s']) if connected else None
-    return {
+    return dict({
         'placement': placement['name'],
         'classification': classification,
         'branch_count': len(branches),
@@ -554,6 +561,41 @@ def evaluate_ready_pose(validator, ready, placement, meter,
         'failure_breakdown': sweep.failure_breakdown(all_outcomes),
         'branches': branches,
         'counts': counts,
+    }, **family_approach_summary(branches))
+
+
+def family_approach_summary(branches):
+    """Each reached family's shortest approach, and the slowest of them.
+
+    Exact from the branch records: each connected branch carries its shortest
+    feasible approach, so a family's shortest is the minimum over its
+    branches. Ties fall to the lower branch label.
+
+    Ranking uses the SLOWEST family, because a ready pose is good when it
+    reaches several families cheaply, not when its easiest entry is fast. Its
+    jerk counterpart is the largest peak jerk among the families' shortest
+    approaches, every one of which the pose may have to use.
+    """
+    shortest = {}
+    for branch in branches:
+        if not branch['connected']:
+            continue
+        family = branch['family']
+        current = shortest.get(family)
+        if current is None or ((branch['duration_s'], branch['branch'])
+                               < (current['duration_s'], current['branch'])):
+            shortest[family] = branch
+    if not shortest:
+        return {'family_shortest_duration_s': {},
+                'slowest_family_duration_s': None,
+                'family_shortest_max_peak_jerk': None}
+    return {
+        'family_shortest_duration_s': {str(f): b['duration_s']
+                                       for f, b in sorted(shortest.items())},
+        'slowest_family_duration_s': max(b['duration_s']
+                                         for b in shortest.values()),
+        'family_shortest_max_peak_jerk': max(b['max_peak_jerk']
+                                             for b in shortest.values()),
     }
 
 
@@ -575,6 +617,13 @@ def summarise_ready_pose(per_placement):
 
     Placements with no task candidate are excluded throughout, as
     connectivity_score already excludes them.
+
+    worst_duration_s and worst_peak_jerk come from family_approach_summary:
+    the slowest family's shortest approach, and the largest jerk among the
+    families' shortest approaches, at the worst placement. The shortest single
+    approach, the former key, is kept as worst_shortest_approach_s: it
+    measures only a pose's easiest entry, and ranked a pose with one fast
+    family above poses reaching every family faster.
     """
     eligible = [r for r in per_placement
                 if r['classification'] in (sweep.CONNECTED,
@@ -591,10 +640,15 @@ def summarise_ready_pose(per_placement):
         'worst_independent_branch_count': (
             min(r.get('connected_independent_branches', r['connected_branches'])
                 for r in eligible) if eligible else None),
-        'worst_duration_s': (max(r['best_duration_s'] for r in connected)
-                             if connected else None),
-        'worst_peak_jerk': (max(r['best_max_peak_jerk'] for r in connected)
-                            if connected else None),
+        'worst_duration_s': (max(r['slowest_family_duration_s']
+                                 for r in connected) if connected else None),
+        'worst_peak_jerk': (max(r['family_shortest_max_peak_jerk']
+                                for r in connected) if connected else None),
+        'worst_shortest_approach_s': (max(r['best_duration_s'] for r in connected)
+                                      if connected else None),
+        'worst_shortest_approach_jerk': (
+            max(r['best_max_peak_jerk'] for r in connected)
+            if connected else None),
     }
 
 
@@ -883,7 +937,11 @@ def main(argv=None):
     parser.add_argument('--tolerance', type=float, default=0.35)
     parser.add_argument('--out', default='pilot.json')
     parser.add_argument('--placements', default='nominal',
-                        help='comma-separated placement names from the envelope')
+                        help='comma-separated placement names from the '
+                             'envelope, or "all"')
+    parser.add_argument('--all-pool', action='store_true',
+                        help='evaluate every ready pose in the pool, not a '
+                             'pilot selection')
     parser.add_argument('--no-exhaustive-check', action='store_true',
                         help='skip the exhaustive run that verifies pruning')
     args = parser.parse_args(argv)
@@ -898,7 +956,9 @@ def main(argv=None):
         None, PREFIX_LAYERS, with_metadata=True)
     nominal_RG = trajectory_metadata['placement_RG']
     envelope = {p['name']: p for p in sweep.placements()}
-    names = [n.strip() for n in args.placements.split(',') if n.strip()]
+    names = ([p['name'] for p in sweep.placements()]
+             if args.placements.strip() == 'all'
+             else [n.strip() for n in args.placements.split(',') if n.strip()])
     unknown = [n for n in names if n not in envelope]
     if unknown:
         parser.error(f'unknown placements {unknown}')
@@ -934,7 +994,10 @@ def main(argv=None):
     with counting_collisions(validator, pool_meter), \
             counting_static_gates(pool_meter), pool_meter.phase('pool'):
         pool, pool_summary = sweep.build_candidate_pool(validator)
-    pilot = pilot_ready_poses(pool, args.pilot_count)
+    # The pilot selection keeps one anchor per rail position, so asking it
+    # for the whole pool would silently drop the others.
+    pilot = list(pool) if args.all_pool else pilot_ready_poses(pool,
+                                                               args.pilot_count)
 
     runs = []
     for _ in range(args.repeats):
@@ -987,6 +1050,8 @@ def main(argv=None):
         'pool': dict(pool_summary, size=len(pool),
                      seconds=pool_meter.seconds['pool'],
                      counts=pool_meter.counts),
+        'ready_pose_selection': ('entire pool' if args.all_pool
+                                 else PILOT_SELECTION_RULE),
         'pilot': [{'configuration': np.asarray(e['configuration']).tolist(),
                    'provenance': e['provenance'],
                    'anchor_name': e['anchor_name']} for e in pilot],

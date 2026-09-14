@@ -946,6 +946,9 @@ def connectivity_score(classifications):
 def rank_ready_poses(records):
     """Hard feasibility and connectivity first, duration second, jerk third.
 
+    worst_duration_s is the slowest IK family's shortest approach at the worst
+    placement, not the pose's single fastest entry.
+
     Jerk never excludes a candidate; it only orders candidates that are
     already feasible and equally connected.
     """
