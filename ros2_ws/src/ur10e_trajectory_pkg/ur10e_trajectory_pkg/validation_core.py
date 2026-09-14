@@ -54,15 +54,43 @@ DEFAULT_IK_SEED = 20260913
 # less exploration than the numbers suggest.
 IK_SEARCH_LIMIT = 1
 
+# Stopping threshold handed to ikine_LM. The solver minimises the QUADRATIC
+# error E = 0.5 * e.T @ We @ e over the 6-vector angle-axis error e, and stops
+# at E < tol. So this is not a bound on pose error directly: the previous
+# value of 1e-4 admitted |e| up to sqrt(2e-4) = 0.0141, about 0.81 deg when
+# angular error dominates.
+#
+# That explained the census distribution exactly: accepted orientation error
+# had a median of 0.44 deg with a viability cliff between 0.25 and 0.5 deg.
+# Those numbers described this stopping rule, not the task.
+#
+# 5e-7 is the value implied by a 1 mm translation bound under equal weighting,
+# and is tighter than the roughly 1.5e-6 implied by 0.1 deg of orientation
+# alone, so one scalar serves both. Measured over the 500-waypoint trajectory,
+# against the old 1e-4:
+#
+#   orientation error, median   0.4395 deg  ->  0.0008 deg
+#   waypoints within 1mm/0.1deg      249    ->  500
+#   longest segment                  417    ->  419
+#   median solver iterations           2    ->  2
+#   tracking run time                0.4 s  ->  0.4 s
+#
+# Three orders of magnitude of orientation accuracy at no measurable cost, so
+# there was never a reason to relax the acceptance limit to match the old
+# distribution. Acceptance must still check position and orientation errors
+# explicitly: this is a scalar on a weighted sum, not a bound on either.
+IK_SOLVER_TOL = 5e-7
+
 class TrajectoryValidator:
     def __init__(self, urdf_path, mesh_base_path=None, framerate=30,
-                 seed=DEFAULT_IK_SEED):
+                 seed=DEFAULT_IK_SEED, solver_tol=IK_SOLVER_TOL):
         self.framerate = framerate
 
         # Instance-owned generator, not numpy's global one, so validating a
         # trajectory cannot disturb random state elsewhere in the process.
         self._seed = seed
         self._rng = np.random.default_rng(seed)
+        self._solver_tol = solver_tol
 
         # rtb.ERobot.URDF() (and pybullet's loadURDF) resolve package://
         # mesh URIs against their own default search paths -- NOT against
@@ -335,7 +363,7 @@ class TrajectoryValidator:
 
         q0 = np.concatenate(([rail_seed], q_seed_arm))
         sol = self.robot.ikine_LM(T_target, end=EE_LINK, q0=q0,
-                                  mask=[1, 1, 1, 1, 1, 1], tol=1e-4,
+                                  mask=[1, 1, 1, 1, 1, 1], tol=self._solver_tol,
                                   slimit=IK_SEARCH_LIMIT, seed=self._seed)
         return sol.q[0],sol.q[1:], sol
 

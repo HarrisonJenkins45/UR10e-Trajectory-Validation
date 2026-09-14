@@ -22,6 +22,11 @@ from ur10e_trajectory_pkg.validation_core import (
     TrajectoryValidator,
 )
 
+from ur10e_trajectory_pkg.pose_metrics import (
+    PROVISIONAL_ORIENTATION_TOL_RAD,
+    PROVISIONAL_POSITION_TOL_M,
+)
+
 from test_geometry_invariants import _urdf_path
 
 REPEATS = 5
@@ -294,3 +299,45 @@ def test_local_solver_lands_in_a_degenerate_branch_where_a_good_one_exists(
         f'best condition number from a wide seed bank was {best:.1f}; the '
         'premise that a good branch exists for this target no longer holds'
     )
+
+
+# --------------------------------------------------------------------------
+# Stopping tolerance
+# --------------------------------------------------------------------------
+
+def test_solver_tolerance_bounds_the_quadratic_error_not_the_pose_error():
+    """Document what tol actually constrains, because it is not obvious.
+
+    ikine_LM minimises E = 0.5 * e.T @ We @ e over the 6-vector angle-axis
+    error and stops at E < tol, so tol bounds a weighted sum rather than
+    either pose error. The implied bound on the error norm is sqrt(2*tol).
+
+    The old value of 1e-4 therefore admitted |e| up to 0.0141, about 0.81 deg
+    when angular error dominates, which is exactly where the census found the
+    orientation distribution sitting.
+    """
+    from ur10e_trajectory_pkg.validation_core import IK_SOLVER_TOL
+
+    implied_norm = np.sqrt(2.0 * IK_SOLVER_TOL)
+    assert implied_norm <= PROVISIONAL_POSITION_TOL_M * 1.5, (
+        'the stopping tolerance no longer implies an error norm compatible '
+        'with the provisional 1 mm position bound'
+    )
+    assert np.rad2deg(implied_norm) <= np.rad2deg(PROVISIONAL_ORIENTATION_TOL_RAD)
+
+    # The old value would fail both of the above; kept as the contrast.
+    assert np.rad2deg(np.sqrt(2.0 * 1e-4)) > np.rad2deg(
+        PROVISIONAL_ORIENTATION_TOL_RAD)
+
+
+def test_tightening_the_tolerance_is_configurable(validator, nominal_pose):
+    """A caller can still trade accuracy for effort deliberately."""
+    from ur10e_trajectory_pkg.validation_core import IK_SOLVER_TOL
+
+    assert validator._solver_tol == IK_SOLVER_TOL
+    loose = TrajectoryValidator(
+        _urdf_path(),
+        mesh_base_path=get_package_share_directory('ur_description'),
+        solver_tol=1e-4,
+    )
+    assert loose._solver_tol == 1e-4

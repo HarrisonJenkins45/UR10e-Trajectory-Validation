@@ -16,8 +16,11 @@ Four modes, each deterministic:
 
 Reading the result:
 
-  fresh passes where tracking fails          branch SELECTION, greedy
-                                             tracking strands itself
+  fresh passes where tracking fails          continuation failure, consistent
+                                             with branch SELECTION or with
+                                             local DISCOVERY failing at that
+                                             waypoint; these modes cannot
+                                             separate the two
   wide_bank passes where fresh fails         branch DISCOVERY, local
                                              perturbation cannot cross
                                              branches
@@ -78,14 +81,15 @@ GATE_KEYS = (
 )
 
 
-def _validator(urdf_path, mesh_path, skip_gate=None):
+def _validator(urdf_path, mesh_path, skip_gate=None, solver_tol=None):
     """Build a validator, optionally with one gate disabled.
 
     Ablation runs are kept separate rather than combined, because disabling a
     gate changes which waypoints are accepted and therefore the seed handed to
     every later waypoint. The runs are not comparable point by point.
     """
-    validator = TrajectoryValidator(urdf_path, mesh_base_path=mesh_path)
+    kwargs = {} if solver_tol is None else {'solver_tol': solver_tol}
+    validator = TrajectoryValidator(urdf_path, mesh_base_path=mesh_path, **kwargs)
     if skip_gate == 'collision':
         validator.check_all_collisions = lambda q, verbose=False: False
     return validator
