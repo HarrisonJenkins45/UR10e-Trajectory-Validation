@@ -658,11 +658,21 @@ class TrajectoryValidator:
                 cond = float(sv[0] / sv[-1]) if sv[-1] > 1e-9 else float('inf')
 
             arm_violation = rail_violation = None
+            arm_delta = arm_speed_out = rail_delta = None
             if check_jump and finite:
-                arm_speed = np.abs(q_arm - prev_arm) / dt_waypoint
+                # Raw signed delta kept alongside the speed. A revolute joint
+                # solution is returned wrapped into [-pi, pi], so a smooth
+                # motion crossing that boundary shows up as a delta near 2*pi:
+                # a representation discontinuity, not a physical velocity. The
+                # two are indistinguishable from the speed alone.
+                delta = np.asarray(q_arm) - np.asarray(prev_arm)
+                arm_delta = delta.tolist()
+                arm_speed = np.abs(delta) / dt_waypoint
+                arm_speed_out = arm_speed.tolist()
                 arm_violation = bool(np.any(arm_speed > max_joint_vel_threshold))
                 if prev_rail is not None:
-                    rail_speed = abs(new_rail - prev_rail) / dt_waypoint
+                    rail_delta = float(new_rail - prev_rail)
+                    rail_speed = abs(rail_delta) / dt_waypoint
                     rail_violation = bool(rail_speed > max_rail_vel_threshold)
                 else:
                     rail_violation = False
@@ -693,6 +703,9 @@ class TrajectoryValidator:
                 gate_singular=(None if cond is None
                                else bool(cond > condition_number_threshold)),
                 gate_arm_velocity=arm_violation,
+                arm_delta_rad=arm_delta,
+                arm_speed_rad_s=arm_speed_out,
+                rail_delta_m=rail_delta,
                 gate_rail_velocity=rail_violation,
                 gate_collision=(None if res is None else bool(res['collide'])),
                 accepted=bool(res is not None and res['ok']),
