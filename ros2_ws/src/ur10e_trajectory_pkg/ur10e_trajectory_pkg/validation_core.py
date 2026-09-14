@@ -244,6 +244,35 @@ class TrajectoryValidator:
             self._rail_vel_limit = (min(float(rail_qdlim), RAIL_VEL_SAFETY_CAP)
                                     if rail_qdlim else RAIL_VEL_SAFETY_CAP)
 
+            # Arm velocity ceilings, read the same way. These come from
+            # Universal Robots: 120 deg/s for shoulder pan and lift, 180 deg/s
+            # for the elbow and wrists, and our URDF carries them unmodified
+            # from the original.
+            #
+            # They were previously ignored. A literal 2.0 rad/s, about 115
+            # deg/s, was typed into three function signatures and applied
+            # uniformly, holding the wrists to roughly two thirds of their
+            # rated speed. The wrists are what performs a tumble, so that was
+            # the largest artificial limit on how fast one could be
+            # reproduced, and it came from no document at all.
+            #
+            # No safety cap here. The rail's cap is a deliberate derate on
+            # hardware we have no trustworthy data for; the arm's limits are
+            # the manufacturer's own.
+            self._arm_vel_limits = np.array([
+                float(getattr(self.robot.links[self._link_index_by_name[name]],
+                              'qdlim', 0.0) or 0.0)
+                for name in self._q_link_names[1:]
+            ])
+            if not np.all(self._arm_vel_limits > 0):
+                raise ValueError(
+                    'URDF does not declare a velocity limit for every arm '
+                    f'joint: got {self._arm_vel_limits.tolist()}'
+                )
+
+
+
+
             # # Kept for visualization/back-compat only (e.g. anything that
             # # still expects validator.env / validator.floor_box /
             # # validator.wall_box to exist) -- collision checking below no
@@ -263,6 +292,15 @@ class TrajectoryValidator:
             self._init_pybullet_collision_model()
         finally:
             os.unlink(self._resolved_urdf_path)
+
+    @property
+    def velocity_limits(self):
+        """Per-joint velocity ceilings in q_full order, straight from the URDF.
+
+        The rail's is clamped by RAIL_VEL_SAFETY_CAP, a deliberate derate; the
+        arm's are Universal Robots' own values, unmodified.
+        """
+        return np.concatenate(([self._rail_vel_limit], self._arm_vel_limits))
 
     def _init_pybullet_collision_model(self):
         """Load the same URDF into a headless pybullet client, purely for
@@ -538,7 +576,7 @@ class TrajectoryValidator:
                                        prev_arm=None, check_jump=False,
                                        dt_waypoint=None,
                                        max_rail_vel_threshold=None,
-                                       max_joint_vel_threshold=2.0,
+                                       max_joint_vel_threshold=None,
                                        condition_number_threshold=50.0,
                                        max_rail_attempts=10,
                                        verbose=False, label='',
@@ -561,6 +599,10 @@ class TrajectoryValidator:
         # because it is per-instance -- it depends on the loaded model.
         if max_rail_vel_threshold is None:
             max_rail_vel_threshold = self._rail_vel_limit
+        # Same treatment for the arm: None means the URDF's per-joint values.
+        # A scalar is still accepted, as a deliberate uniform derate.
+        if max_joint_vel_threshold is None:
+            max_joint_vel_threshold = self._arm_vel_limits
 
         arm_limits = (self.robot.qlim[0][ARM_SLICE], self.robot.qlim[1][ARM_SLICE])
         arm_periodic = PERIODIC_JOINTS[ARM_SLICE]
@@ -841,7 +883,7 @@ class TrajectoryValidator:
     def find_feasible_segments(self, ee_x, ee_y, ee_z, ee_quat, q_seed, min_length,
                                     dt_waypoint,
                                     max_rail_vel_threshold=None,
-                                    max_joint_vel_threshold=2.0,
+                                    max_joint_vel_threshold=None,
                                     condition_number_threshold=50.0,
                                     verbose=False, recorder=None):
             # Independent of any previous validation on this instance.
@@ -1106,7 +1148,7 @@ class TrajectoryValidator:
     
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
                                   max_rail_vel_threshold=None,
-                                   max_joint_vel_threshold=2.0,
+                                   max_joint_vel_threshold=None,
                                    condition_number_threshold=50.0,
                                    t_transition=2.0, t_traj=10.0,
                                    check_transition=False,

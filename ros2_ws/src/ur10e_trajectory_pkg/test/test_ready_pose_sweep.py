@@ -16,7 +16,6 @@ from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 from test_geometry_invariants import _urdf_path
 
-VELOCITY = motion_limits.velocity_vector()
 ACCELERATION = motion_limits.acceleration_vector()
 
 
@@ -25,6 +24,12 @@ def validator():
     return TrajectoryValidator(
         _urdf_path(), mesh_base_path=get_package_share_directory('ur_description')
     )
+
+
+@pytest.fixture(scope='module')
+def VELOCITY(validator):
+    """Per-joint ceilings read from the URDF, not a typed-in table."""
+    return motion_limits.velocity_vector(validator)
 
 
 @pytest.fixture(scope='module')
@@ -142,7 +147,7 @@ def test_jerk_falls_as_duration_rises(ready):
     assert peaks[0] > peaks[1] > peaks[2]
 
 
-def test_minimum_duration_is_the_same_policy_for_every_candidate(ready):
+def test_minimum_duration_is_the_same_policy_for_every_candidate(ready, VELOCITY):
     target = ready + 0.3
     duration = sweep.minimum_duration(ready, target, np.zeros(7), np.zeros(7),
                                       VELOCITY, ACCELERATION)
@@ -159,7 +164,7 @@ def test_minimum_duration_is_the_same_policy_for_every_candidate(ready):
 # Jerk ranks, never rejects
 # --------------------------------------------------------------------------
 
-def test_jerk_is_reported_against_several_references(validator, ready):
+def test_jerk_is_reported_against_several_references(validator, ready, VELOCITY):
     result = sweep.evaluate_approach(validator, ready, ready + 0.05,
                                      np.zeros(7), np.zeros(7),
                                      VELOCITY, ACCELERATION)
@@ -169,7 +174,7 @@ def test_jerk_is_reported_against_several_references(validator, ready):
 
 
 def test_exceeding_the_assumed_jerk_reference_does_not_make_it_infeasible(
-        validator, ready):
+        validator, ready, VELOCITY):
     """Nothing may be called hardware-infeasible for exceeding an assumed
     value. No public UR jerk limit exists."""
     result = sweep.evaluate_approach(validator, ready, ready + 0.4,
@@ -338,7 +343,7 @@ def test_the_entry_state_depends_on_the_continuation(ready):
     assert not np.allclose(first, second)
 
 
-def test_winding_expansion_belongs_to_the_runner(validator, ready):
+def test_winding_expansion_belongs_to_the_runner(validator, ready, VELOCITY):
     """evaluate_approach evaluates one supplied representation.
 
     Which lifts are reachable depends on where the approach starts and how

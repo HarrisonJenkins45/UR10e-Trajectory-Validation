@@ -9,9 +9,11 @@ how LEGACY_MATLAB_START_Q survived as long as it did.
 
 What is actually known:
 
-  velocity, arm     AUTHORITATIVE. Universal Robots publishes 120 deg/s for
-                    shoulder pan and lift, 180 deg/s for the rest. The 2 rad/s
-                    used so far is uniform and conservative against both.
+  velocity, arm     CERTIFIED, and READ FROM THE URDF rather than typed here.
+                    Universal Robots publishes 120 deg/s for shoulder pan and
+                    lift and 180 deg/s for the rest, and our URDF carries those
+                    unmodified from the original. The table below is a
+                    cross-check on the URDF, not the operative value.
 
   acceleration, arm PROVISIONAL. The pinned official description states
                     outright that acceleration limits are not publicly
@@ -70,8 +72,11 @@ _NO_PUBLIC_JERK = ('no public UR jerk limit; movej exposes commanded '
 _RAIL_UNKNOWN = ('rail drive, gearing and carriage load unknown; URDF value '
                  'carries a TODO and the README marks it uncertain')
 
-# Published per-joint velocity limits. The uniform 2 rad/s used so far is
-# below all of these, so nothing measured against it was ever optimistic.
+# Published per-joint velocity limits, kept as a REFERENCE to cross-check the
+# URDF against, not as the values the code uses. The URDF carries these
+# unmodified from Universal Robots, so it is the source; duplicating them here
+# as the operative numbers is how two copies drift apart. A test asserts the
+# URDF still agrees with this table.
 ARM_VELOCITY = {
     'shoulder_pan_joint': Limit(np.deg2rad(120.0), 'rad/s', CERTIFIED, _UR_PUBLISHED),
     'shoulder_lift_joint': Limit(np.deg2rad(120.0), 'rad/s', CERTIFIED, _UR_PUBLISHED),
@@ -90,25 +95,25 @@ RAIL_VELOCITY = Limit(1.0, 'm/s', PROVISIONAL,
 RAIL_ACCELERATION = Limit(5.0, 'm/s^2', ASSUMED, _RAIL_UNKNOWN)
 RAIL_JERK = Limit(100.0, 'm/s^3', ASSUMED, _RAIL_UNKNOWN)
 
-# The uniform arm velocity cap the validator has used throughout. Kept as its
-# own entry rather than silently replaced: every result on this branch was
-# measured against it, and raising it to the published values would change
-# them all.
-APPLIED_ARM_VELOCITY = Limit(2.0, 'rad/s', PROVISIONAL,
-                             'uniform application cap, conservative against '
-                             'every published UR10e joint limit')
+# Retired. A literal 2.0 rad/s, about 115 deg/s, was applied uniformly to
+# every arm joint and came from no document at all. It held the wrists to
+# roughly two thirds of their rated 180 deg/s, and the wrists are what
+# performs a tumble, so it was the largest artificial limit on how fast one
+# could be reproduced. Kept only so historical results stay interpretable.
+RETIRED_UNIFORM_CAP = Limit(2.0, 'rad/s', ASSUMED,
+                            'former uniform application cap; sourced from '
+                            'nothing, replaced by the URDF per-joint values')
 
 
-def velocity_vector(uniform_cap=True):
-    """Velocity limits in JOINT_NAMES order.
+def velocity_vector(validator):
+    """Per-joint velocity ceilings, READ from the URDF via the validator.
 
-    uniform_cap keeps the 2 rad/s the whole branch was measured against.
-    Setting it False uses the published per-joint values, which is correct for
-    hardware but changes every recorded result.
+    No longer a typed-in table. The URDF is Universal Robots' own file and is
+    the single source for the arm; the rail's value is clamped there by a
+    safety cap we chose deliberately, because we have no trustworthy data for
+    that hardware.
     """
-    arm = ([APPLIED_ARM_VELOCITY.value] * 6 if uniform_cap
-           else [ARM_VELOCITY[name].value for name in JOINT_NAMES[1:]])
-    return np.array([RAIL_VELOCITY.value] + arm)
+    return validator.velocity_limits
 
 
 def acceleration_vector():
@@ -124,7 +129,7 @@ def certification_status():
     entries = {
         'arm_velocity': min((ARM_VELOCITY[n].status for n in JOINT_NAMES[1:]),
                             key=lambda s: (s != CERTIFIED)),
-        'applied_arm_velocity': APPLIED_ARM_VELOCITY.status,
+        'urdf_arm_velocity': CERTIFIED,
         'arm_acceleration': ARM_ACCELERATION.status,
         'arm_jerk': ARM_JERK.status,
         'rail_velocity': RAIL_VELOCITY.status,
@@ -154,7 +159,7 @@ def manifest():
     return {
         'arm_velocity': {name: ARM_VELOCITY[name].as_dict()
                          for name in JOINT_NAMES[1:]},
-        'applied_arm_velocity': APPLIED_ARM_VELOCITY.as_dict(),
+        'retired_uniform_cap': RETIRED_UNIFORM_CAP.as_dict(),
         'arm_acceleration': ARM_ACCELERATION.as_dict(),
         'arm_jerk': ARM_JERK.as_dict(),
         'rail_velocity': RAIL_VELOCITY.as_dict(),
