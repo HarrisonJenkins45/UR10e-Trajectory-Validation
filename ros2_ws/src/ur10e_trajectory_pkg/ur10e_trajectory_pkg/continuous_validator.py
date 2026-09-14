@@ -29,6 +29,23 @@ hide that.
 
 Nothing here is a graph cost. A trajectory that passes the graph and fails
 this is a real finding about the discrete model, which is the point.
+
+First full measurement on the graph path, with the corrected world-frame task
+twist, split at the approach boundary:
+
+    interval      twist   min alpha*  unsolved  max cond   at t
+    approach      fail        0.000          0       inf   0.00
+    trajectory    pass        1.277          0      10.4  51.90
+
+The trajectory passes: every LP solved and the minimum scaling is above 1.
+The margin is 1.277, not the 15.7 reported before the twist was corrected --
+that figure came from a twist derived from the joint velocity being
+evaluated, which was producible by construction. The real task demands
+roughly 78% of what the arm can deliver at the tightest point.
+
+The approach fails for a real reason rather than a numerical one: zero
+unsolved LPs, and an alpha* of exactly 0 at the singular start, where the
+commanded task twist is unachievable at any rate.
 """
 import numpy as np
 from scipy.interpolate import PchipInterpolator
