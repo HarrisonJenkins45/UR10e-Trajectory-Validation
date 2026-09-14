@@ -71,6 +71,18 @@ JERK_REFERENCES_RAD_S3 = (100.0, 250.0, 500.0, 1000.0)
 # constant.
 CHARACTERISTIC_LENGTH_M = 1.3
 
+# Collision-check resolution, PER JOINT. A single scalar applied across the
+# configuration vector silently means "0.05 metres" for the rail and "0.05
+# radians" for the arm, which are different quantities that happen to share a
+# number. Stated separately so neither is inherited from the other.
+COLLISION_STEP_RAIL_M = 0.05
+COLLISION_STEP_ARM_RAD = 0.05
+
+
+def collision_step_bounds():
+    """Per-joint resolution bound, in JOINT_NAMES order."""
+    return np.array([COLLISION_STEP_RAIL_M] + [COLLISION_STEP_ARM_RAD] * 6)
+
 
 def placements(envelope=PROVISIONAL_STAGE7_ENVELOPE_V1, seed=0):
     """29 deterministic placements: nominal, 12 axis extrema, 16 coupled."""
@@ -277,8 +289,8 @@ DIRECT_APPROACH_UNCONNECTED = 'direct_approach_unconnected'
 CONNECTED = 'connected'
 
 
-def collision_check_indices(position, max_step_rad=0.05):
-    """Indices to check so consecutive ones differ by at most max_step_rad.
+def collision_check_indices(position, step_bounds=None):
+    """Indices to check so no joint moves more than its own bound between them.
 
     Walks the curve rather than estimating a count from total variation and
     sampling uniformly in time. A quintic has nonuniform speed, so a uniform
@@ -291,10 +303,13 @@ def collision_check_indices(position, max_step_rad=0.05):
     caller can tell.
     """
     position = np.asarray(position, dtype=float)
+    bounds = collision_step_bounds() if step_bounds is None else np.asarray(step_bounds)
     chosen = [0]
     for index in range(1, len(position)):
-        step = float(np.max(np.abs(position[index] - position[chosen[-1]])))
-        if step > max_step_rad:
+        # Ratio against each joint's OWN bound, so metres and radians are not
+        # compared against one shared number.
+        step = float(np.max(np.abs(position[index] - position[chosen[-1]]) / bounds))
+        if step > 1.0:
             # index is already too far, so take the LAST sample still inside
             # the bound. Taking index itself would leave a gap wider than the
             # bound, which is the error this function exists to prevent.
@@ -305,20 +320,35 @@ def collision_check_indices(position, max_step_rad=0.05):
     return np.asarray(chosen)
 
 
-def achieved_step(position, indices):
-    """Largest coordinate difference between consecutive CHECKED points."""
+def achieved_step(position, indices, step_bounds=None):
+    """Worst consecutive step as a FRACTION of each joint's own bound.
+
+    Returns a dimensionless ratio, so a value at or below 1.0 means every
+    joint stayed inside its own limit. A raw coordinate difference could not
+    say that, since the rail's and the arm's limits are different quantities.
+    """
+    bounds = collision_step_bounds() if step_bounds is None else np.asarray(step_bounds)
     checked = np.asarray(position, dtype=float)[np.asarray(indices)]
     if len(checked) < 2:
         return 0.0
-    return float(np.max(np.abs(np.diff(checked, axis=0))))
+    return float(np.max(np.abs(np.diff(checked, axis=0)) / bounds))
 
 
-def approach_collides(validator, position, max_step_rad=0.05):
-    """Collision along an approach, at a bounded coordinate resolution."""
+def approach_collides(validator, position, step_bounds=None, counter=None):
+    """Collision along an approach, at a bounded per-joint resolution.
+
+    counter, when given, receives the number of configurations queried, since
+    the corrected resolution makes that cost path-dependent rather than a
+    fixed figure that could be assumed.
+    """
     position = np.asarray(position, dtype=float)
     if len(position) < 2:
+        if counter is not None:
+            counter.append(1)
         return bool(validator.check_all_collisions(position[0]))
-    indices = collision_check_indices(position, max_step_rad)
+    indices = collision_check_indices(position, step_bounds)
+    if counter is not None:
+        counter.append(len(indices))
     return any(validator.check_all_collisions(position[i]) for i in indices)
 
 
@@ -433,10 +463,18 @@ def branch_clusters(configurations, tolerance=0.35):
     alternatives, and a ready pose that can only enter through a single
     branch is fragile however cheap that entry is.
     """
+    # Canonical order before the greedy pass, so the result does not depend on
+    # the order candidates happened to arrive in. Greedy clustering is
+    # order-dependent in general, and branch count is about to become a
+    # primary ranking key.
+    ordered = sorted(
+        (np.asarray(c, dtype=float) for c in configurations),
+        key=lambda c: tuple(np.round(c, 9)))
+
     representatives = []
-    for configuration in configurations:
-        arm = np.asarray(configuration, dtype=float)[ARM_SLICE]
-        rail = float(np.asarray(configuration)[RAIL_INDEX])
+    for configuration in ordered:
+        arm = configuration[ARM_SLICE]
+        rail = float(configuration[RAIL_INDEX])
         for other_rail, other_arm in representatives:
             wrapped = np.abs(np.angle(np.exp(1j * (arm - other_arm))))
             if (np.max(wrapped) <= tolerance

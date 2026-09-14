@@ -274,10 +274,11 @@ def test_the_collision_resolution_bound_actually_holds(ready):
                                               np.zeros(7), 3.0)
     _, position, _, _, _ = sweep.sample_quintic(coefficients, 3.0, samples=2000)
 
-    for bound in (0.02, 0.05, 0.2):
-        indices = sweep.collision_check_indices(position, bound)
-        assert sweep.achieved_step(position, indices) <= bound + 1e-9, (
-            f'checked points differ by more than the {bound} rad bound'
+    for scale in (0.4, 1.0, 4.0):
+        bounds = sweep.collision_step_bounds() * scale
+        indices = sweep.collision_check_indices(position, bounds)
+        assert sweep.achieved_step(position, indices, bounds) <= 1.0 + 1e-9, (
+            'a checked pair moved further than its own per-joint bound'
         )
 
 
@@ -286,8 +287,10 @@ def test_a_tighter_bound_checks_more_points(ready):
     coefficients = sweep.quintic_coefficients(ready, target, np.zeros(7),
                                               np.zeros(7), 3.0)
     _, position, _, _, _ = sweep.sample_quintic(coefficients, 3.0, samples=2000)
-    assert (len(sweep.collision_check_indices(position, 0.01))
-            > len(sweep.collision_check_indices(position, 0.2)))
+    tight = sweep.collision_step_bounds() * 0.2
+    loose = sweep.collision_step_bounds() * 4.0
+    assert (len(sweep.collision_check_indices(position, tight))
+            > len(sweep.collision_check_indices(position, loose)))
 
 
 def test_resolution_follows_the_move_size(ready):
@@ -298,8 +301,8 @@ def test_resolution_follows_the_move_size(ready):
     large = sweep.sample_quintic(
         sweep.quintic_coefficients(ready, ready + 2.0, np.zeros(7),
                                    np.zeros(7), 3.0), 3.0, 2000)[1]
-    assert (len(sweep.collision_check_indices(large, 0.05))
-            > len(sweep.collision_check_indices(small, 0.05)))
+    assert (len(sweep.collision_check_indices(large))
+            > len(sweep.collision_check_indices(small)))
 
 
 # --------------------------------------------------------------------------
@@ -413,3 +416,52 @@ def test_anchors_are_tagged_and_never_replace_broad_finalists():
     assert all(a['provenance'] == 'anchor' for a in anchors)
     assert all(a['anchor_name'] for a in anchors)
     assert len({a['anchor_name'] for a in anchors}) == len(sweep.ANCHOR_POSTURES_DEG)
+
+
+def test_the_resolution_bound_is_per_joint_not_one_shared_number():
+    """0.05 applied across the vector means metres for the rail and radians
+    for the arm, which are different quantities sharing a number."""
+    bounds = sweep.collision_step_bounds()
+    assert bounds[0] == sweep.COLLISION_STEP_RAIL_M
+    assert np.all(bounds[1:] == sweep.COLLISION_STEP_ARM_RAD)
+    assert len(bounds) == 7
+
+
+def test_a_rail_only_move_is_bounded_in_metres(ready):
+    """The rail bound must apply to the rail, whatever the arm bound is."""
+    target = ready.copy()
+    target[0] += 1.0
+    coefficients = sweep.quintic_coefficients(ready, target, np.zeros(7),
+                                              np.zeros(7), 3.0)
+    _, position, _, _, _ = sweep.sample_quintic(coefficients, 3.0, 2000)
+    indices = sweep.collision_check_indices(position)
+    rail_steps = np.abs(np.diff(position[indices][:, 0]))
+    assert np.max(rail_steps) <= sweep.COLLISION_STEP_RAIL_M + 1e-9
+
+
+def test_branch_clustering_is_invariant_under_input_order():
+    """Greedy clustering is order-dependent in general, and branch count is
+    now a primary ranking key."""
+    rng = np.random.default_rng(0)
+    configurations = [np.concatenate(([rng.uniform(0, 3)],
+                                      rng.uniform(-np.pi, np.pi, 6)))
+                      for _ in range(40)]
+    reference = sweep.branch_clusters(configurations)
+    for seed in range(5):
+        shuffled = list(configurations)
+        np.random.default_rng(seed).shuffle(shuffled)
+        assert sweep.branch_clusters(shuffled) == reference
+
+
+def test_branch_count_sensitivity_to_tolerance_is_reported():
+    """The count depends on the tolerance, so nearby values must be checked
+    rather than one figure trusted."""
+    rng = np.random.default_rng(1)
+    configurations = [np.concatenate(([rng.uniform(0, 3)],
+                                      rng.uniform(-np.pi, np.pi, 6)))
+                      for _ in range(40)]
+    counts = [sweep.branch_clusters(configurations, tolerance=t)
+              for t in (0.25, 0.35, 0.50)]
+    assert counts == sorted(counts, reverse=True), (
+        'a looser tolerance must not increase the cluster count'
+    )
