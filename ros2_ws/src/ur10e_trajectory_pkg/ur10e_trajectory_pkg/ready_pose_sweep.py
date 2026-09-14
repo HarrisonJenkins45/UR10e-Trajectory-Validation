@@ -14,9 +14,11 @@ mean different things and one of them is not about the ready pose at all:
                          GENERATOR found nothing here, not that the placement
                          is intrinsically infeasible; candidate generation may
                          simply be incomplete
-  approach_unconnected   task-feasible candidates exist and this ready pose
-                         cannot reach any of them. This one IS about the
-                         ready pose
+  direct_approach_unconnected
+                         task-feasible candidates exist and no DIRECT quintic
+                         from this ready pose reaches any of them. This one IS
+                         about the ready pose. The reasons stay visible through
+                         failure_breakdown rather than being collapsed
   connected              at least one valid approach exists
 
 A placement classified no_task_candidate must not count against a ready
@@ -334,22 +336,91 @@ def achieved_step(position, indices, step_bounds=None):
     return float(np.max(np.abs(np.diff(checked, axis=0)) / bounds))
 
 
-def approach_collides(validator, position, step_bounds=None, counter=None):
+def approach_collides(validator, position, step_bounds=None, counter=None,
+                      stats=None):
     """Collision along an approach, at a bounded per-joint resolution.
 
-    counter, when given, receives the number of configurations queried, since
-    the corrected resolution makes that cost path-dependent rather than a
-    fixed figure that could be assumed.
+    counter, when given, receives the number of configurations ACTUALLY
+    queried, which stops at the first collision; the corrected resolution makes
+    that cost path-dependent rather than a fixed figure that could be assumed.
+    stats, when given, also receives the planned query count and the achieved
+    step ratio, so a caller can see whether the resolution bound held.
     """
     position = np.asarray(position, dtype=float)
-    if len(position) < 2:
-        if counter is not None:
-            counter.append(1)
-        return bool(validator.check_all_collisions(position[0]))
-    indices = collision_check_indices(position, step_bounds)
+    indices = (np.array([0]) if len(position) < 2
+               else collision_check_indices(position, step_bounds))
+    queried = 0
+    collides = False
+    for index in indices:
+        queried += 1
+        if validator.check_all_collisions(position[index]):
+            collides = True
+            break
     if counter is not None:
-        counter.append(len(indices))
-    return any(validator.check_all_collisions(position[i]) for i in indices)
+        counter.append(queried)
+    if stats is not None:
+        stats['collision_queries'] = queried
+        stats['collision_queries_planned'] = int(len(indices))
+        stats['collision_achieved_step'] = achieved_step(position, indices,
+                                                         step_bounds)
+    return collides
+
+
+# Largest arm step between consecutive prefix layers that can be a genuine
+# motion rather than an unlifted wrap. Half a turn in one 0.1 s layer is
+# 31 rad/s, far beyond any joint's limit.
+PREFIX_CONTINUITY_RAD = np.pi
+
+
+def lifted_prefix(validator, prefix, destination=None):
+    """A continuous lifted prefix, the only form entry_state_from_prefix takes.
+
+    Candidates are stored canonically in [-pi, pi], so a prefix crossing a
+    wrap differentiates to about 60 rad/s, minimum_duration returns None and
+    the ready pose is silently classified unconnected. Each layer is lifted
+    toward the previous LIFTED layer instead.
+
+    destination, when given, is a lifted representation of layer 0 chosen by
+    destination_lifts. The whole prefix follows it: shifting layer 0 by 2*pi*k
+    without shifting layers 1 and 2 would reintroduce the same discontinuity
+    one layer later.
+
+    Returns None when no continuous lift exists within joint limits, which
+    means this continuation is invalid from this representation.
+    """
+    from ur10e_trajectory_pkg.configurations import PERIODIC_JOINTS
+    from ur10e_trajectory_pkg.joint_coordinates import (
+        TWO_PI,
+        nearest_feasible_lift,
+    )
+
+    prefix = np.asarray(prefix, dtype=float)
+    lower, upper = validator.robot.qlim
+    arm_limits = (lower[ARM_SLICE], upper[ARM_SLICE])
+    periodic = PERIODIC_JOINTS[ARM_SLICE]
+
+    first = prefix[0] if destination is None else np.asarray(destination, float)
+    if destination is not None:
+        if abs(first[RAIL_INDEX] - prefix[0][RAIL_INDEX]) > 1e-9:
+            raise ValueError('destination rail differs from layer 0')
+        turns = (first[ARM_SLICE] - prefix[0][ARM_SLICE]) / TWO_PI
+        if (np.any(np.abs(turns - np.rint(turns)) > 1e-9)
+                or np.any(np.rint(turns)[~np.asarray(periodic)] != 0)):
+            raise ValueError('destination is not a lift of layer 0')
+
+    lifted = [first]
+    for layer in prefix[1:]:
+        arm = nearest_feasible_lift(layer[ARM_SLICE], lifted[-1][ARM_SLICE],
+                                    arm_limits, periodic)
+        lifted.append(np.concatenate(([layer[RAIL_INDEX]], arm)))
+    lifted = np.stack(lifted)
+
+    if np.any(lifted < lower - 1e-9) or np.any(lifted > upper + 1e-9):
+        return None
+    if np.any(np.abs(np.diff(lifted[:, ARM_SLICE], axis=0))
+              >= PREFIX_CONTINUITY_RAD):
+        return None
+    return lifted
 
 
 def entry_state_from_prefix(prefix, dt):
@@ -371,6 +442,13 @@ def entry_state_from_prefix(prefix, dt):
         raise ValueError(
             'entry state needs at least three layers: PCHIP derives its '
             'initial derivatives from the first three configurations'
+        )
+    if np.any(np.abs(np.diff(prefix[:, ARM_SLICE], axis=0))
+              >= PREFIX_CONTINUITY_RAD):
+        raise ValueError(
+            'prefix is not continuous: an arm joint steps half a turn or more '
+            'between layers, which is an unlifted wrap. Build it with '
+            'lifted_prefix'
         )
     times = np.arange(len(prefix)) * dt
     interpolator = PchipInterpolator(times, prefix, axis=0)
@@ -398,22 +476,41 @@ def destination_lifts(validator, target, ready, velocity_limits, duration):
             for arm in arms]
 
 
+# Machine-readable failure reasons. The prose reason stays for people; these
+# are what a runner counts, so the causes behind direct_approach_unconnected
+# are not collapsed into one label.
+REASON_NO_DURATION = 'no_duration'
+REASON_JOINT_LIMITS = 'joint_limits'
+REASON_COLLISION = 'collision'
+
+
 def evaluate_approach(validator, ready, target, entry_velocity,
                       entry_acceleration, velocity_limits,
-                      acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3):
+                      acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3,
+                      step_bounds=None, collision_counter=None):
     """One ready pose to one layer-0 candidate, under the standard retiming.
 
     Feasibility here means velocity, acceleration, collision and joint limits.
     Jerk is measured and reported against several references, never used to
     reject: the limit is assumed, with no published UR figure behind it, so
     rejecting on it would invent infeasibility.
+
+    Every result carries reason_code (None when feasible) and, once collision
+    was checked, collision_queries and the achieved step ratio.
+    collision_counter, a list, receives the queries actually made.
+
+    Note the quintic's shape depends on the duration whenever the entry state
+    is nonzero, through its ve*T and ae*T^2 terms. Changing velocity limits
+    changes the duration and so can change the collision and joint-limit
+    verdicts, not just the timing.
     """
     duration = minimum_duration(ready, target, entry_velocity,
                                 entry_acceleration, velocity_limits,
                                 acceleration_limits)
     if duration is None:
-        return {'feasible': False, 'reason': 'no duration satisfies velocity '
-                                             'and acceleration limits'}
+        return {'feasible': False, 'reason_code': REASON_NO_DURATION,
+                'reason': 'no duration satisfies velocity and acceleration '
+                          'limits'}
 
     coefficients = quintic_coefficients(ready, target, entry_velocity,
                                         entry_acceleration, duration)
@@ -422,23 +519,27 @@ def evaluate_approach(validator, ready, target, entry_velocity,
 
     lower, upper = validator.robot.qlim
     if np.any(position < lower - 1e-9) or np.any(position > upper + 1e-9):
-        return {'feasible': False, 'reason': 'approach leaves joint limits',
+        return {'feasible': False, 'reason_code': REASON_JOINT_LIMITS,
+                'reason': 'approach leaves joint limits',
                 'duration_s': duration}
 
     # Resolution scaled to the actual joint displacement rather than a fixed
     # stride. A broadly sampled ready pose can be most of a joint range away
     # from its target, and 40 samples over a large move can step straight
     # through an obstacle.
-    if approach_collides(validator, position):
-        return {'feasible': False,
-                'reason': 'direct quintic collides; a collision-free approach '
-                          'may still exist around the obstacle',
-                'duration_s': duration}
+    stats = {}
+    if approach_collides(validator, position, step_bounds,
+                         counter=collision_counter, stats=stats):
+        return dict({'feasible': False, 'reason_code': REASON_COLLISION,
+                     'reason': 'direct quintic collides; a collision-free '
+                               'approach may still exist around the obstacle',
+                     'duration_s': duration}, **stats)
 
     peak_jerk = np.max(np.abs(jerk), axis=0)
     integrated = np.trapz(np.abs(jerk), dx=duration / (len(jerk) - 1), axis=0)
-    return {
+    return dict({
         'feasible': True,
+        'reason_code': None,
         'duration_s': float(duration),
         'peak_velocity': np.max(np.abs(velocity), axis=0).tolist(),
         'peak_acceleration': np.max(np.abs(acceleration), axis=0).tolist(),
@@ -452,37 +553,58 @@ def evaluate_approach(validator, ready, target, entry_velocity,
             for reference in jerk_references
         },
         'matches_entry_state': True,     # by construction of the quintic
-    }
+    }, **stats)
+
+
+# Rail distance is divided by this before comparison with the angular
+# tolerance, so the default 0.35 admits 1.05 m of rail difference within one
+# branch. Rail position is a continuous choice rather than a discrete IK
+# branch, which is why it is weighted loosely.
+BRANCH_RAIL_SCALE_M = 3.0
+
+
+def branch_assignments(configurations, tolerance=0.35):
+    """Branch label for each configuration, in INPUT order.
+
+    Labels are order-invariant: the greedy pass runs in canonical order and a
+    label is its representative's rank in that order, so shuffling the input
+    permutes the labels with it and changes nothing else. A runner needs
+    membership, not just a count, to stop once a branch has a feasible
+    approach.
+
+    Wrapped joint distance, so two lifts of one configuration share a label.
+    """
+    arrays = [np.asarray(c, dtype=float) for c in configurations]
+    # Canonical order before the greedy pass. Greedy clustering is
+    # order-dependent in general, and branch count is a primary ranking key.
+    order = sorted(range(len(arrays)),
+                   key=lambda i: tuple(np.round(arrays[i], 9)))
+
+    representatives = []
+    labels = [None] * len(arrays)
+    for index in order:
+        arm = arrays[index][ARM_SLICE]
+        rail = float(arrays[index][RAIL_INDEX])
+        for label, (other_rail, other_arm) in enumerate(representatives):
+            wrapped = np.abs(np.angle(np.exp(1j * (arm - other_arm))))
+            if (np.max(wrapped) <= tolerance
+                    and abs(rail - other_rail) / BRANCH_RAIL_SCALE_M <= tolerance):
+                labels[index] = label
+                break
+        else:
+            labels[index] = len(representatives)
+            representatives.append((rail, arm))
+    return labels
 
 
 def branch_clusters(configurations, tolerance=0.35):
-    """Distinct solution branches among reached configurations.
+    """Number of distinct solution branches among reached configurations.
 
-    Wrapped joint distance, so two lifts of one configuration count once.
     Reaching one layer-0 candidate is not connectivity: the graph needs
     alternatives, and a ready pose that can only enter through a single
     branch is fragile however cheap that entry is.
     """
-    # Canonical order before the greedy pass, so the result does not depend on
-    # the order candidates happened to arrive in. Greedy clustering is
-    # order-dependent in general, and branch count is about to become a
-    # primary ranking key.
-    ordered = sorted(
-        (np.asarray(c, dtype=float) for c in configurations),
-        key=lambda c: tuple(np.round(c, 9)))
-
-    representatives = []
-    for configuration in ordered:
-        arm = configuration[ARM_SLICE]
-        rail = float(configuration[RAIL_INDEX])
-        for other_rail, other_arm in representatives:
-            wrapped = np.abs(np.angle(np.exp(1j * (arm - other_arm))))
-            if (np.max(wrapped) <= tolerance
-                    and abs(rail - other_rail) / 3.0 <= tolerance):
-                break
-        else:
-            representatives.append((rail, arm))
-    return len(representatives)
+    return len(set(branch_assignments(configurations, tolerance)))
 
 
 def classify(task_candidates, approaches):
@@ -501,6 +623,21 @@ def classify(task_candidates, approaches):
     if not any(a['feasible'] for a in approaches):
         return DIRECT_APPROACH_UNCONNECTED
     return CONNECTED
+
+
+def failure_breakdown(approaches):
+    """Count of each failure reason_code across infeasible approaches.
+
+    Kept beside classify rather than inside it: the three-way classification
+    stays stable, and the causes behind direct_approach_unconnected stay
+    visible instead of collapsing into one label.
+    """
+    counts = {}
+    for approach in approaches:
+        if not approach['feasible']:
+            code = approach.get('reason_code') or 'unknown'
+            counts[code] = counts.get(code, 0) + 1
+    return counts
 
 
 def connectivity_score(classifications):
@@ -535,13 +672,20 @@ def rank_ready_poses(records):
     return sorted([r for r in records if r['static_gates']['passed']], key=key)
 
 
-def certification_note():
-    """Why nothing here certifies a ready pose."""
+def certification_note(validator=None):
+    """Why nothing here certifies a ready pose, and under which limits.
+
+    Pass the validator the sweep ran with, so the note records the velocity
+    limits actually enforced rather than only the reference tables.
+    """
     return {
         'envelope': 'PROVISIONAL_STAGE7_ENVELOPE_V1, a software robustness '
                     'envelope rather than the physical operating envelope',
-        'limits': motion_limits.certification_status(),
-        'may_certify_for_hardware': motion_limits.may_certify_for_hardware(),
+        'limits': motion_limits.certification_status(validator),
+        'effective_limits': (None if validator is None
+                             else motion_limits.effective_limits(validator)),
+        'may_certify_for_hardware': motion_limits.may_certify_for_hardware(
+            validator),
         'result_status': 'provisional',
     }
 

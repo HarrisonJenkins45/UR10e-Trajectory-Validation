@@ -66,6 +66,13 @@ def test_the_envelope_is_named_provisional_not_physical():
     assert note['may_certify_for_hardware'] is False
 
 
+def test_the_certification_note_records_the_enforced_limits(validator):
+    note = sweep.certification_note(validator)
+    np.testing.assert_array_equal(note['effective_limits']['velocity_vector'],
+                                  validator.velocity_limits)
+    assert note['may_certify_for_hardware'] is False
+
+
 def test_axis_extrema_reach_the_declared_bounds():
     envelope = sweep.PROVISIONAL_STAGE7_ENVELOPE_V1
     extremes = [p for p in sweep.placements() if p['name'].startswith(('translate', 'rotate'))]
@@ -470,3 +477,150 @@ def test_branch_count_sensitivity_to_tolerance_is_reported():
     assert counts == sorted(counts, reverse=True), (
         'a looser tolerance must not increase the cluster count'
     )
+
+
+# --------------------------------------------------------------------------
+# Runner interfaces: membership, reasons, and one enforced prefix lift
+# --------------------------------------------------------------------------
+
+def test_branch_assignments_give_membership_invariant_under_input_order():
+    """A runner stopping once a branch has a feasible approach needs to know
+    WHICH branch each candidate is in, not just how many there are."""
+    rng = np.random.default_rng(2)
+    configurations = [np.concatenate(([rng.uniform(0, 3)],
+                                      rng.uniform(-np.pi, np.pi, 6)))
+                      for _ in range(40)]
+    reference = sweep.branch_assignments(configurations)
+    assert len(reference) == len(configurations)
+    assert sweep.branch_clusters(configurations) == len(set(reference))
+    for seed in range(5):
+        permutation = np.random.default_rng(seed).permutation(len(configurations))
+        shuffled = [configurations[i] for i in permutation]
+        labels = sweep.branch_assignments(shuffled)
+        assert labels == [reference[i] for i in permutation]
+
+
+def test_two_lifts_of_one_configuration_share_a_branch_label():
+    base = np.concatenate(([1.0], np.deg2rad([0.0, -120.0, 90.0, -80.0, 60.0, 0.0])))
+    lifted = base.copy()
+    lifted[4] += 2 * np.pi
+    labels = sweep.branch_assignments([base, lifted])
+    assert labels[0] == labels[1]
+
+
+def test_an_approach_with_no_feasible_duration_says_so(validator, ready, VELOCITY):
+    target = ready.copy()
+    target[0] += 100.0
+    result = sweep.evaluate_approach(validator, ready, target, np.zeros(7),
+                                     np.zeros(7), VELOCITY, ACCELERATION)
+    assert result['feasible'] is False
+    assert result['reason_code'] == sweep.REASON_NO_DURATION
+
+
+def test_an_approach_leaving_joint_limits_says_so(validator, ready, VELOCITY):
+    target = ready.copy()
+    target[3] = np.pi + 0.2            # elbow beyond its +/-pi limit
+    result = sweep.evaluate_approach(validator, ready, target, np.zeros(7),
+                                     np.zeros(7), VELOCITY, ACCELERATION)
+    assert result['feasible'] is False
+    assert result['reason_code'] == sweep.REASON_JOINT_LIMITS
+
+
+def test_a_colliding_approach_counts_the_queries_actually_made(
+        validator, ready, VELOCITY, monkeypatch):
+    """The counter used to be unreachable from evaluate_approach, and it
+    reported planned queries even when the first one collided."""
+    monkeypatch.setattr(validator, 'check_all_collisions',
+                        lambda q, verbose=False: True)
+    counter = []
+    result = sweep.evaluate_approach(validator, ready, ready + 0.3, np.zeros(7),
+                                     np.zeros(7), VELOCITY, ACCELERATION,
+                                     collision_counter=counter)
+    assert result['feasible'] is False
+    assert result['reason_code'] == sweep.REASON_COLLISION
+    assert counter == [1]
+    assert result['collision_queries'] == 1
+    assert result['collision_queries_planned'] > 1
+
+
+def test_a_feasible_approach_reports_its_collision_resolution(
+        validator, ready, VELOCITY):
+    counter = []
+    result = sweep.evaluate_approach(validator, ready, ready + 0.05, np.zeros(7),
+                                     np.zeros(7), VELOCITY, ACCELERATION,
+                                     collision_counter=counter)
+    assert result['feasible'] is True
+    assert result['reason_code'] is None
+    assert counter == [result['collision_queries']]
+    assert result['collision_queries'] == result['collision_queries_planned']
+    assert result['collision_achieved_step'] <= 1.0 + 1e-9
+
+
+def test_failure_breakdown_keeps_the_causes_apart():
+    approaches = [
+        {'feasible': False, 'reason_code': sweep.REASON_COLLISION},
+        {'feasible': False, 'reason_code': sweep.REASON_COLLISION},
+        {'feasible': False, 'reason_code': sweep.REASON_NO_DURATION},
+        {'feasible': True, 'reason_code': None},
+    ]
+    assert sweep.classify([object()], approaches) == sweep.CONNECTED
+    assert sweep.failure_breakdown(approaches) == {
+        sweep.REASON_COLLISION: 2, sweep.REASON_NO_DURATION: 1}
+
+
+def _wrapping_prefix(ready):
+    """Canonical candidates whose wrist_3 crosses +pi between layers."""
+    prefix = np.stack([ready.copy() for _ in range(3)])
+    prefix[:, 6] = [np.pi - 0.02, -np.pi + 0.02, -np.pi + 0.06]
+    return prefix
+
+
+def test_an_unlifted_prefix_is_refused_rather_than_differentiated(ready):
+    """Differentiating across the wrap gives about 60 rad/s, minimum_duration
+    returns None, and the ready pose is silently called unconnected."""
+    with pytest.raises(ValueError, match='not continuous'):
+        sweep.entry_state_from_prefix(_wrapping_prefix(ready), 0.1)
+
+
+def test_lifted_prefix_removes_the_wrap(validator, ready):
+    lifted = sweep.lifted_prefix(validator, _wrapping_prefix(ready))
+    assert lifted is not None
+    np.testing.assert_allclose(lifted[:, 6],
+                               [np.pi - 0.02, np.pi + 0.02, np.pi + 0.06])
+    velocity, _ = sweep.entry_state_from_prefix(lifted, 0.1)
+    assert abs(velocity[6]) < 1.0
+
+
+def test_a_lifted_destination_carries_the_whole_prefix_with_it(validator, ready):
+    """Shifting layer 0 by a full turn without layers 1 and 2 reintroduces the
+    discontinuity one layer later."""
+    prefix = np.stack([ready, ready + 0.01, ready + 0.02])
+    destination = prefix[0].copy()
+    destination[4] += 2 * np.pi
+    lifted = sweep.lifted_prefix(validator, prefix, destination)
+    assert lifted is not None
+    np.testing.assert_allclose(lifted[:, 4] - prefix[:, 4], 2 * np.pi, atol=1e-12)
+    np.testing.assert_allclose(lifted[:, 5], prefix[:, 5], atol=1e-12)
+
+
+def test_a_destination_that_is_not_a_lift_is_refused(validator, ready):
+    prefix = np.stack([ready, ready + 0.01, ready + 0.02])
+    moved = prefix[0].copy()
+    moved[4] += 0.5
+    with pytest.raises(ValueError, match='not a lift'):
+        sweep.lifted_prefix(validator, prefix, moved)
+    rail_moved = prefix[0].copy()
+    rail_moved[0] += 0.1
+    with pytest.raises(ValueError, match='rail'):
+        sweep.lifted_prefix(validator, prefix, rail_moved)
+
+
+def test_a_lift_whose_continuation_leaves_the_limits_is_invalid(validator, ready):
+    """Near the limit, the shifted layer 0 fits and layer 2 does not, so this
+    representation has no valid continuation."""
+    prefix = np.stack([ready.copy() for _ in range(3)])
+    prefix[:, 4] = [-0.1, -0.05, 0.2]
+    destination = prefix[0].copy()
+    destination[4] += 2 * np.pi
+    assert sweep.lifted_prefix(validator, prefix, destination) is None
+
