@@ -748,8 +748,13 @@ def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
 
 
 def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
-             exhaustive=False):
-    """Prepare each placement, then evaluate every ready pose against it."""
+             exhaustive=False, progress=False):
+    """Prepare each placement, then evaluate every ready pose against it.
+
+    progress prints one flushed line per ready pose with elapsed time and a
+    naive ETA, since a full sweep otherwise says nothing until it ends.
+    """
+    started = time.perf_counter()
     prepared = []
     for placement in placements:
         with meter.phase('placement'):
@@ -768,6 +773,12 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
                 validator, entry['configuration'], placement, meter,
                 exhaustive=exhaustive))
             pose_seconds.append(time.perf_counter() - start)
+        if progress:
+            elapsed = time.perf_counter() - started
+            remaining = elapsed / (index + 1) * (len(ready_poses) - index - 1)
+            print(f'progress: ready pose {index + 1}/{len(ready_poses)}, '
+                  f'{elapsed / 60:.1f} min elapsed, about '
+                  f'{remaining / 60:.1f} min remaining', flush=True)
         results.append({
             'ready_index': index,
             'configuration': np.asarray(entry['configuration']).tolist(),
@@ -1011,7 +1022,8 @@ def main(argv=None):
         meter = Meter()
         with counting_collisions(validator, meter), counting_static_gates(meter):
             results, placement_records, pose_seconds = run_once(
-                validator, pilot, placements, meter, args.tolerance)
+                validator, pilot, placements, meter, args.tolerance,
+                progress=True)
         runs.append((results, placement_records, pose_seconds, meter))
 
     results, placement_records, pose_seconds, meter = runs[0]
