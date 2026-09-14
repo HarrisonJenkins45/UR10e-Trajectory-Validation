@@ -63,11 +63,24 @@ from ur10e_trajectory_pkg.validation_core import (
     TrajectoryValidator,
 )
 
-# 2: adds gate_pose_position and gate_pose_orientation, and `accepted` now
-# means production acceptance INCLUDING the forward-kinematics pose check.
-# Version 1 artifacts stay interpretable because they retained raw pose
-# errors, so the new flags can be recomputed from them.
-SCHEMA_VERSION = 2
+# 3: configurations are now LIFTED, q + 2*pi*k chosen per joint, so q_full is
+#    continuous with its predecessor rather than wrapped into [-pi, pi]. Adds
+#    q_arm_canonical, winding and arm_delta_canonical_rad alongside the lifted
+#    delta. Version 2 configurations are canonical, so the two are not
+#    directly comparable and the schema had to move.
+#
+#    `viable` is DEPRECATED and now duplicates `accepted`, because production
+#    acceptance includes the pose check that viable was invented to supply.
+#    Retained so version 2 readers keep working. The graph-facing replacement
+#    is node_valid, the pose and configuration checks, against
+#    transition_valid, the predecessor-dependent velocity and swept-collision
+#    checks.
+#
+# 2: adds gate_pose_position and gate_pose_orientation, and `accepted` means
+#    production acceptance INCLUDING the forward-kinematics pose check.
+#    Version 1 artifacts stay interpretable because they retained raw pose
+#    errors, so the new flags can be recomputed from them.
+SCHEMA_VERSION = 3
 
 # Fixed and explicit, so the bank is part of the record rather than a detail
 # of whoever ran it. These are diagnostic probes for whether a viable branch

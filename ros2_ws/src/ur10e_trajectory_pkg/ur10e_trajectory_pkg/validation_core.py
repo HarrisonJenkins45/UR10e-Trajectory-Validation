@@ -11,7 +11,15 @@ import pybullet as pb
 from spatialmath import SE3, UnitQuaternion
 from spatialgeometry import Cuboid
 
-from ur10e_trajectory_pkg.configurations import ARM_SLICE, NUM_JOINTS
+from ur10e_trajectory_pkg.configurations import (
+    ARM_SLICE,
+    NUM_JOINTS,
+    PERIODIC_JOINTS,
+)
+from ur10e_trajectory_pkg.joint_coordinates import (
+    nearest_feasible_lift,
+    winding_numbers,
+)
 from ur10e_trajectory_pkg.pose_metrics import (
     IK_ORIENTATION_TOL_RAD,
     IK_POSITION_TOL_M,
@@ -553,9 +561,31 @@ class TrajectoryValidator:
         if max_rail_vel_threshold is None:
             max_rail_vel_threshold = self._rail_vel_limit
 
-        def evaluate(q_arm, sol, rail):
+        arm_limits = (self.robot.qlim[0][ARM_SLICE], self.robot.qlim[1][ARM_SLICE])
+        arm_periodic = PERIODIC_JOINTS[ARM_SLICE]
+
+        def lift_toward_reference(q_arm):
+            """Put the solution on the turn nearest where we already are.
+
+            The solver returns every revolute value wrapped into [-pi, pi],
+            so a smooth motion across that boundary reads as a delta of
+            nearly 2*pi. Applied BEFORE any velocity check, and the lifted
+            values are what propagate onward, so the same continuous
+            coordinates reach the next seed, the stored segment, the
+            interpolation and the playback command.
+
+            The reference is the previous COMMANDED configuration while
+            tracking, and the caller's seed on a fresh entry -- never the
+            perturbed numerical seed, which is an artefact of the retry loop.
+            """
+            reference = prev_arm if prev_arm is not None else seed_arm
+            return nearest_feasible_lift(q_arm, reference, arm_limits,
+                                         arm_periodic)
+
+        def evaluate(q_arm_canonical, sol, rail):
             if not sol.success:
                 return None
+            q_arm = lift_toward_reference(q_arm_canonical)
             q_full = np.concatenate(([rail], q_arm))
 
             # Does this configuration actually reach the commanded pose?
@@ -611,7 +641,9 @@ class TrajectoryValidator:
                 'arm_velocity_failed': bool(arm_jump),
                 'rail_velocity_failed': bool(rail_jump),
             }
-            return dict(q_full=q_full, cond_num=cond_num, low_cond=low_cond,
+            return dict(q_arm=q_arm, q_arm_canonical=np.asarray(q_arm_canonical),
+                        winding=winding_numbers(q_arm, q_arm_canonical).tolist(),
+                        q_full=q_full, cond_num=cond_num, low_cond=low_cond,
                         jump=jump, collide=collide, joint_vel=joint_vel,
                         position_error_m=position_err,
                         orientation_error_rad=orientation_err,
@@ -642,7 +674,8 @@ class TrajectoryValidator:
             decides tolerances, and storing raw values means changing them
             later needs no re-run.
             """
-            q_full = np.concatenate(([new_rail], q_arm))
+            q_arm_used = res['q_arm'] if res is not None else np.asarray(q_arm)
+            q_full = np.concatenate(([new_rail], q_arm_used))
             finite = bool(np.all(np.isfinite(q_full)))
 
             position_err = orientation_err = None
@@ -665,7 +698,8 @@ class TrajectoryValidator:
                 # motion crossing that boundary shows up as a delta near 2*pi:
                 # a representation discontinuity, not a physical velocity. The
                 # two are indistinguishable from the speed alone.
-                delta = np.asarray(q_arm) - np.asarray(prev_arm)
+                delta = np.asarray(q_arm_used) - np.asarray(prev_arm)
+                canonical_delta = np.asarray(q_arm) - np.asarray(prev_arm)
                 arm_delta = delta.tolist()
                 arm_speed = np.abs(delta) / dt_waypoint
                 arm_speed_out = arm_speed.tolist()
@@ -688,6 +722,8 @@ class TrajectoryValidator:
                 solver_iterations=int(getattr(sol, 'iterations', -1)),
                 configuration_finite=finite,
                 q_full=q_full.tolist() if finite else None,
+                q_arm_canonical=np.asarray(q_arm).tolist(),
+                winding=(None if res is None else res['winding']),
                 rail_position=float(new_rail),
                 position_error_m=position_err,
                 orientation_error_rad=orientation_err,
@@ -704,6 +740,9 @@ class TrajectoryValidator:
                                else bool(cond > condition_number_threshold)),
                 gate_arm_velocity=arm_violation,
                 arm_delta_rad=arm_delta,
+                arm_delta_canonical_rad=(
+                    None if not check_jump or not finite
+                    else canonical_delta.tolist()),
                 arm_speed_rad_s=arm_speed_out,
                 rail_delta_m=rail_delta,
                 gate_rail_velocity=rail_violation,
@@ -722,7 +761,8 @@ class TrajectoryValidator:
                 if verbose:
                     print(f'{label}rail-assisted recovery succeeded '
                           f'(rail {rail_pos:.3f} -> {new_rail:.3f})')
-                return dict(ok=True, q_arm=q_arm, q_full=res['q_full'], rail_pos=new_rail,
+                return dict(ok=True, q_arm=res['q_arm'], q_full=res['q_full'],
+                            rail_pos=new_rail,
                             cond_num=res['cond_num'], joint_vel=res['joint_vel'],
                             attempts_used=attempt + 1, rail_moved=True, reason=None)
             last = (q_arm, sol, res)
@@ -731,7 +771,9 @@ class TrajectoryValidator:
         q_arm, sol, res = last
         reason = self._failure_reason(sol, res, condition_number_threshold,max_rail_vel_threshold,
                                        max_joint_vel_threshold, rail_fallback_exhausted=True)
-        return dict(ok=False, q_arm=q_arm, q_full=(res['q_full'] if res else None),
+        return dict(ok=False,
+                    q_arm=(res['q_arm'] if res else q_arm),
+                    q_full=(res['q_full'] if res else None),
                     rail_pos=rail_pos, cond_num=(res['cond_num'] if res else None),
                     joint_vel=(res['joint_vel'] if res else None),
                     attempts_used=max_rail_attempts + 1, rail_moved=False, reason=reason)

@@ -42,6 +42,12 @@ NUM_JOINTS = len(JOINT_NAMES)
 RAIL_INDEX = 0
 ARM_SLICE = slice(1, None)
 
+# Which joints are periodic, i.e. where q and q + 2*pi are the same physical
+# configuration and a lift may be chosen. The rail is prismatic and never is.
+# All six arm joints are, though the elbow's declared range is only 2*pi wide
+# so no alternative lift ever fits inside its limits.
+PERIODIC_JOINTS = (False, True, True, True, True, True, True)
+
 # The posture carried over from the MATLAB script, as [0, -135, 90, -90, 0, 0]
 # degrees for the arm with the rail at its zero end.
 #
