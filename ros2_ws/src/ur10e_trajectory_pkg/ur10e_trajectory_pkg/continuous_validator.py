@@ -17,8 +17,10 @@ resolution:
   tracking      reached pose against an SE(3) interpolation of the desired
                 pose between waypoints, since a joint-space curve through two
                 correct endpoints need not stay on the Cartesian path
-  conditioning  arm singularity margin and commanded-twist feasibility
-                BETWEEN waypoints, where nothing has ever looked
+  conditioning  arm singularity margin and TRUE commanded-twist feasibility
+                between waypoints, the latter solved as a linear program over
+                the redundant joint space rather than inferred from velocity
+                headroom, which is a different quantity
 
 The approach from q_start is checked separately. Assigning it two seconds
 makes it admissible under a velocity limit; it does not make it a
@@ -30,6 +32,7 @@ this is a real finding about the discrete model, which is the point.
 """
 import numpy as np
 from scipy.interpolate import PchipInterpolator
+from scipy.optimize import linprog
 from scipy.spatial.transform import Rotation, Slerp
 
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, JOINT_NAMES
@@ -199,64 +202,150 @@ def tracking_error(validator, interpolator, dense_times, waypoint_times,
     }
 
 
-def twist_margin(validator, interpolator, dense_times, velocity_limits):
-    """Worst commanded-twist feasibility between waypoints.
+def velocity_headroom(interpolator, dense_times, velocity_limits):
+    """Fraction of the velocity budget the command stream actually uses.
 
-    alpha* is the largest scaling of the commanded twist a bounded joint
-    velocity can produce. Below 1 the motion cannot be tracked at the
-    requested rate at that configuration, whatever the condition number says.
-    Computed from the realised joint velocity, so it measures the trajectory
-    being played rather than a hypothetical one.
+    Named for what it measures. An earlier version called its reciprocal
+    alpha* and described it as commanded-twist feasibility, which it is not:
+    it never touches the Jacobian or a desired Cartesian twist, so it can only
+    ever report joint velocity headroom. The two answer different questions
+    and can disagree, because a configuration can have ample joint headroom
+    and still be unable to produce a particular twist direction.
     """
-    worst_alpha = np.inf
-    worst_condition = 0.0
-    worst_time = None
-    for instant in dense_times:
+    rates = interpolator.derivative(1)(dense_times)
+    usage = np.max(np.abs(rates) / velocity_limits, axis=1)
+    worst = int(np.argmax(usage))
+    return {
+        'max_budget_used': float(usage[worst]),
+        'at_time_s': float(dense_times[worst]),
+        'within_limits': bool(usage[worst] <= 1.0),
+    }
+
+
+def twist_alpha_star(jacobian, desired_twist, velocity_limits):
+    """Largest scaling of a commanded twist a bounded joint velocity can make.
+
+        max alpha  s.t.  J qdot = alpha * v,  |qdot| <= qdot_max
+
+    A genuine linear program over the redundant joint space, not a headroom
+    ratio. alpha >= 1 means the twist is achievable at this configuration;
+    below 1 it cannot be tracked at the requested rate, whatever the condition
+    number says.
+    """
+    desired_twist = np.asarray(desired_twist, dtype=float)
+    if np.linalg.norm(desired_twist) <= 1e-12:
+        return np.inf                       # no motion cannot be infeasible
+
+    joints = jacobian.shape[1]
+    # Variables [qdot (n), alpha]; maximise alpha by minimising -alpha.
+    objective = np.zeros(joints + 1)
+    objective[-1] = -1.0
+    equality = np.hstack([jacobian, -desired_twist.reshape(-1, 1)])
+    bounds = [(-v, v) for v in velocity_limits] + [(0.0, None)]
+
+    solution = linprog(objective, A_eq=equality, b_eq=np.zeros(jacobian.shape[0]),
+                       bounds=bounds, method='highs')
+    return float(solution.x[-1]) if solution.success else 0.0
+
+
+def conditioning_and_twist(validator, interpolator, dense_times,
+                           velocity_limits, condition_threshold=50.0):
+    """Arm conditioning and true twist feasibility between waypoints.
+
+    Records WHERE the worst conditioning occurs and for how long the threshold
+    is exceeded. Without that, an infinite value proves nothing about the
+    interior: the legacy start posture is itself singular, so t = 0 is
+    guaranteed to report infinity whatever the trajectory does.
+    """
+    conditions = np.empty(len(dense_times))
+    alphas = np.empty(len(dense_times))
+    for index, instant in enumerate(dense_times):
         configuration = interpolator(instant)
-        rates = interpolator.derivative(1)(instant)
-        usage = np.max(np.abs(rates) / velocity_limits)
-        alpha = np.inf if usage <= 1e-12 else 1.0 / usage
         singular = np.linalg.svd(
             validator.compute_arm_jacobian(configuration), compute_uv=False)
-        condition = (singular[0] / singular[-1] if singular[-1] > 1e-12
-                     else np.inf)
-        if alpha < worst_alpha:
-            worst_alpha, worst_time = alpha, float(instant)
-        worst_condition = max(worst_condition, condition)
+        conditions[index] = (singular[0] / singular[-1] if singular[-1] > 1e-12
+                             else np.inf)
+        twist = (validator.compute_system_jacobian(configuration)
+                 @ interpolator.derivative(1)(instant))
+        alphas[index] = twist_alpha_star(
+            validator.compute_system_jacobian(configuration), twist,
+            velocity_limits)
+
+    exceeded = conditions > condition_threshold
+    interior = dense_times > dense_times[0]
+    worst = int(np.argmax(np.nan_to_num(conditions, posinf=1e308)))
+    worst_alpha = int(np.argmin(alphas))
     return {
-        'min_alpha_star': float(worst_alpha),
-        'max_arm_condition_number': float(worst_condition),
-        'at_time_s': worst_time,
-        'feasible': bool(worst_alpha >= 1.0),
+        'max_condition_number': float(conditions[worst]),
+        'max_condition_at_time_s': float(dense_times[worst]),
+        'seconds_above_condition_threshold': float(
+            np.sum(exceeded) * (dense_times[1] - dense_times[0])),
+        'exceeds_only_at_start': bool(exceeded.any()
+                                      and not (exceeded & interior).any()),
+        'interior_max_condition_number': float(
+            np.max(conditions[interior]) if interior.any() else 0.0),
+        'min_alpha_star': float(alphas[worst_alpha]),
+        'min_alpha_star_at_time_s': float(dense_times[worst_alpha]),
+        'twist_feasible': bool(alphas.min() >= 1.0),
+    }
+
+
+def command_stream_derivatives(dense_times, dense_path):
+    """Acceleration and jerk by finite difference of the COMMAND STREAM.
+
+    PCHIP is only C1, so acceleration can jump at every knot. Sampling the
+    interpolant's own third derivative sees the within-segment polynomial jerk
+    and misses those discontinuities entirely, so it is not a bound. The
+    controller receives the sampled stream, and this is what that stream
+    actually does.
+    """
+    step = dense_times[1] - dense_times[0]
+    velocity = np.diff(dense_path, axis=0) / step
+    acceleration = np.diff(velocity, axis=0) / step
+    jerk = np.diff(acceleration, axis=0) / step
+    return {
+        'velocity': np.max(np.abs(velocity), axis=0),
+        'acceleration': np.max(np.abs(acceleration), axis=0),
+        'jerk': np.max(np.abs(jerk), axis=0),
     }
 
 
 def validate(validator, path, waypoint_times, positions, quaternions,
-             velocity_limits, rate_hz=CONTROLLER_HZ):
+             velocity_limits, rate_hz=CONTROLLER_HZ, condition_threshold=50.0):
     """Full continuous check of one command trajectory."""
     dense_times, interpolator, dense_path = interpolate(
         path, waypoint_times, rate_hz)
-    extremes = derivative_extremes(interpolator, dense_times)
+
+    # Two derivative views, deliberately both. The interpolant's own
+    # derivatives describe the within-segment polynomial; the finite
+    # differences describe the sampled stream the controller receives, which
+    # includes the acceleration jumps PCHIP leaves at every knot.
+    analytic = derivative_extremes(interpolator, dense_times)
+    commanded = command_stream_derivatives(dense_times, dense_path)
 
     report = {
         'controller_hz': rate_hz,
         'samples': int(len(dense_times)),
-        'peak': {key: value.tolist() for key, value in extremes.items()},
-        'limit_violations': limit_violations(extremes, velocity_limits),
+        'peak_analytic': {k: v.tolist() for k, v in analytic.items()},
+        'peak_command_stream': {k: v.tolist() for k, v in commanded.items()},
+        'limit_violations': limit_violations(commanded, velocity_limits),
         'position_limit_violations': position_limit_violations(
             validator, dense_path),
         'collision': collision_convergence(validator, interpolator,
                                            waypoint_times),
         'tracking': tracking_error(validator, interpolator, dense_times,
                                    waypoint_times, positions, quaternions),
-        'twist': twist_margin(validator, interpolator, dense_times,
-                              velocity_limits),
+        'conditioning': conditioning_and_twist(
+            validator, interpolator, dense_times, velocity_limits,
+            condition_threshold),
+        'velocity_headroom': velocity_headroom(interpolator, dense_times,
+                                               velocity_limits),
     }
     report['passed'] = bool(
         not report['limit_violations']
         and not report['position_limit_violations']
         and not report['collision']['collision_found']
         and report['tracking']['within_tolerance']
-        and report['twist']['feasible']
+        and report['conditioning']['twist_feasible']
     )
     return report

@@ -137,24 +137,76 @@ def test_tracking_is_measured_between_waypoints_not_only_at_them(validator,
     assert 'at_time_s' in report
 
 
-def test_twist_margin_reports_alpha_star(validator, smooth_path):
-    """alpha* below 1 means the commanded motion cannot be tracked at that
-    rate, whatever the condition number says."""
+def test_alpha_star_is_a_linear_program_not_velocity_headroom(validator,
+                                                              smooth_path):
+    """These are different quantities and must not be confused.
+
+    An earlier version returned the reciprocal of the velocity-budget ratio
+    and called it alpha*. That never touches the Jacobian or a desired twist,
+    so it can only report joint headroom. Measured on the first graph path the
+    two disagreed completely: headroom 1.158 giving a reciprocal of 0.864,
+    against a true alpha* of 0 at the same instant.
+    """
     times = _times(len(smooth_path))
-    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, rate_hz=100.0)
-    report = cv.twist_margin(validator, interpolator, dense_times, LIMITS)
-    assert report['min_alpha_star'] > 0.0
-    assert report['feasible'] is True
+    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+
+    headroom = cv.velocity_headroom(interpolator, dense_times, LIMITS)
+    conditioning = cv.conditioning_and_twist(validator, interpolator,
+                                             dense_times, LIMITS)
+    assert 'max_budget_used' in headroom
+    assert conditioning['min_alpha_star'] != pytest.approx(
+        1.0 / headroom['max_budget_used'])
 
 
-def test_a_stationary_trajectory_has_unbounded_twist_margin(validator):
-    """No commanded motion cannot be infeasible."""
-    path = np.tile(np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0]))),
-                   (5, 1))
-    times = _times(5)
-    dense_times, interpolator, _ = cv.interpolate(path, times, rate_hz=100.0)
-    report = cv.twist_margin(validator, interpolator, dense_times, LIMITS)
-    assert report['feasible'] is True
+def test_alpha_star_is_infinite_for_no_commanded_motion(validator):
+    """No motion cannot be infeasible."""
+    jacobian = validator.compute_system_jacobian(
+        np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0]))))
+    assert cv.twist_alpha_star(jacobian, np.zeros(6), LIMITS) == np.inf
+
+
+def test_alpha_star_scales_with_the_requested_rate(validator):
+    """Halving the demanded twist must double the achievable scaling."""
+    configuration = np.concatenate(
+        ([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0])))
+    jacobian = validator.compute_system_jacobian(configuration)
+    twist = jacobian @ (0.1 * np.ones(7))
+
+    full = cv.twist_alpha_star(jacobian, twist, LIMITS)
+    half = cv.twist_alpha_star(jacobian, 0.5 * twist, LIMITS)
+    assert half == pytest.approx(2.0 * full, rel=1e-4)
+
+
+def test_conditioning_records_where_the_worst_value_occurs(validator,
+                                                           smooth_path):
+    """An infinite value at t=0 proves nothing about the interior.
+
+    The legacy start posture is itself singular, so the first sample is
+    guaranteed to report infinity whatever the trajectory does.
+    """
+    times = _times(len(smooth_path))
+    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+    report = cv.conditioning_and_twist(validator, interpolator, dense_times,
+                                       LIMITS)
+    for key in ('max_condition_at_time_s', 'interior_max_condition_number',
+                'exceeds_only_at_start', 'seconds_above_condition_threshold'):
+        assert key in report
+
+
+def test_command_stream_jerk_exceeds_the_interpolant_derivative(smooth_path):
+    """PCHIP is only C1, so acceleration jumps at every knot.
+
+    The interpolant's own third derivative sees the within-segment polynomial
+    and misses those jumps, so it is not a bound on what the controller
+    receives. Measured on the first graph path: 61.6 analytic against 342.4
+    from the command stream.
+    """
+    times = _times(len(smooth_path))
+    dense_times, interpolator, dense_path = cv.interpolate(
+        smooth_path, times, 200.0)
+    analytic = cv.derivative_extremes(interpolator, dense_times)
+    commanded = cv.command_stream_derivatives(dense_times, dense_path)
+    assert np.max(commanded['jerk']) > np.max(analytic['jerk'])
 
 
 def test_declared_higher_order_limits_are_starting_values_not_inherited():
