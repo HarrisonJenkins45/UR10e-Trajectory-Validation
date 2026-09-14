@@ -170,6 +170,60 @@ def run_interaction(validator, targets, quaternions, arm_seeds):
     return out
 
 
+EXTRA_SEED_MODE = 'extra_seed'
+
+
+def run_extra_seeds(validator, targets, quaternions, extra_seeds):
+    """Additional seeds per waypoint, each tagged with where it came from.
+
+    extra_seeds[index] is a list of (configuration, origin). Used to add
+    another placement's candidates as seeds without letting them stand in for
+    independent generation: their provenance stays on every candidate they
+    produce, so what they alone found is countable.
+    """
+    out = []
+    for index in range(len(targets)):
+        for seed_number, (configuration, origin) in enumerate(
+                extra_seeds[index] if index < len(extra_seeds) else []):
+            configuration = np.asarray(configuration, dtype=float)
+            out += solve_one(
+                validator, targets[index], quaternions[index],
+                configuration[ARM_SLICE], configuration[RAIL_INDEX],
+                dict(mode=EXTRA_SEED_MODE, waypoint_index=index,
+                     entry_kind='independent', arm_seed_number=seed_number,
+                     rail_seed_number=None, seed_origin=origin))
+    return out
+
+
+def generate_layers(validator, targets, quaternions, dt, q_start,
+                    num_layers=3, extra_seeds=None):
+    """Candidates for the first num_layers waypoints of one placement.
+
+    The same three modes as the full generator, restricted to a prefix. The
+    tracker is causal, so the rail seeds it derives for these waypoints are
+    the ones a full-length run would derive.
+    """
+    targets = np.asarray(targets)[:num_layers]
+    quaternions = np.asarray(quaternions)[:num_layers]
+    rail_seeds, arm_configs = tracking_reference_path(
+        validator, targets, quaternions, dt, q_start)
+    arm_seeds = [np.deg2rad(seed) for seed in WIDE_SEED_BANK_DEG]
+
+    records = run_arm_isolation(validator, targets, quaternions, rail_seeds,
+                                arm_seeds)
+    records += run_rail_isolation(validator, targets, quaternions, arm_configs)
+    records += run_interaction(validator, targets, quaternions, arm_seeds)
+    if extra_seeds:
+        records += run_extra_seeds(validator, targets, quaternions, extra_seeds)
+    return collect_candidates(records), records
+
+
+def only_from_extra_seeds(entries):
+    """Candidates no independent mode found, per the recorded provenance."""
+    return [e for e in entries
+            if all(p['mode'] == EXTRA_SEED_MODE for p in e['provenance'])]
+
+
 def candidate_key(record):
     """Identity of a configuration for deduplication.
 
@@ -213,6 +267,7 @@ def collect_candidates(records):
             'rail_seed': record.get('rail_seed'),
             'attempt': record['attempt'],
             'solver_iterations': record['solver_iterations'],
+            'seed_origin': record.get('seed_origin'),
         })
     return {index: list(entries.values())
             for index, entries in per_waypoint.items()}

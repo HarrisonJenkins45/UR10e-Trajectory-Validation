@@ -229,7 +229,13 @@ def quintic_coefficients(start, end, end_velocity, end_acceleration, duration):
     return np.stack([a0, a1, a2, a3, a4, a5])
 
 
-def sample_quintic(coefficients, duration, samples=400):
+# Samples at which velocity and acceleration are checked, in normalised time.
+# Shared by sample_quintic and the exact duration solve, so both answer the
+# question for the same instants.
+QUINTIC_SAMPLES = 400
+
+
+def sample_quintic(coefficients, duration, samples=QUINTIC_SAMPLES):
     """Position and its three derivatives, taken analytically.
 
     Differentiating the polynomial rather than differencing samples, so the
@@ -252,80 +258,161 @@ def sample_quintic(coefficients, duration, samples=400):
     return times, evaluate(0), evaluate(1), evaluate(2), evaluate(3)
 
 
-# Geometric step of the upward duration scan. A feasible window narrower than
-# this ratio can be missed; the narrowest measured on the nominal pilot spanned
-# a ratio of about 1.7.
-DURATION_SCAN_RATIO = 1.1
+# Normalised-time basis of the quintic from rest to (D, ve, ae), s = t / T:
+#
+#     T   * velocity(s)     = D F1(s) + ve T G1(s) + ae T^2 H1(s)
+#     T^2 * acceleration(s) = D F2(s) + ve T G2(s) + ae T^2 H2(s)
+#
+# Derived from quintic_coefficients, so each velocity or acceleration bound at
+# a sample is a quadratic inequality in T.
+_S = np.linspace(0.0, 1.0, QUINTIC_SAMPLES)
+_F1 = 30 * _S**2 - 60 * _S**3 + 30 * _S**4
+_G1 = -12 * _S**2 + 28 * _S**3 - 15 * _S**4
+_H1 = 1.5 * _S**2 - 4 * _S**3 + 2.5 * _S**4
+_F2 = 60 * _S - 180 * _S**2 + 120 * _S**3
+_G2 = -24 * _S + 84 * _S**2 - 60 * _S**3
+_H2 = 3 * _S - 12 * _S**2 + 10 * _S**3
+
+
+def duration_lower_bound(start, end, velocity_limits, lower=0.2):
+    """No approach can be shorter: no joint can average more than its limit."""
+    displacement = np.abs(np.asarray(end, float) - np.asarray(start, float))
+    return max(float(lower),
+               float(np.max(displacement / np.asarray(velocity_limits, float))))
+
+
+def _sampled_feasible(start, end, end_velocity, end_acceleration, duration,
+                      velocity_limits, acceleration_limits):
+    """The package's own check: the limits at the quintic's samples."""
+    coefficients = quintic_coefficients(start, end, end_velocity,
+                                        end_acceleration, duration)
+    _, _, velocity, acceleration, _ = sample_quintic(coefficients, duration)
+    return bool(np.all(np.abs(velocity) <= velocity_limits)
+                and np.all(np.abs(acceleration) <= acceleration_limits))
+
+
+def _violated_intervals(c2, c1, c0):
+    """Open intervals of T on which c2 T^2 + c1 T + c0 > 0, as (lo, hi) arrays.
+
+    At most two per row. A row's boundary points satisfy it, so the violated
+    sets are open and the feasible set is closed.
+    """
+    inf = np.inf
+    los, his = [], []
+    with np.errstate(divide='ignore', invalid='ignore'):
+        discriminant = c1 * c1 - 4.0 * c2 * c0
+        root = np.sqrt(np.maximum(discriminant, 0.0))
+        # Stable roots: q / c2 and c0 / q.
+        q = -0.5 * (c1 + np.where(c1 >= 0.0, root, -root))
+        first = np.where(q != 0.0, q / c2, 0.0)
+        second = np.where(q != 0.0, c0 / q, 0.0)
+        small, large = np.minimum(first, second), np.maximum(first, second)
+
+        upward = c2 > 0.0
+        real = discriminant >= 0.0
+        # Opens upward: violated outside the roots, or everywhere without them.
+        mask = upward & real
+        los += [np.full(mask.sum(), -inf), large[mask]]
+        his += [small[mask], np.full(mask.sum(), inf)]
+        mask = upward & ~real
+        los.append(np.full(mask.sum(), -inf))
+        his.append(np.full(mask.sum(), inf))
+        # Opens downward: violated between the roots.
+        mask = (c2 < 0.0) & (discriminant > 0.0)
+        los.append(small[mask])
+        his.append(large[mask])
+        # Linear.
+        linear = c2 == 0.0
+        crossing = np.where(c1 != 0.0, -c0 / c1, 0.0)
+        mask = linear & (c1 > 0.0)
+        los.append(crossing[mask])
+        his.append(np.full(mask.sum(), inf))
+        mask = linear & (c1 < 0.0)
+        los.append(np.full(mask.sum(), -inf))
+        his.append(crossing[mask])
+        mask = linear & (c1 == 0.0) & (c0 > 0.0)
+        los.append(np.full(mask.sum(), -inf))
+        his.append(np.full(mask.sum(), inf))
+    return np.concatenate(los), np.concatenate(his)
+
+
+def _first_uncovered(lo, hi, start):
+    """Smallest T >= start lying in none of the open intervals (lo, hi).
+
+    Sorted by lo, the running maximum of hi is how far the union reaches; the
+    first interval starting at or beyond that reach leaves a gap there.
+    """
+    order = np.argsort(lo, kind='stable')
+    lo, hi = lo[order], hi[order]
+    reach = np.maximum.accumulate(np.maximum(hi, start))
+    before = np.concatenate(([start], reach[:-1]))
+    gaps = np.flatnonzero(lo >= before)
+    return float(before[gaps[0]]) if len(gaps) else float(reach[-1])
 
 
 def minimum_duration(start, end, end_velocity, end_acceleration,
                      velocity_limits, acceleration_limits,
-                     lower=0.2, upper=20.0, tolerance=0.01,
-                     scan_ratio=DURATION_SCAN_RATIO):
-    """Shortest duration satisfying velocity and provisional acceleration.
+                     lower=0.2, upper=20.0):
+    """Shortest duration satisfying velocity and provisional acceleration, exactly.
 
     The same policy for every candidate, which is what makes their jerk
     comparable: jerk scales strongly with duration, so candidates timed
     differently cannot be ranked against each other at all.
 
-    Feasibility is NOT monotone in duration once the entry state is nonzero.
-    The quintic's ve*T and ae*T^2 terms make a long approach swing away and
-    back so that it can arrive moving, so the feasible durations form a
-    window and a long approach can fail where a moderate one passes. This
-    function used to test the upper bound first and bisect down from it,
-    which returned None for approaches with a perfectly good window: on the
-    nominal pilot, every winding of 5 of 34 candidates, one of them the only
-    member of its branch. So instead:
+    Feasibility is NOT monotone in duration once the entry state is nonzero:
+    a long quintic swings away and back to arrive moving, so the feasible
+    durations can form windows. Two searches have missed them. Bisecting down
+    from the upper bound missed every winding of 5 of 34 nominal candidates;
+    an upward scan in 1.1x steps then missed 16 of 710 windings whose windows
+    spanned ratios as narrow as 1.007, and a finer ratio only narrows the
+    miss. So there is no search:
 
-      1. the entry state must itself be within the limits, or no duration can
-         end in it
-      2. scan upward geometrically from a rigorous lower bound, the largest
-         per-joint displacement over its velocity limit, since no joint can
-         average more than its limit
-      3. bisect between the last infeasible and first feasible scan points
+      1. an entry state beyond the limits admits no duration
+      2. in normalised time every velocity and acceleration bound at each of
+         the QUINTIC_SAMPLES samples is a quadratic inequality in T, violated
+         on at most two open intervals
+      3. the answer is the first T at or above the average-speed lower bound
+         covered by none of them, found by one sorted sweep
+
+    The result is confirmed with the package's own sampled check, nudged up by
+    one part in 10^9 when rounding at an exact root misses it. The constraint
+    set is the sampled one, as before: this answers the same question
+    exactly, not a finer one.
     """
     velocity_limits = np.asarray(velocity_limits, dtype=float)
     acceleration_limits = np.asarray(acceleration_limits, dtype=float)
+    end_velocity = np.asarray(end_velocity, dtype=float)
+    end_acceleration = np.asarray(end_acceleration, dtype=float)
     if (np.any(np.abs(end_velocity) > velocity_limits)
             or np.any(np.abs(end_acceleration) > acceleration_limits)):
         return None
 
-    def feasible(duration):
-        coefficients = quintic_coefficients(start, end, end_velocity,
-                                            end_acceleration, duration)
-        _, _, velocity, acceleration, _ = sample_quintic(coefficients, duration)
-        return (np.all(np.abs(velocity) <= velocity_limits)
-                and np.all(np.abs(acceleration) <= acceleration_limits))
-
-    displacement = np.abs(np.asarray(end, float) - np.asarray(start, float))
-    first = max(lower, float(np.max(displacement / velocity_limits)))
+    first = duration_lower_bound(start, end, velocity_limits, lower)
     if first > upper:
         return None
-    scan = []
-    duration = first
-    while duration < upper:
-        scan.append(duration)
-        duration *= scan_ratio
-    scan.append(upper)
 
-    previous = None
-    for duration in scan:
-        if feasible(duration):
-            break
-        previous = duration
-    else:
-        return None
-    if previous is None:
-        return duration
+    D = (np.asarray(end, float) - np.asarray(start, float))[:, None]
+    ve, ae = end_velocity[:, None], end_acceleration[:, None]
+    V, A = velocity_limits[:, None], acceleration_limits[:, None]
+    # Each row: c2 T^2 + c1 T + c0 <= 0.
+    c2 = np.concatenate([ae * _H1, -ae * _H1, ae * _H2 - A, -ae * _H2 - A]).ravel()
+    c1 = np.concatenate([ve * _G1 - V, -ve * _G1 - V, ve * _G2, -ve * _G2]).ravel()
+    c0 = np.concatenate([D * _F1, -D * _F1, D * _F2, -D * _F2]).ravel()
+    lo, hi = _violated_intervals(c2, c1, c0)
 
-    low, high = previous, duration
-    while high - low > tolerance:
-        middle = 0.5 * (low + high)
-        if feasible(middle):
-            high = middle
-        else:
-            low = middle
-    return high
+    candidate = _first_uncovered(lo, hi, first)
+    # Rounding at a root can leave the candidate a hair inside an interval;
+    # step past it and sweep again, a bounded number of times.
+    for _ in range(8):
+        if candidate > upper:
+            return None
+        for trial in (candidate, candidate * (1.0 + 1e-9)):
+            if trial <= upper and _sampled_feasible(
+                    start, end, end_velocity, end_acceleration, trial,
+                    velocity_limits, acceleration_limits):
+                return trial
+        candidate = _first_uncovered(lo, hi, candidate * (1.0 + 1e-6))
+    return None
 
 
 # --------------------------------------------------------------------------

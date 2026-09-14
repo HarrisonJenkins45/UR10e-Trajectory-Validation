@@ -22,59 +22,83 @@ Per ready pose and branch:
      duration, with its prefix lifted along (lifted_prefix); a lift whose
      continuation leaves the joint limits is dropped as an invalid
      representation, not recorded as a failure
-  5. entry state from the lifted prefix, minimum duration, joint limits:
-     pure numpy, no physics query
-  6. sorted by duration, collision-checked in that order until the first
-     feasible approach, which is therefore the branch's shortest. The rest
-     are skipped and counted
+  5. ordered by the average-speed lower bound on duration. Exact minimum
+     durations and the joint-limit check (numpy, no physics query) are
+     computed lazily: an alternative is timed only while its bound is at most
+     the shortest timed duration still waiting, so ties are timed too
+  6. the shortest timed alternative is collision-checked, repeating until
+     the first feasible approach, which is therefore the branch's shortest
+     in (duration, candidate, winding) order. Alternatives never timed
+     because their bound exceeded it are counted as untimed_by_bound, so
+     rejection counts cover timed alternatives only
+
+Entry state is computed once per candidate: it is invariant under a lift.
+exhaustive=True times every alternative before any collision check; the pilot
+runs it once and requires the same branch outcomes.
 
 A placement whose candidates all fail steps 1-2 is no_task_candidate and no
 ready pose is evaluated against it. Otherwise a ready pose is connected if any
 branch has a feasible approach, and direct_approach_unconnected if none does,
 with the causes kept in failure_breakdown.
 
-Only the nominal placement has layers today. Layers for the other 28 come
-from candidate generation at that placement, which does not exist yet, so the
-runner takes layers as input and refuses a placement without them rather
-than inventing any.
+Layers for a placement come from the candidate generator run on layers 0-2
+of THAT placement's targets, with the nominal candidates added only as extra
+seeds tagged with their origin. Seeds alone could only rediscover nominal's
+branches, undercounting branches, a primary ranking key, and blurring
+no_task_candidate into "nominal's branches do not carry over". The nominal
+placement can use the committed full-length generator output instead. A
+placement with no layers is refused rather than given invented ones.
+
+Continuation policy and the plan: for the one layer-0 candidate the Stage 5
+graph path uses, its layers 1-2 are exactly the cheapest two-step
+continuation. That is one agreement, not proof, since the graph minimises over
+all 500 layers. Once READY_Q is chosen, recheck its approach against the real
+graph path's layers 0-2, or start the planner from that continuation.
 
 Nothing here selects READY_Q. The pilot measures cost; selection needs the
 full sweep and a doubled-pool stability check.
 
-Nominal pilot: 8 ready poses (3 anchors, 5 broad finalists across the rail)
-from a pool of 73 (900 of 4096 samples passed the static gates), two repeats
-with identical results:
+Pilot, 8 ready poses (3 anchors, 5 broad finalists across the rail) from a
+pool of 73 (900 of 4096 samples passed the static gates), against nominal and
+two generated placements. Two repeats identical; the exhaustive run agrees on
+every branch outcome:
 
-    placement   layer candidates 36 / 39 / 38
-                dropped before classifying: 2 no continuation, 1 entering
-                beyond the rail cap (1.16x); 33 valid in 11 branch clusters
-                1,062 collision queries (task gates and swept edges)
+    placement      layer-0  valid  seed-only  branches  independent
+    nominal        36       33     0          11        11
+    translate_x+   74       70     34         13        11
+    rotate_r+      58       55     33         15         8
 
-    ready poses all connected; 4 reach 11 of 11 branches, 4 reach 10, the
-                missing one a single-candidate branch whose every winding
-                collides or has no feasible duration
-                shortest approach 0.77 to 2.43 s
+  nominal reads the committed full-length generator output; the other two are
+  generated at their placement in 1.9 s each, with nominal's candidates as
+  tagged extra seeds. Regenerating nominal the same way without seeds
+  reproduces the committed layers 0-2 exactly. Dropped before classifying:
+  2, 4 and 2 candidates with no continuation; 1 at nominal and 1 at rotate_r+
+  entering beyond the rail cap.
 
-    windings    32 per candidate, 8,448 in all: 710 no duration, 268 leave
-                joint limits, 131 collision-checked (47 collide), 7,339
-                skipped once their branch had its shortest feasible approach
-    collision   per approach p50 71, p95 113.5, max 171; achieved step
-                ratio at most 1.0
-    time        2.79 s per ready pose at p50, 97% of it timing windings in
-                numpy and 3% collision
+  Every ready pose connects at every placement. Worst branch count 10-11 over
+  all branches, but 8 for every pose once branches reached only through
+  nominal's seeds are excluded: at rotate_r+, 7 of 15 branches exist only
+  through them. Which count ranks is a decision the sweep needs.
 
-Projected full sweep, 29 placements against the 73-pose pool: 99 min at p50,
-101 min at p95, EXCLUDING candidate generation for the 28 placements that
-have no layers yet.
+  Windings 40,448: 16,351 timed (982 no duration, 367 leave joint limits),
+  24,097 left untimed by the bound, 481 collision-checked (174 collide).
+  Collision queries per approach p50 72, p95 114, max 211.
+  0.85 s per ready pose and placement at p50, 1.46 s at p95.
 
-The first run of this pilot reported 10 of 11 branches for every ready pose.
-That was minimum_duration missing feasible duration windows, not geometry.
+Projected full sweep, 29 placements against the 73-pose pool, generation
+included: 31 min at p50, 53 min at p95.
+
+Earlier pilots of this runner are superseded. The first reported 10 of 11
+branches for every pose, which was minimum_duration missing windows; the
+second used an upward scan that still missed 16 windings and was recorded as
+finding none.
 
 Usage (pilot):
     python3 -m ur10e_trajectory_pkg.ready_pose_runner \\
         --candidates candidates.json --out pilot.json
 """
 import argparse
+import heapq
 import json
 import os
 import sys
@@ -105,7 +129,6 @@ TASK_CONDITION_THRESHOLD = 50.0    # the tracker's own singularity gate
 TASK_MIN_ALPHA_STAR = 1.0
 MAX_APPROACH_SECONDS = 20.0        # the upper bound minimum_duration searches
 DURATION_LOWER_S = 0.2
-DURATION_TOLERANCE_S = 0.01
 CONTINUATION_POLICY = (
     'cheapest two-step continuation per layer-0 candidate, under the graph '
     'edge cost, among those whose PCHIP entry state is within the velocity '
@@ -228,11 +251,18 @@ def layer0_task_gates(validator, configuration, twist, velocity_limits):
 
 def prepare_placement(validator, name, layers, positions, quaternions, dt,
                       meter, velocity_limits=None, tolerance=0.35,
-                      acceleration_limits=None):
+                      acceleration_limits=None, layer0_extra_seed_only=None):
     """Cache everything about a placement that does not depend on a ready pose.
 
     layers holds canonical configurations for layers 0, 1 and 2, or None when
     no candidates exist for this placement.
+
+    layer0_extra_seed_only, aligned with layers[0], marks candidates that only
+    another placement's seeds produced. The rail makes the arm redundant, so
+    every such seed tends to land on its own point of the self-motion manifold
+    and survive deduplication; counting them says nothing about branches. What
+    matters is whether a whole BRANCH exists only through them, which is what
+    branch_clusters_independent excludes.
     """
     velocity_limits = (validator.velocity_limits if velocity_limits is None
                        else np.asarray(velocity_limits, dtype=float))
@@ -295,7 +325,14 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
             rejections['continuation_leaves_limits'] = (
                 rejections.get('continuation_leaves_limits', 0) + 1)
             continue
+        entry_velocity, entry_acceleration = sweep.entry_state_from_prefix(
+            prefix, dt)
         valid.append({'candidate_index': index, 'configuration': candidate,
+                      'extra_seed_only': bool(
+                          layer0_extra_seed_only[index]
+                          if layer0_extra_seed_only is not None else False),
+                      'entry_velocity': entry_velocity,
+                      'entry_acceleration': entry_acceleration,
                       'prefix': prefix, 'continuation_alternatives': alternatives,
                       'entry_feasible_continuations': entry_feasible,
                       'continuation_cost': best[0][0]})
@@ -317,6 +354,10 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
     for entry, label in zip(valid, labels):
         entry['branch'] = label
     counts['branch_clusters'] = len(set(labels))
+    counts['branch_clusters_independent'] = len(
+        {v['branch'] for v in valid if not v['extra_seed_only']})
+    counts['valid_candidates_extra_seed_only'] = sum(
+        1 for v in valid if v['extra_seed_only'])
     state.update(status='ready', valid=valid, dt=dt,
                  velocity_limits=velocity_limits)
     return state
@@ -326,10 +367,8 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
 # Per ready pose
 # --------------------------------------------------------------------------
 
-def _alternatives(validator, ready, members, dt, velocity_limits,
-                  acceleration_limits, counts, rejected):
-    """Every timed winding of a branch's members, before any physics query."""
-    lower, upper = validator.robot.qlim
+def _alternatives(validator, ready, members, velocity_limits, counts):
+    """Every winding of a branch's members, ordered by duration lower bound."""
     out = []
     for entry in members:
         candidate = entry['configuration']
@@ -337,43 +376,48 @@ def _alternatives(validator, ready, members, dt, velocity_limits,
                                         velocity_limits, MAX_APPROACH_SECONDS)
         counts['winding_alternatives'].append(len(lifts))
         for lift in lifts:
-            prefix = sweep.lifted_prefix(validator, entry['prefix'], lift)
-            if prefix is None:
+            if sweep.lifted_prefix(validator, entry['prefix'], lift) is None:
                 counts['lift_continuation_invalid'] += 1
                 continue
-            velocity, acceleration = sweep.entry_state_from_prefix(prefix, dt)
-            duration = sweep.minimum_duration(
-                ready, lift, velocity, acceleration, velocity_limits,
-                acceleration_limits, lower=DURATION_LOWER_S,
-                upper=MAX_APPROACH_SECONDS, tolerance=DURATION_TOLERANCE_S)
-            if duration is None:
-                rejected.append({'feasible': False,
-                                 'reason_code': sweep.REASON_NO_DURATION})
-                continue
-            coefficients = sweep.quintic_coefficients(
-                ready, lift, velocity, acceleration, duration)
-            _, position, _, _, _ = sweep.sample_quintic(coefficients, duration)
-            if (np.any(position < lower - 1e-9)
-                    or np.any(position > upper + 1e-9)):
-                rejected.append({'feasible': False,
-                                 'reason_code': sweep.REASON_JOINT_LIMITS})
-                continue
             out.append({
-                'duration_s': float(duration),
+                'bound_s': sweep.duration_lower_bound(
+                    ready, lift, velocity_limits, DURATION_LOWER_S),
                 'candidate_index': entry['candidate_index'],
                 'winding': np.rint((lift[ARM_SLICE] - candidate[ARM_SLICE])
                                    / TWO_PI).astype(int).tolist(),
-                'target': lift, 'entry_velocity': velocity,
-                'entry_acceleration': acceleration,
+                'target': lift,
+                # Invariant under a lift, so cached per candidate.
+                'entry_velocity': entry['entry_velocity'],
+                'entry_acceleration': entry['entry_acceleration'],
             })
-    # Deterministic: ties in duration fall back to candidate and winding.
-    out.sort(key=lambda a: (a['duration_s'], a['candidate_index'],
+    out.sort(key=lambda a: (a['bound_s'], a['candidate_index'],
                             tuple(a['winding'])))
     return out
 
 
+def _time_alternative(validator, ready, alternative, velocity_limits,
+                      acceleration_limits):
+    """Exact minimum duration and joint limits. Returns a reason code or None."""
+    duration = sweep.minimum_duration(
+        ready, alternative['target'], alternative['entry_velocity'],
+        alternative['entry_acceleration'], velocity_limits,
+        acceleration_limits, lower=DURATION_LOWER_S,
+        upper=MAX_APPROACH_SECONDS)
+    if duration is None:
+        return sweep.REASON_NO_DURATION
+    coefficients = sweep.quintic_coefficients(
+        ready, alternative['target'], alternative['entry_velocity'],
+        alternative['entry_acceleration'], duration)
+    _, position, _, _, _ = sweep.sample_quintic(coefficients, duration)
+    lower, upper = validator.robot.qlim
+    if np.any(position < lower - 1e-9) or np.any(position > upper + 1e-9):
+        return sweep.REASON_JOINT_LIMITS
+    alternative['duration_s'] = float(duration)
+    return None
+
+
 def evaluate_ready_pose(validator, ready, placement, meter,
-                        acceleration_limits=None):
+                        acceleration_limits=None, exhaustive=False):
     """One ready pose against one prepared placement."""
     ready = np.asarray(ready, dtype=float)
     if placement['status'] != 'ready':
@@ -389,8 +433,9 @@ def evaluate_ready_pose(validator, ready, placement, meter,
     velocity_limits = placement['velocity_limits']
     step_bounds = sweep.collision_step_bounds()
     counts = {'winding_alternatives': [], 'lift_continuation_invalid': 0,
-              'collision_queries_per_approach': [], 'alternatives_skipped': 0,
-              'approaches_collision_checked': 0}
+              'collision_queries_per_approach': [],
+              'approaches_collision_checked': 0, 'alternatives_timed': 0,
+              'untimed_by_bound': 0, 'timed_not_collision_checked': 0}
     all_outcomes = []
 
     by_branch = {}
@@ -399,14 +444,33 @@ def evaluate_ready_pose(validator, ready, placement, meter,
 
     branches = []
     for label in sorted(by_branch):
-        rejected = []
         with meter.phase('enumerate'):
-            alternatives = _alternatives(
-                validator, ready, by_branch[label], placement['dt'],
-                velocity_limits, acceleration_limits, counts, rejected)
-        best, checked = None, []
-        with meter.phase('collision'):
-            for position, alternative in enumerate(alternatives):
+            alternatives = _alternatives(validator, ready, by_branch[label],
+                                         velocity_limits, counts)
+        rejected, checked, waiting = [], [], []
+        best, cursor = None, 0
+        while True:
+            with meter.phase('enumerate'):
+                while cursor < len(alternatives) and (
+                        exhaustive or not waiting
+                        or alternatives[cursor]['bound_s'] <= waiting[0][0][0]):
+                    alternative = alternatives[cursor]
+                    reason = _time_alternative(validator, ready, alternative,
+                                               velocity_limits,
+                                               acceleration_limits)
+                    if reason is None:
+                        key = (alternative['duration_s'],
+                               alternative['candidate_index'],
+                               tuple(alternative['winding']))
+                        heapq.heappush(waiting, (key, cursor, alternative))
+                    else:
+                        rejected.append({'feasible': False,
+                                         'reason_code': reason})
+                    cursor += 1
+            if not waiting:
+                break
+            _, _, alternative = heapq.heappop(waiting)
+            with meter.phase('collision'):
                 queries = []
                 result = sweep.evaluate_approach(
                     validator, ready, alternative['target'],
@@ -415,19 +479,27 @@ def evaluate_ready_pose(validator, ready, placement, meter,
                     acceleration_limits, step_bounds=step_bounds,
                     collision_counter=queries,
                     duration=alternative['duration_s'])
-                counts['approaches_collision_checked'] += 1
-                counts['collision_queries_per_approach'].append(sum(queries))
-                checked.append(result)
-                if result['feasible']:
-                    best = (alternative, result)
-                    counts['alternatives_skipped'] += len(alternatives) - position - 1
-                    break
+            counts['approaches_collision_checked'] += 1
+            counts['collision_queries_per_approach'].append(sum(queries))
+            checked.append(result)
+            if result['feasible']:
+                best = (alternative, result)
+                break
+        counts['alternatives_timed'] += cursor
+        counts['untimed_by_bound'] += len(alternatives) - cursor
+        counts['timed_not_collision_checked'] += len(waiting)
+
         outcomes = rejected + checked
         all_outcomes += outcomes
         branch = {
             'branch': label,
             'members': len(by_branch[label]),
-            'alternatives_timed': len(alternatives),
+            'independent': any(not e['extra_seed_only']
+                               for e in by_branch[label]),
+            'alternatives': len(alternatives),
+            'alternatives_timed': cursor,
+            'rejected_before_collision': len(rejected),
+            'collision_checked': len(checked),
             'failure_breakdown': sweep.failure_breakdown(outcomes),
             'connected': best is not None,
         }
@@ -449,6 +521,8 @@ def evaluate_ready_pose(validator, ready, placement, meter,
         'classification': classification,
         'branch_count': len(branches),
         'connected_branches': len(connected),
+        'connected_independent_branches': sum(1 for b in connected
+                                              if b['independent']),
         'best_duration_s': None if shortest is None else shortest['duration_s'],
         'best_max_peak_jerk': (None if shortest is None
                                else shortest['max_peak_jerk']),
@@ -456,6 +530,19 @@ def evaluate_ready_pose(validator, ready, placement, meter,
         'branches': branches,
         'counts': counts,
     }
+
+
+def branch_outcomes(results):
+    """What the ranking consumes, without the counts that depend on pruning."""
+    return [
+        [{'placement': r['placement'], 'classification': r['classification'],
+          'branches': [{k: b.get(k) for k in ('branch', 'connected',
+                                               'duration_s', 'candidate_index',
+                                               'winding')}
+                       for b in r['branches']]}
+         for r in result['per_placement']]
+        for result in results
+    ]
 
 
 def summarise_ready_pose(per_placement):
@@ -474,6 +561,9 @@ def summarise_ready_pose(per_placement):
              if r['classification'] != NO_LAYERS]),
         'worst_branch_count': (min(r['connected_branches'] for r in eligible)
                                if eligible else None),
+        'worst_independent_branch_count': (
+            min(r.get('connected_independent_branches', r['connected_branches'])
+                for r in eligible) if eligible else None),
         'worst_duration_s': (max(r['best_duration_s'] for r in connected)
                              if connected else None),
         'worst_peak_jerk': (max(r['best_max_peak_jerk'] for r in connected)
@@ -484,6 +574,61 @@ def summarise_ready_pose(per_placement):
 # --------------------------------------------------------------------------
 # Pilot selection, the run, and projection
 # --------------------------------------------------------------------------
+
+def nominal_seeds(nominal_layers, name='nominal'):
+    """Nominal candidates as tagged extra seeds, per layer."""
+    return [[(np.asarray(c, dtype=float), f'{name}:layer{k}:candidate{i}')
+             for i, c in enumerate(layer)]
+            for k, layer in enumerate(nominal_layers)]
+
+
+def generated_placement(validator, placement, nominal_RG, meter,
+                        nominal_layers=None, csv_path=None):
+    """Targets and layers 0-2 for one placement, generated at that placement."""
+    from ur10e_trajectory_pkg.ClientNode import (
+        DEFAULT_CSV_PATH,
+        build_trajectory_targets,
+    )
+    from ur10e_trajectory_pkg import candidate_generator
+    from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q, RAIL_INDEX
+
+    placement_RG = sweep.placement_transform(placement, nominal_RG)
+    (x, y, z, quaternions, times), metadata = build_trajectory_targets(
+        csv_path or DEFAULT_CSV_PATH, PREFIX_LAYERS, placement_RG=placement_RG,
+        return_metadata=True)
+    positions = np.column_stack((x, y, z))
+    dt = float(times[1] - times[0])
+
+    extra = None if nominal_layers is None else nominal_seeds(nominal_layers)
+    start = time.perf_counter()
+    with meter.phase('generation'):
+        candidates, records = candidate_generator.generate_layers(
+            validator, positions, quaternions, dt, LEGACY_MATLAB_START_Q,
+            PREFIX_LAYERS, extra_seeds=extra)
+    seconds = time.perf_counter() - start
+
+    layers = [[np.concatenate(([e['rail_position']], e['q_arm_canonical']))
+               for e in candidates.get(k, [])] for k in range(PREFIX_LAYERS)]
+    seed_only = candidate_generator.only_from_extra_seeds(candidates.get(0, []))
+    return {
+        'name': placement['name'], 'layers': layers, 'positions': positions,
+        'layer0_extra_seed_only': [any(e is s for s in seed_only)
+                                   for e in candidates.get(0, [])],
+        'quaternions': quaternions, 'dt': dt,
+        'generation': {
+            'source': 'generated at this placement',
+            'placement_RG': np.asarray(placement_RG).tolist(),
+            'trajectory': metadata,
+            'seconds': seconds,
+            'solve_records': len(records),
+            'candidates_per_layer': [len(candidates.get(k, []))
+                                     for k in range(PREFIX_LAYERS)],
+            'only_from_nominal_seeds_per_layer': [
+                len(candidate_generator.only_from_extra_seeds(
+                    candidates.get(k, []))) for k in range(PREFIX_LAYERS)],
+        },
+    }
+
 
 def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
     """A small spread of ready poses over rail position and provenance."""
@@ -520,7 +665,8 @@ def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
     return chosen
 
 
-def run_once(validator, ready_poses, placements, meter, tolerance=0.35):
+def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
+             exhaustive=False):
     """Prepare each placement, then evaluate every ready pose against it."""
     prepared = []
     for placement in placements:
@@ -528,7 +674,8 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35):
             prepared.append(prepare_placement(
                 validator, placement['name'], placement['layers'],
                 placement['positions'], placement['quaternions'],
-                placement['dt'], meter, tolerance=tolerance))
+                placement['dt'], meter, tolerance=tolerance,
+                layer0_extra_seed_only=placement.get('layer0_extra_seed_only')))
 
     results, pose_seconds = [], []
     for index, entry in enumerate(ready_poses):
@@ -536,7 +683,8 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35):
         for placement in prepared:
             start = time.perf_counter()
             per_placement.append(evaluate_ready_pose(
-                validator, entry['configuration'], placement, meter))
+                validator, entry['configuration'], placement, meter,
+                exhaustive=exhaustive))
             pose_seconds.append(time.perf_counter() - start)
         results.append({
             'ready_index': index,
@@ -547,7 +695,9 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35):
             'summary': summarise_ready_pose(per_placement),
         })
     placement_records = [{'name': p['name'], 'status': p['status'],
-                          'counts': p['counts']} for p in prepared]
+                          'counts': p['counts'],
+                          'generation': source.get('generation')}
+                         for p, source in zip(prepared, placements)]
     return results, placement_records, pose_seconds
 
 
@@ -563,8 +713,12 @@ def aggregate(results, placement_records, meter, pose_seconds):
         'winding_alternatives_per_candidate': distribution(windings),
         'approaches_collision_checked': int(sum(
             r['counts']['approaches_collision_checked'] for r in per_pose)),
-        'alternatives_skipped_by_early_exit': int(sum(
-            r['counts']['alternatives_skipped'] for r in per_pose)),
+        'alternatives_timed': int(sum(
+            r['counts']['alternatives_timed'] for r in per_pose)),
+        'untimed_by_bound': int(sum(
+            r['counts']['untimed_by_bound'] for r in per_pose)),
+        'timed_not_collision_checked': int(sum(
+            r['counts']['timed_not_collision_checked'] for r in per_pose)),
         'lift_continuation_invalid': int(sum(
             r['counts']['lift_continuation_invalid'] for r in per_pose)),
         'pre_collision_rejections': {
@@ -587,14 +741,16 @@ def aggregate(results, placement_records, meter, pose_seconds):
 
 
 def project_runtime(pool_seconds, placement_seconds, pose_seconds, pool_size,
-                    placements=29):
+                    placements=29, generation_seconds=None):
     """Full-sweep wall time from pilot measurements, at p50 and p95.
 
-    Excludes generating layers for the non-nominal placements, which has not
-    been built and so cannot be measured.
+    generation_seconds, measured per generated placement, is charged to every
+    placement; without it generation is excluded and the projection says so.
     """
     per_pose = distribution(pose_seconds)
     fixed = pool_seconds + placements * placement_seconds
+    if generation_seconds is not None:
+        fixed += placements * generation_seconds
     evaluations = pool_size * placements
     return {
         'placements': placements,
@@ -603,7 +759,9 @@ def project_runtime(pool_seconds, placement_seconds, pose_seconds, pool_size,
         'fixed_seconds': fixed,
         'p50_seconds': fixed + evaluations * per_pose['p50'],
         'p95_seconds': fixed + evaluations * per_pose['p95'],
-        'excludes': 'candidate generation for the 28 non-nominal placements',
+        'generation_seconds_per_placement': generation_seconds,
+        'excludes': (None if generation_seconds is not None
+                     else 'candidate generation per placement'),
     }
 
 
@@ -670,8 +828,13 @@ def manifest(args, validator, candidates_document, trajectory_metadata, dt,
         'timing_policy': {'waypoint_dt_s': dt,
                           'max_approach_s': MAX_APPROACH_SECONDS,
                           'duration_lower_s': DURATION_LOWER_S,
-                          'duration_tolerance_s': DURATION_TOLERANCE_S,
-                          'quintic_samples': 400},
+                          'duration_method': 'exact: lower bound or a root '
+                                             'of the sampled quadratic '
+                                             'constraints',
+                          'ordering': 'lazy by average-speed lower bound, '
+                                      'timing while bound <= shortest '
+                                      'waiting duration',
+                          'quintic_samples': sweep.QUINTIC_SAMPLES},
         'task_gates': {'condition_number_max': TASK_CONDITION_THRESHOLD,
                        'alpha_star_min': TASK_MIN_ALPHA_STAR,
                        'twist': 'task twist from layer 0 to layer 1'},
@@ -690,6 +853,13 @@ def main(argv=None):
     parser.add_argument('--repeats', type=int, default=2)
     parser.add_argument('--tolerance', type=float, default=0.35)
     parser.add_argument('--out', default='pilot.json')
+    parser.add_argument('--placements', default='nominal',
+                        help='comma-separated placement names from the envelope')
+    parser.add_argument('--generate-nominal', action='store_true',
+                        help='generate nominal layers instead of reading '
+                             '--candidates (for checking the generator)')
+    parser.add_argument('--no-exhaustive-check', action='store_true',
+                        help='skip the exhaustive run that verifies pruning')
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
@@ -702,8 +872,29 @@ def main(argv=None):
         None, PREFIX_LAYERS, with_metadata=True)
     layers, candidates_document = load_candidates(
         args.candidates, PREFIX_LAYERS, include_oracle=False)
-    placements = [{'name': 'nominal', 'layers': layers, 'positions': positions,
-                   'quaternions': quaternions, 'dt': dt}]
+    nominal_RG = trajectory_metadata['placement_RG']
+    envelope = {p['name']: p for p in sweep.placements()}
+    names = [n.strip() for n in args.placements.split(',') if n.strip()]
+    unknown = [n for n in names if n not in envelope]
+    if unknown:
+        parser.error(f'unknown placements {unknown}')
+
+    generation_meter = Meter()
+    placements = []
+    for name in names:
+        if name == 'nominal' and not args.generate_nominal:
+            placements.append({
+                'name': 'nominal', 'layers': layers, 'positions': positions,
+                'quaternions': quaternions, 'dt': dt,
+                'generation': {'source': 'committed full-length generator '
+                                         'output (--candidates)'}})
+        else:
+            with counting_collisions(validator, generation_meter):
+                placements.append(generated_placement(
+                    validator, envelope[name], nominal_RG, generation_meter,
+                    nominal_layers=None if name == 'nominal' else layers))
+    generated = [p['generation']['seconds'] for p in placements
+                 if 'seconds' in p['generation']]
 
     pool_meter = Meter()
     with counting_collisions(validator, pool_meter), \
@@ -723,16 +914,42 @@ def main(argv=None):
     reference = results_without_timing(results)
     deterministic = all(results_without_timing(r[0]) == reference
                         for r in runs[1:])
+
+    exhaustive_check = {'ran': False}
+    if not args.no_exhaustive_check:
+        check_meter = Meter()
+        with counting_collisions(validator, check_meter), \
+                counting_static_gates(check_meter):
+            full, _, full_seconds = run_once(validator, pilot, placements,
+                                             check_meter, args.tolerance,
+                                             exhaustive=True)
+        exhaustive_check = {
+            'ran': True,
+            'branch_outcomes_agree': (
+                json.dumps(branch_outcomes(full), default=_plain)
+                == json.dumps(branch_outcomes(results), default=_plain)),
+            'seconds_per_ready_pose_placement': distribution(full_seconds),
+            'phase_seconds': dict(check_meter.seconds),
+            'alternatives_timed': int(sum(
+                r['counts']['alternatives_timed']
+                for result in full for r in result['per_placement']
+                if 'counts' in r)),
+        }
     summary = aggregate(results, placement_records, meter, pose_seconds)
     projection = project_runtime(
-        pool_meter.seconds['pool'], meter.seconds.get('placement', 0.0),
-        pose_seconds, len(pool))
+        pool_meter.seconds['pool'],
+        meter.seconds.get('placement', 0.0) / len(placements),
+        pose_seconds, len(pool),
+        generation_seconds=(float(np.mean(generated)) if generated else None))
 
     document = {
         'schema_version': SCHEMA_VERSION,
         'manifest': manifest(args, validator, candidates_document,
-                             trajectory_metadata, dt, ['nominal'],
+                             trajectory_metadata, dt, names,
                              args.tolerance),
+        'generation': {'counts': generation_meter.counts,
+                       'seconds': generation_meter.seconds,
+                       'per_placement_seconds': generated},
         'pool': dict(pool_summary, size=len(pool),
                      seconds=pool_meter.seconds['pool'],
                      counts=pool_meter.counts),
@@ -740,6 +957,7 @@ def main(argv=None):
                    'provenance': e['provenance'],
                    'anchor_name': e['anchor_name']} for e in pilot],
         'deterministic_across_repeats': deterministic,
+        'exhaustive_check': exhaustive_check,
         'repeats': args.repeats,
         'repeat_seconds': [sum(r[3].seconds.values()) for r in runs],
         'summary': summary,
@@ -755,22 +973,25 @@ def main(argv=None):
     for record in placement_records:
         print(f"placement {record['name']}: {record['status']} {record['counts']}")
     print(f"deterministic across {args.repeats} repeats: {deterministic}")
+    print(f"exhaustive check: {exhaustive_check}")
     for key in ('classifications', 'collision_queries_per_approach',
                 'winding_alternatives_per_candidate',
                 'approaches_collision_checked',
-                'alternatives_skipped_by_early_exit',
+                'alternatives_timed', 'untimed_by_bound',
+                'timed_not_collision_checked',
                 'lift_continuation_invalid', 'pre_collision_rejections',
                 'collision_rejections', 'seconds_per_ready_pose_placement',
                 'phase_seconds', 'counts'):
         print(f'  {key}: {summary[key]}')
     for result in results:
-        record = result['per_placement'][0]
-        print(f"  ready {result['ready_index']} {result['provenance']:12s} "
-              f"{result['anchor_name'] or '':24s} rail "
-              f"{result['configuration'][0]:.2f}: {record['classification']} "
-              f"branches {record.get('connected_branches')}/"
-              f"{record.get('branch_count')} best "
-              f"{record.get('best_duration_s')} s")
+        for record in result['per_placement']:
+            print(f"  ready {result['ready_index']} {result['provenance']:12s} "
+                  f"{result['anchor_name'] or '':24s} rail "
+                  f"{result['configuration'][0]:.2f} {record['placement']:14s}: "
+                  f"{record['classification']} branches "
+                  f"{record.get('connected_branches')}/"
+                  f"{record.get('branch_count')} best "
+                  f"{record.get('best_duration_s')} s")
     print(f"projection: {projection}")
     print(f"total wall {document['total_wall_seconds']:.1f} s")
     return 0

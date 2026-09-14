@@ -193,10 +193,41 @@ def test_a_moving_entry_is_timed_inside_its_window_not_missed(ready, VELOCITY):
     assert 2.0 < duration < 7.8
     assert _quintic_feasible(ready, target, zeros, entry_acceleration, duration,
                              VELOCITY, ACCELERATION)
-    # Nothing feasible more than one scan step shorter.
-    for shorter in np.arange(0.2, duration / sweep.DURATION_SCAN_RATIO, 0.01):
+    for shorter in np.arange(0.2, duration - 1e-6, 0.005):
         assert not _quintic_feasible(ready, target, zeros, entry_acceleration,
                                      shorter, VELOCITY, ACCELERATION)
+
+
+def test_the_exact_duration_agrees_with_a_brute_force_scan(ready, VELOCITY):
+    """No scan step to fall between. Random entry states and destinations; the
+    exact answer must pass the sampled check, nothing on a fine grid below it
+    may, and when it reports None nothing on the grid may pass at all."""
+    rng = np.random.default_rng(7)
+    for _ in range(12):
+        target = ready + rng.uniform(-1.0, 1.0, 7) * np.concatenate(([0.8], np.full(6, 2.0)))
+        entry_velocity = rng.uniform(-0.6, 0.6, 7) * VELOCITY
+        entry_acceleration = rng.uniform(-0.6, 0.6, 7) * ACCELERATION
+        duration = sweep.minimum_duration(ready, target, entry_velocity,
+                                          entry_acceleration, VELOCITY,
+                                          ACCELERATION)
+        bound = sweep.duration_lower_bound(ready, target, VELOCITY)
+        top = 20.0 if duration is None else duration - 1e-6
+        grid = np.arange(bound, top, 0.004 if duration is not None else 0.02)
+        assert not any(_quintic_feasible(ready, target, entry_velocity,
+                                         entry_acceleration, T, VELOCITY,
+                                         ACCELERATION) for T in grid)
+        if duration is not None:
+            assert _quintic_feasible(ready, target, entry_velocity,
+                                     entry_acceleration, duration, VELOCITY,
+                                     ACCELERATION)
+
+
+def test_the_lower_bound_is_the_average_speed_limit(ready, VELOCITY):
+    target = ready.copy()
+    target[4] += 1.0
+    assert sweep.duration_lower_bound(ready, target, VELOCITY) == pytest.approx(
+        1.0 / VELOCITY[4])
+    assert sweep.duration_lower_bound(ready, ready, VELOCITY) == 0.2
 
 
 def test_an_entry_state_beyond_the_limits_has_no_duration(ready, VELOCITY):

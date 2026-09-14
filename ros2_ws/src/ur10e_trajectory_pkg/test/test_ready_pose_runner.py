@@ -133,6 +133,27 @@ def test_a_continuation_entering_beyond_a_limit_is_dropped_per_placement(
         'entry_state_exceeds_limits': 1}
 
 
+def test_branches_reached_only_through_extra_seeds_are_counted_apart(
+        validator, placement, ready):
+    """A branch whose every member came from another placement's seeds says
+    the seeds carried over, not that the generator found it here."""
+    meter = runner.Meter()
+    state = runner.prepare_placement(
+        validator, placement['name'], placement['layers'],
+        placement['positions'], placement['quaternions'], DT, meter,
+        layer0_extra_seed_only=[False, True, False])
+    assert state['counts']['branch_clusters'] == 2
+    assert state['counts']['branch_clusters_independent'] == 1
+    assert state['counts']['valid_candidates_extra_seed_only'] == 1
+
+    result = runner.evaluate_ready_pose(validator, ready, state, meter)
+    assert result['connected_branches'] == 2
+    assert result['connected_independent_branches'] == 1
+    summary = runner.summarise_ready_pose([result])
+    assert summary['worst_branch_count'] == 2
+    assert summary['worst_independent_branch_count'] == 1
+
+
 def test_a_placement_without_layers_is_refused_not_invented(validator, placement):
     state = runner.prepare_placement(
         validator, 'translate_x+', None, placement['positions'],
@@ -171,6 +192,7 @@ def test_collision_is_checked_in_duration_order_and_stops_at_first_feasible(
     result = runner.evaluate_ready_pose(validator, ready, single, runner.Meter())
 
     branch = result['branches'][0]
+    counts = result['counts']
     assert len(seen) == 2
     assert seen[0] <= seen[1]
     assert branch['connected'] is True
@@ -178,8 +200,42 @@ def test_collision_is_checked_in_duration_order_and_stops_at_first_feasible(
     # Pre-collision rejections (joint limits, duration) are listed too; only
     # one alternative reached the collision check and failed there.
     assert branch['failure_breakdown'].get(sweep.REASON_COLLISION) == 1
-    assert (result['counts']['alternatives_skipped']
-            == branch['alternatives_timed'] - 2)
+    # Every alternative is accounted for exactly once.
+    assert branch['alternatives'] == (branch['collision_checked']
+                                      + branch['rejected_before_collision']
+                                      + counts['timed_not_collision_checked']
+                                      + counts['untimed_by_bound'])
+
+
+def test_pruning_by_bound_changes_no_branch_outcome(validator, prepared, ready):
+    """The lazy order must pick exactly what timing everything would, while
+    leaving some alternatives untimed."""
+    pruned = runner.evaluate_ready_pose(validator, ready, prepared, runner.Meter())
+    full = runner.evaluate_ready_pose(validator, ready, prepared, runner.Meter(),
+                                      exhaustive=True)
+    wrap = lambda r: [{'per_placement': [r]}]
+    assert runner.branch_outcomes(wrap(pruned)) == runner.branch_outcomes(wrap(full))
+    assert pruned['counts']['untimed_by_bound'] > 0
+    assert full['counts']['untimed_by_bound'] == 0
+    assert (pruned['counts']['alternatives_timed']
+            < full['counts']['alternatives_timed'])
+
+
+def test_the_cached_entry_state_is_the_lifted_prefixs(validator, prepared, ready):
+    """Entry state is invariant under a lift, which is what makes caching it
+    per candidate exact rather than an approximation."""
+    entry = prepared['valid'][0]
+    lifts = sweep.destination_lifts(validator, entry['configuration'], ready,
+                                    validator.velocity_limits, 20.0)
+    # A lift whose continuation leaves the limits has no prefix to compare.
+    prefixes = [p for p in (sweep.lifted_prefix(validator, entry['prefix'], lift)
+                            for lift in lifts) if p is not None]
+    assert len(prefixes) > 1
+    for prefix in prefixes:
+        velocity, acceleration = sweep.entry_state_from_prefix(prefix, DT)
+        np.testing.assert_allclose(velocity, entry['entry_velocity'], atol=1e-9)
+        np.testing.assert_allclose(acceleration, entry['entry_acceleration'],
+                                   atol=1e-9)
 
 
 def test_every_collision_query_is_counted_by_phase(validator, prepared, ready):
@@ -243,6 +299,21 @@ def test_pilot_selection_spans_rail_and_provenance():
     strata = {int(c['configuration'][0] / 3.0 * 8) for c in chosen}
     assert len(strata) >= 7
     assert [id(c) for c in chosen] == [id(c) for c in runner.pilot_ready_poses(pool)]
+
+
+def test_nominal_seeds_carry_their_origin():
+    layers = [[np.zeros(7), np.ones(7)], [np.full(7, 2.0)], []]
+    seeds = runner.nominal_seeds(layers)
+    assert [len(layer) for layer in seeds] == [2, 1, 0]
+    assert seeds[0][1][1] == 'nominal:layer0:candidate1'
+    np.testing.assert_array_equal(seeds[1][0][0], np.full(7, 2.0))
+
+
+def test_projection_charges_generation_to_every_placement():
+    projection = runner.project_runtime(10.0, 2.0, [1.0], pool_size=50,
+                                        placements=29, generation_seconds=3.0)
+    assert projection['fixed_seconds'] == pytest.approx(10.0 + 29 * 5.0)
+    assert projection['excludes'] is None
 
 
 def test_projection_scales_pool_and_placements():

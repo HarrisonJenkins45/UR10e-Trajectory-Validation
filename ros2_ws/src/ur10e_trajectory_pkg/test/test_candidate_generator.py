@@ -262,3 +262,38 @@ def test_every_candidate_reaches_its_target(validator, trajectory):
         for entry in entries:
             reached = validator.robot.fkine(entry['lifted_forms'][0], end='tool0')
             assert np.linalg.norm(reached.t - positions[index]) <= 1e-3
+
+
+# --------------------------------------------------------------------------
+# Layers for one placement, with tagged extra seeds
+# --------------------------------------------------------------------------
+
+def test_generate_layers_covers_the_prefix_and_tags_extra_seeds(validator, trajectory):
+    """Extra seeds add candidates without standing in for independent
+    generation: their origin stays on every candidate they produce."""
+    positions, quaternions = trajectory
+    seed = np.concatenate(([1.5], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0])))
+    extra = [[(seed, 'nominal:layer0:candidate0')], [], []]
+    candidates, records = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=3, extra_seeds=extra)
+
+    assert set(candidates) == {0, 1, 2}
+    assert all(r['waypoint_index'] < 3 for r in records)
+    tagged = [p for entry in candidates[0] for p in entry['provenance']
+              if p['mode'] == generator.EXTRA_SEED_MODE]
+    assert tagged and all(p['seed_origin'] == 'nominal:layer0:candidate0'
+                          for p in tagged)
+    independent = [e for e in candidates[0]
+                   if e not in generator.only_from_extra_seeds(candidates[0])]
+    assert independent, 'independent modes must still produce candidates'
+
+
+def test_only_from_extra_seeds_reads_provenance():
+    entries = [
+        {'provenance': [{'mode': generator.EXTRA_SEED_MODE}]},
+        {'provenance': [{'mode': generator.EXTRA_SEED_MODE},
+                        {'mode': 'interaction'}]},
+    ]
+    assert generator.only_from_extra_seeds(entries) == [entries[0]]
+

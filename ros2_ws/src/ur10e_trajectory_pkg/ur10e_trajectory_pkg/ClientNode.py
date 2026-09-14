@@ -168,7 +168,8 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
     poses_I = frames.poses_from_positions_quaternions(positions_I, quaternions_I)
     motion = frames.relative_motion(poses_I)
 
-    if placement_RG is None:
+    is_legacy = placement_RG is None
+    if is_legacy:
         placement_RG = legacy_placement(quaternions_I[0])
     poses_RG, factor = frames.place_relative_motion(
         motion, placement_RG, bound_m)
@@ -187,7 +188,7 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
         'csv_path': str(csv_path),
         'num_waypoints': int(num_waypoints),
         'placement_RG': np.asarray(placement_RG).tolist(),
-        'placement_is_legacy_fixture': True,
+        'placement_is_legacy_fixture': is_legacy,
         'bound_m': None if bound_m is None else float(bound_m),
         'translation_scale_factor': float(factor),
         'target_frame': frames.TARGET_FRAME,
