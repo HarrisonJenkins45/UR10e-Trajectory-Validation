@@ -290,13 +290,6 @@ def test_floor_collision_is_detected_within_the_covered_region(validator, rail_m
 MAX_ARM_REACH_M = 1.30
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='Known gap: floor and wall span only the rail travel (0..3), not '
-           'the reachable workspace (about -1.3..4.3), so the arm can dip '
-           'below floor level undetected within ~1.3 m of either rail end. '
-           'Widening the two env bodies fixes it; delete this marker then.',
-)
 @pytest.mark.parametrize('body_name', ['floor_id', 'wall_id'])
 def test_environment_covers_the_reachable_workspace(validator, body_name):
     """The environment must cover everywhere the arm can actually go.
@@ -313,16 +306,16 @@ def test_environment_covers_the_reachable_workspace(validator, body_name):
     assert x_max >= RAIL_UPPER_M + MAX_ARM_REACH_M - TOL_M
 
 
-def test_floor_gap_beyond_the_rail_end_is_still_present(validator):
-    """Pin the gap above to a concrete symptom.
+def test_floor_collision_is_detected_past_the_rail_end(validator):
+    """The gap the widened environment closes.
 
-    Keeps it from quietly changing without a test moving. Delete alongside
-    the xfail once the environment is widened.
+    While the planes spanned only the rail's 0 to 3 m travel, this pose
+    reached past the end with no floor beneath it and validated clean. The
+    arm overhangs each rail end by its own 1.3 m reach, so that region is
+    reachable and had to be modelled before collision clearance could mean
+    anything there.
     """
     q_dipping = _q(RAIL_UPPER_M, 0, -50, 120, -90, 0, 0)
     wrist_x = validator.robot.fkine(q_dipping, end='wrist_3_link').t[0]
     assert wrist_x > RAIL_UPPER_M, 'pose no longer overhangs the rail end'
-    assert validator.check_all_collisions(q_dipping) is False, (
-        'floor collision past the rail end is now detected -- the environment '
-        'was widened, so remove this test and the xfail above'
-    )
+    assert validator.check_all_collisions(q_dipping) is True

@@ -39,15 +39,18 @@ class ObstacleMarkerPublisher(Node):
         return m
 
     def publish_markers(self):
-        # X CENTRES ARE +1.5, NOT 0. The rig measures from the origin: the
-        # rail spans X = 0 -> 3 so that rail position 0 is the home end.
-        # These 3 m planes are centred, so an X centre of 0 would span
-        # -1.5 -> 1.5 and leave the rail's outer half hanging off the floor
-        # with no wall beside it. +1.5 makes both planes span 0 -> 3 too.
+        # 6 m long, centred at X = +1.5, so both planes span -1.5 -> 4.5.
+        #
+        # They must cover the REACHABLE workspace, not the rail's travel. The
+        # rail spans 0 -> 3, but the arm overhangs each end by its own 1.3 m
+        # reach, so the robot can occupy -1.3 -> 4.3. When these were 3 m
+        # long the arm could dip below floor level within 1.3 m of either end
+        # with no floor there to hit, and the collision checker had nothing to
+        # report.
         # Vertical plane at Y = +1.0, thin in Y -- the wall. Dark grey.
-        wall = self._make_cube(0, 1.5, 1.0, 0.0, 3.0, 0.05, 3.0, 0.1, 0.1, 0.1)
+        wall = self._make_cube(0, 1.5, 1.0, 0.0, 6.0, 0.05, 3.0, 0.1, 0.1, 0.1)
         # Horizontal plane at Z = -0.05, thin in Z -- the floor. Gold.
-        floor = self._make_cube(1, 1.5, 0.0, -0.05, 3.0, 3.0, 0.05, 0.85, 0.65, 0.0)
+        floor = self._make_cube(1, 1.5, 0.0, -0.05, 6.0, 3.0, 0.05, 0.85, 0.65, 0.0)
         self.pub.publish(MarkerArray(markers=[wall, floor]))
 
 

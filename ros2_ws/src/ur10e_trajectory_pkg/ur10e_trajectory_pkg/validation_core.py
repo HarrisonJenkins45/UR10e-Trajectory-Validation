@@ -309,15 +309,16 @@ class TrajectoryValidator:
         # Sizes below are the original Cuboid `scale` (full extents) halved,
         # since pybullet boxes take half-extents.
         wall_shape = pb.createCollisionShape(
-            pb.GEOM_BOX, halfExtents=[1.5, 0.025, 1.5], physicsClientId=self._pb_client
+            pb.GEOM_BOX, halfExtents=[3.0, 0.025, 1.5], physicsClientId=self._pb_client
         )
         floor_shape = pb.createCollisionShape(
-            pb.GEOM_BOX, halfExtents=[1.5, 1.5, 0.025], physicsClientId=self._pb_client
+            pb.GEOM_BOX, halfExtents=[3.0, 1.5, 0.025], physicsClientId=self._pb_client
         )
-        # X centre +1.5, not 0 -- see obstacle_markers.publish_markers. The
-        # rail spans X = 0 -> 3, so centred-on-origin planes would leave its
-        # outer half outside the environment entirely, where no floor or wall
-        # collision can ever be reported. Must stay in step with the markers.
+        # 6 m long, centred at X = +1.5, spanning -1.5 -> 4.5. Covers the
+        # REACHABLE workspace rather than the rail's 0 -> 3 travel: the arm
+        # overhangs each rail end by its own 1.3 m reach, and while these
+        # planes were 3 m long it could dip below floor level there with no
+        # floor to hit. Must stay in step with obstacle_markers.
         self.wall_id = pb.createMultiBody(
             baseCollisionShapeIndex=wall_shape,
             basePosition=[1.5, 1.0, 0.0],
