@@ -139,7 +139,8 @@ def legacy_placement(first_quaternion):
 
 def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
                              num_waypoints=DEFAULT_NUM_WAYPOINTS,
-                             placement_RG=None, bound_m=TARGET_BOUND_M):
+                             placement_RG=None, bound_m=TARGET_BOUND_M,
+                             return_metadata=False):
     """End-effector targets in the RAIL-BASE frame, per the frame contract.
 
     Reproduces relative motion, then places it:
@@ -169,14 +170,28 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
 
     if placement_RG is None:
         placement_RG = legacy_placement(quaternions_I[0])
-    poses_RG, _ = frames.place_relative_motion(motion, placement_RG, bound_m)
+    poses_RG, factor = frames.place_relative_motion(
+        motion, placement_RG, bound_m)
 
     positions_RG = poses_RG[:, :3, 3]
     quaternions_RG = np.stack([
         frames.to_position_quaternion(pose)[1] for pose in poses_RG
     ])
-    return (positions_RG[:, 0], positions_RG[:, 1], positions_RG[:, 2],
-            quaternions_RG, sim_time)
+    targets = (positions_RG[:, 0], positions_RG[:, 1], positions_RG[:, 2],
+               quaternions_RG, sim_time)
+    if not return_metadata:
+        return targets
+    # Everything needed to reproduce these targets from the CSV, for the
+    # manifest a diagnostic artifact carries.
+    return targets, {
+        'csv_path': str(csv_path),
+        'num_waypoints': int(num_waypoints),
+        'placement_RG': np.asarray(placement_RG).tolist(),
+        'placement_is_legacy_fixture': True,
+        'bound_m': None if bound_m is None else float(bound_m),
+        'translation_scale_factor': float(factor),
+        'target_frame': frames.TARGET_FRAME,
+    }
 
 
 def main(args=None):

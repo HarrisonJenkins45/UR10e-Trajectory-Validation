@@ -13,8 +13,8 @@ from ament_index_python.packages import get_package_share_directory
 from ur10e_trajectory_pkg import failure_census
 from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
 from ur10e_trajectory_pkg.pose_metrics import (
-    PROVISIONAL_ORIENTATION_TOL_RAD,
-    PROVISIONAL_POSITION_TOL_M,
+    IK_ORIENTATION_TOL_RAD,
+    IK_POSITION_TOL_M,
 )
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
@@ -204,9 +204,9 @@ def test_viable_requires_both_pose_errors_and_all_gates():
 
 
 @pytest.mark.parametrize('overrides', [
-    {'position_error_m': PROVISIONAL_POSITION_TOL_M * 10,
+    {'position_error_m': IK_POSITION_TOL_M * 10,
      'gate_pose_position': True},
-    {'orientation_error_rad': PROVISIONAL_ORIENTATION_TOL_RAD * 10,
+    {'orientation_error_rad': IK_ORIENTATION_TOL_RAD * 10,
      'gate_pose_orientation': True},
     {'gate_singular': True},
     {'gate_collision': True},

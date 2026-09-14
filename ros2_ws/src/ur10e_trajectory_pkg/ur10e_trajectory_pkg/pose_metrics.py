@@ -12,21 +12,24 @@ subtracting componentwise gives a large spurious error, and Euler angles wrap
 and gimbal. The input trajectory contains seven such sign reversals, so this
 is a real case and not a theoretical one.
 
-Nothing here gates anything yet. Stage 2b decides tolerances and turns these
-into an acceptance check; until then they are recorded observationally, which
-is why the census stores raw errors rather than pass/fail flags.
+These gate acceptance: a configuration outside either limit is rejected as
+POSE_MISMATCH, because it does not answer the commanded target. Raw errors are
+still recorded everywhere, so the limits can change without re-running a
+census.
 """
 import numpy as np
 
-# Provisional limits, recorded alongside raw errors so a later change of mind
-# does not require re-running anything. NOT yet enforced anywhere.
+# Acceptance limits on the reached pose. These ARE enforced: a configuration
+# outside either is rejected as POSE_MISMATCH. One canonical pair, imported
+# wherever it is needed rather than aliased, so there is no way for the
+# validator and a diagnostic to disagree about what "in tolerance" means.
 #
-# Deliberately independent of ikine_LM's own tol: that measures convergence of
-# the solver's local search, not distance to the target, so it cannot stand in
-# for either of these. A reaching solve was measured at 1e-4 m, so the
+# Deliberately independent of ikine_LM's own tol, which bounds the weighted
+# sum E = 0.5 e.T We e rather than either error, and so cannot stand in for
+# either. A reaching solve measures about 1e-4 m of position error, so the
 # position limit sits an order of magnitude above normal numerical error.
-PROVISIONAL_POSITION_TOL_M = 1e-3
-PROVISIONAL_ORIENTATION_TOL_RAD = np.deg2rad(0.1)
+IK_POSITION_TOL_M = 1e-3
+IK_ORIENTATION_TOL_RAD = np.deg2rad(0.1)
 
 
 def quaternion_to_matrix(quaternion):
@@ -71,11 +74,11 @@ def pose_error(reached_pose, target_position, target_quaternion):
     )
 
 
-def within_provisional_tolerance(position_err_m, orientation_err_rad):
-    """Both errors inside the provisional limits.
+def within_pose_tolerance(position_err_m, orientation_err_rad):
+    """Both errors inside the acceptance limits. Bounds are inclusive.
 
-    Provided so the census can flag likely-viable candidates without those
-    limits being load-bearing anywhere. Raw errors are stored regardless.
+    Raw errors are recorded everywhere regardless, so changing these limits
+    does not require re-running a census.
     """
-    return (position_err_m <= PROVISIONAL_POSITION_TOL_M
-            and orientation_err_rad <= PROVISIONAL_ORIENTATION_TOL_RAD)
+    return (position_err_m <= IK_POSITION_TOL_M
+            and orientation_err_rad <= IK_ORIENTATION_TOL_RAD)

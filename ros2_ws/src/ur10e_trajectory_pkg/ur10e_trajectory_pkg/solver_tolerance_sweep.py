@@ -36,8 +36,8 @@ from ur10e_trajectory_pkg.failure_census import (
     viable,
 )
 from ur10e_trajectory_pkg.pose_metrics import (
-    PROVISIONAL_ORIENTATION_TOL_RAD,
-    PROVISIONAL_POSITION_TOL_M,
+    IK_ORIENTATION_TOL_RAD,
+    IK_POSITION_TOL_M,
 )
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
@@ -91,10 +91,10 @@ def measure(urdf_path, mesh_path, targets, quaternions, dt, solver_tol):
             'p90': percentile(orientation, 0.9),
             'max': max(orientation) if orientation else None,
         },
-        'within_provisional': sum(
+        'within_tolerance': sum(
             1 for r in accepted
-            if r['position_error_m'] <= PROVISIONAL_POSITION_TOL_M
-            and r['orientation_error_rad'] <= PROVISIONAL_ORIENTATION_TOL_RAD),
+            if r['position_error_m'] <= IK_POSITION_TOL_M
+            and r['orientation_error_rad'] <= IK_ORIENTATION_TOL_RAD),
         'iterations': {
             'median': percentile(iterations, 0.5),
             'max': max(iterations) if iterations else None,
@@ -123,9 +123,9 @@ def main(argv=None):
         'schema_version': SCHEMA_VERSION,
         'environment': environment.describe(),
         'num_waypoints': len(targets),
-        'provisional_tolerances': {
-            'position_m': PROVISIONAL_POSITION_TOL_M,
-            'orientation_rad': PROVISIONAL_ORIENTATION_TOL_RAD,
+        'acceptance_tolerances': {
+            'position_m': IK_POSITION_TOL_M,
+            'orientation_rad': IK_ORIENTATION_TOL_RAD,
         },
         'rows': rows,
     }
@@ -138,7 +138,7 @@ def main(argv=None):
     print(header)
     for row in rows:
         print(f"{row['solver_tol']:8.0e} {row['longest_segment']:5d} "
-              f"{row['viable_waypoints']:7d} {row['within_provisional']:8d} "
+              f"{row['viable_waypoints']:7d} {row['within_tolerance']:8d} "
               f"{np.rad2deg(row['orientation_error_rad']['median'] or 0):8.4f}d "
               f"{np.rad2deg(row['orientation_error_rad']['p90'] or 0):8.4f}d "
               f"{row['position_error_m']['median'] or 0:9.2e} "

@@ -13,8 +13,8 @@ from spatialgeometry import Cuboid
 
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, NUM_JOINTS
 from ur10e_trajectory_pkg.pose_metrics import (
-    PROVISIONAL_ORIENTATION_TOL_RAD,
-    PROVISIONAL_POSITION_TOL_M,
+    IK_ORIENTATION_TOL_RAD,
+    IK_POSITION_TOL_M,
     pose_error,
 )
 from scipy.interpolate import PchipInterpolator
@@ -84,12 +84,6 @@ IK_SEARCH_LIMIT = 1
 # distribution. Acceptance must still check position and orientation errors
 # explicitly: this is a scalar on a weighted sum, not a bound on either.
 IK_SOLVER_TOL = 5e-7
-
-# Acceptance limits on the REACHED pose, checked explicitly rather than being
-# inferred from IK_SOLVER_TOL, which bounds a weighted sum of both errors
-# rather than either one.
-IK_POSITION_TOL_M = PROVISIONAL_POSITION_TOL_M
-IK_ORIENTATION_TOL_RAD = PROVISIONAL_ORIENTATION_TOL_RAD
 
 # Independent failure flags. Never collapsed: a configuration can miss its
 # target AND collide, and knowing both is the difference between "the

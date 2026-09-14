@@ -167,8 +167,8 @@ def test_position_and_orientation_are_never_collapsed():
 
 def test_values_exactly_on_the_tolerance_pass():
     """Inclusive bounds, so a value at the limit is not a failure."""
-    from ur10e_trajectory_pkg.pose_metrics import within_provisional_tolerance
-    assert within_provisional_tolerance(IK_POSITION_TOL_M, IK_ORIENTATION_TOL_RAD)
+    from ur10e_trajectory_pkg.pose_metrics import within_pose_tolerance
+    assert within_pose_tolerance(IK_POSITION_TOL_M, IK_ORIENTATION_TOL_RAD)
 
 
 @pytest.mark.parametrize('position_err,orientation_err', [
@@ -176,8 +176,8 @@ def test_values_exactly_on_the_tolerance_pass():
     (0.0, IK_ORIENTATION_TOL_RAD * 1.000001),
 ])
 def test_values_immediately_outside_the_tolerance_fail(position_err, orientation_err):
-    from ur10e_trajectory_pkg.pose_metrics import within_provisional_tolerance
-    assert not within_provisional_tolerance(position_err, orientation_err)
+    from ur10e_trajectory_pkg.pose_metrics import within_pose_tolerance
+    assert not within_pose_tolerance(position_err, orientation_err)
 
 
 def test_quaternion_sign_reversal_is_equivalent_at_the_gate(validator, reachable):

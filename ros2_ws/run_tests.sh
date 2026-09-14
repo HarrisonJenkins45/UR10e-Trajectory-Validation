@@ -32,6 +32,8 @@ fi
 
 docker run --rm \
     -v "$WORKSPACE":/root/ros2_ws \
+    -e UR10E_GIT_REVISION="$(git -C "$WORKSPACE" rev-parse HEAD 2>/dev/null)" \
+    -e UR10E_IMAGE_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null)" \
     "$IMAGE" \
     bash -lc '
         # No set -u: the ROS setup scripts reference unbound variables and

@@ -23,8 +23,8 @@ from ur10e_trajectory_pkg.validation_core import (
 )
 
 from ur10e_trajectory_pkg.pose_metrics import (
-    PROVISIONAL_ORIENTATION_TOL_RAD,
-    PROVISIONAL_POSITION_TOL_M,
+    IK_ORIENTATION_TOL_RAD,
+    IK_POSITION_TOL_M,
 )
 
 from test_geometry_invariants import _urdf_path
@@ -316,15 +316,15 @@ def test_solver_tolerance_bounds_the_quadratic_error_not_the_pose_error():
     from ur10e_trajectory_pkg.validation_core import IK_SOLVER_TOL
 
     implied_norm = np.sqrt(2.0 * IK_SOLVER_TOL)
-    assert implied_norm <= PROVISIONAL_POSITION_TOL_M * 1.5, (
+    assert implied_norm <= IK_POSITION_TOL_M * 1.5, (
         'the stopping tolerance no longer implies an error norm compatible '
         'with the provisional 1 mm position bound'
     )
-    assert np.rad2deg(implied_norm) <= np.rad2deg(PROVISIONAL_ORIENTATION_TOL_RAD)
+    assert np.rad2deg(implied_norm) <= np.rad2deg(IK_ORIENTATION_TOL_RAD)
 
     # The old value would fail both of the above; kept as the contrast.
     assert np.rad2deg(np.sqrt(2.0 * 1e-4)) > np.rad2deg(
-        PROVISIONAL_ORIENTATION_TOL_RAD)
+        IK_ORIENTATION_TOL_RAD)
 
 
 def test_tightening_the_tolerance_is_configurable(validator, nominal_pose):

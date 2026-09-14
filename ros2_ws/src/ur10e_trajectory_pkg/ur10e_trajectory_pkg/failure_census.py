@@ -40,7 +40,10 @@ Usage:
     python3 -m ur10e_trajectory_pkg.failure_census --out census.json
 """
 import argparse
+import hashlib
 import json
+import os
+import subprocess
 import sys
 
 import numpy as np
@@ -48,12 +51,17 @@ import numpy as np
 from ur10e_trajectory_pkg import environment
 from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q, NUM_JOINTS
 from ur10e_trajectory_pkg.pose_metrics import (
-    PROVISIONAL_ORIENTATION_TOL_RAD,
-    PROVISIONAL_POSITION_TOL_M,
+    IK_ORIENTATION_TOL_RAD,
+    IK_POSITION_TOL_M,
     pose_error,
-    within_provisional_tolerance,
+    within_pose_tolerance,
 )
-from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
+from ur10e_trajectory_pkg.validation_core import (
+    IK_SEARCH_LIMIT,
+    IK_SOLVER_TOL,
+    RAIL_VEL_SAFETY_CAP,
+    TrajectoryValidator,
+)
 
 # 2: adds gate_pose_position and gate_pose_orientation, and `accepted` now
 # means production acceptance INCLUDING the forward-kinematics pose check.
@@ -76,6 +84,9 @@ WIDE_SEED_BANK_DEG = (
     (180.0, -90.0, 90.0, -90.0, 90.0, 180.0),  # shoulder reversed
 )
 
+# Shortest run of feasible waypoints the segment scan will report.
+MIN_SEGMENT_LENGTH = 10
+
 GATE_KEYS = (
     'gate_solver_failed',
     'gate_pose_position',
@@ -85,6 +96,84 @@ GATE_KEYS = (
     'gate_rail_velocity',
     'gate_collision',
 )
+
+
+def file_digest(path):
+    """sha256 of an input file, so an artifact names the bytes it used."""
+    try:
+        with open(path, 'rb') as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def repository_revision(path):
+    """Commit the workspace was at.
+
+    Falls back to UR10E_GIT_REVISION because the container mounts ros2_ws
+    alone, and the .git directory sits at the repository root above it, so git
+    is not reachable from inside. The runner passes it instead of the artifact
+    silently recording null.
+    """
+    from_env = os.environ.get('UR10E_GIT_REVISION')
+    if from_env:
+        return from_env.strip()
+    try:
+        result = subprocess.run(
+            ['git', '-c', f'safe.directory={path}', '-C', str(path),
+             'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def manifest(args, validator, trajectory_metadata, modes, dt):
+    """Every load-bearing input, so the artifact is independently reproducible.
+
+    Library versions alone are not enough: a verdict also depends on the input
+    bytes, the gate thresholds, the solver settings, and where the trajectory
+    was placed. Recording them here means a result can be reproduced, or shown
+    to be irreproducible, without reading the code that produced it.
+
+    The image id is not discoverable from inside the container, so it comes
+    from UR10E_IMAGE_ID and is recorded as null when the runner does not set
+    it, rather than being guessed at.
+    """
+    workspace = environment.workspace_root()
+    return {
+        'repository_revision': repository_revision(workspace),
+        'docker_image_id': os.environ.get('UR10E_IMAGE_ID'),
+        'inputs': {
+            'urdf_path': args.urdf,
+            'urdf_sha256': file_digest(args.urdf),
+            'csv_path': trajectory_metadata['csv_path'],
+            'csv_sha256': file_digest(trajectory_metadata['csv_path']),
+        },
+        'solver': {
+            'tolerance': IK_SOLVER_TOL,
+            'search_limit': IK_SEARCH_LIMIT,
+            'rng_seed': validator._seed,
+        },
+        'gate_thresholds': {
+            'condition_number': 50.0,
+            'arm_velocity_rad_s': 2.0,
+            'rail_velocity_m_s': validator._rail_vel_limit,
+            'rail_velocity_safety_cap_m_s': RAIL_VEL_SAFETY_CAP,
+            'rail_position_limits_m': list(validator._rail_limits),
+            'pose_position_m': IK_POSITION_TOL_M,
+            'pose_orientation_rad': IK_ORIENTATION_TOL_RAD,
+        },
+        'trajectory': dict(trajectory_metadata, dt_waypoint_s=dt),
+        'run': {
+            'q_start': LEGACY_MATLAB_START_Q.tolist(),
+            'q_start_name': 'LEGACY_MATLAB_START_Q',
+            'independent_solve_rail_seed_m': q_start_rail(None),
+            'min_segment_length': MIN_SEGMENT_LENGTH,
+            'modes': list(modes),
+            'wide_seed_bank_deg': [list(s) for s in WIDE_SEED_BANK_DEG],
+        },
+    }
 
 
 def _validator(urdf_path, mesh_path, skip_gate=None, solver_tol=None):
@@ -116,7 +205,7 @@ def run_tracking(validator, targets, quaternions, dt, q_start, skip_gate=None):
     records = []
     segments = validator.find_feasible_segments(
         targets[:, 0], targets[:, 1], targets[:, 2], quaternions, q_start,
-        min_length=10, dt_waypoint=dt, verbose=False,
+        min_length=MIN_SEGMENT_LENGTH, dt_waypoint=dt, verbose=False,
         recorder=records.append, **_thresholds(skip_gate)
     )
     for record in records:
@@ -167,7 +256,7 @@ def viable(record):
     """
     if not record['configuration_finite'] or record['gate_solver_failed']:
         return False
-    if not within_provisional_tolerance(record['position_error_m'],
+    if not within_pose_tolerance(record['position_error_m'],
                                         record['orientation_error_rad']):
         return False
     return not any(record[key] for key in GATE_KEYS if record[key] is not None)
@@ -223,7 +312,8 @@ def main(argv=None):
     from ament_index_python.packages import get_package_share_directory
     mesh_path = get_package_share_directory('ur_description')
 
-    targets, quaternions, dt = load_trajectory(args.csv, args.waypoints)
+    targets, quaternions, dt, trajectory_metadata = load_trajectory(
+        args.csv, args.waypoints, with_metadata=True)
     modes = [m.strip() for m in args.modes.split(',') if m.strip()]
 
     all_records = []
@@ -255,11 +345,13 @@ def main(argv=None):
     document = {
         'schema_version': SCHEMA_VERSION,
         'environment': environment.describe(),
-        'provisional_tolerances': {
-            'position_m': PROVISIONAL_POSITION_TOL_M,
-            'orientation_rad': PROVISIONAL_ORIENTATION_TOL_RAD,
-            'note': 'recorded only; nothing is gated on these',
+        'manifest': manifest(args, _validator(args.urdf, mesh_path),
+                             trajectory_metadata, modes, dt),
+        'acceptance_tolerances': {
+            'position_m': IK_POSITION_TOL_M,
+            'orientation_rad': IK_ORIENTATION_TOL_RAD,
         },
+
         'wide_seed_bank_deg': [list(s) for s in WIDE_SEED_BANK_DEG],
         'num_waypoints': len(targets),
         'summary': summarise(all_records, segments, len(targets)),
@@ -284,7 +376,7 @@ def main(argv=None):
     return 0
 
 
-def load_trajectory(csv_path, num_waypoints):
+def load_trajectory(csv_path, num_waypoints, with_metadata=False):
     """Targets exactly as the service receives them.
 
     Delegates to the client's own builder rather than rebuilding the
@@ -298,8 +390,14 @@ def load_trajectory(csv_path, num_waypoints):
         build_trajectory_targets,
     )
 
-    x, y, z, quaternions, times = build_trajectory_targets(
-        csv_path or DEFAULT_CSV_PATH, num_waypoints)
+    result = build_trajectory_targets(
+        csv_path or DEFAULT_CSV_PATH, num_waypoints,
+        return_metadata=with_metadata)
+    if with_metadata:
+        (x, y, z, quaternions, times), metadata = result
+        return (np.column_stack((x, y, z)), quaternions,
+                float(times[1] - times[0]), metadata)
+    x, y, z, quaternions, times = result
     return np.column_stack((x, y, z)), quaternions, float(times[1] - times[0])
 
 
