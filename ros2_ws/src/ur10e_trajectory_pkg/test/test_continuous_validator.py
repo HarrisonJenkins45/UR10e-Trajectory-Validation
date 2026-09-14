@@ -137,32 +137,64 @@ def test_tracking_is_measured_between_waypoints_not_only_at_them(validator,
     assert 'at_time_s' in report
 
 
-def test_alpha_star_is_a_linear_program_not_velocity_headroom(validator,
-                                                              smooth_path):
-    """These are different quantities and must not be confused.
+def test_alpha_star_is_at_least_the_reciprocal_of_velocity_usage(validator):
+    """Self-consistency, and the check that caught a silent solver failure.
 
-    An earlier version returned the reciprocal of the velocity-budget ratio
-    and called it alpha*. That never touches the Jacobian or a desired twist,
-    so it can only report joint headroom. Measured on the first graph path the
-    two disagreed completely: headroom 1.158 giving a reciprocal of 0.864,
-    against a true alpha* of 0 at the same instant.
+    When the requested twist is J @ qdot, scaling that same qdot by
+    1 / usage is feasible by construction, so alpha* can never be below it --
+    even on a rank-deficient Jacobian. A result under that bound is a
+    numerical failure, not physical infeasibility.
+
+    Measured at the singular start, the LP returned 0.0 while reporting
+    'optimal' until the twist was normalised before solving.
     """
-    times = _times(len(smooth_path))
-    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+    for arm_deg in ([0.0, -135.0, 90.0, -90.0, 0.0, 0.0],      # singular
+                    [0.0, -135.0, 90.0, -90.0, 45.0, 0.0],
+                    [30.0, -100.0, 60.0, -70.0, 80.0, 25.0]):
+        configuration = np.concatenate(([1.0], np.deg2rad(arm_deg)))
+        jacobian = validator.compute_system_jacobian(configuration)
+        rates = np.array([0.3, 1.5, 1.0, 0.8, 2.3, 0.5, 0.4])   # usage > 1
+        usage = float(np.max(np.abs(rates) / LIMITS))
 
-    headroom = cv.velocity_headroom(interpolator, dense_times, LIMITS)
-    conditioning = cv.conditioning_and_twist(validator, interpolator,
-                                             dense_times, LIMITS)
-    assert 'max_budget_used' in headroom
-    assert conditioning['min_alpha_star'] != pytest.approx(
-        1.0 / headroom['max_budget_used'])
+        result = cv.twist_alpha_star(jacobian, jacobian @ rates, LIMITS)
+        assert result['solved']
+        assert result['alpha'] >= 1.0 / usage - 1e-6, (
+            f'alpha* {result["alpha"]:.6f} below the feasible bound '
+            f'{1.0 / usage:.6f}; the LP did not find the optimum'
+        )
+
+
+def test_the_result_retains_status_and_residuals(validator):
+    """So a caller can tell an optimum that satisfies the constraints from one
+    that merely claims to."""
+    configuration = np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0])))
+    jacobian = validator.compute_system_jacobian(configuration)
+    result = cv.twist_alpha_star(jacobian, jacobian @ (0.1 * np.ones(7)), LIMITS)
+
+    for key in ('alpha', 'status', 'solved', 'equality_residual'):
+        assert key in result
+    assert result['equality_residual'] < 1e-6
+
+
+def test_solver_failure_is_distinct_from_a_feasible_zero():
+    """Collapsing both to 0.0 reported a solver failure as infeasibility.
+
+    An unsolved problem has alpha None and solved False; a genuinely
+    unachievable twist has a numeric alpha with solved True.
+    """
+    # A twist with a component no joint can produce: the Jacobian is all zero,
+    # so only alpha = 0 satisfies the equality.
+    impossible = cv.twist_alpha_star(np.zeros((6, 7)), np.ones(6), LIMITS)
+    assert impossible['solved'] is True
+    assert impossible['alpha'] == pytest.approx(0.0, abs=1e-9)
+    assert impossible['alpha'] is not None
 
 
 def test_alpha_star_is_infinite_for_no_commanded_motion(validator):
     """No motion cannot be infeasible."""
     jacobian = validator.compute_system_jacobian(
         np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0]))))
-    assert cv.twist_alpha_star(jacobian, np.zeros(6), LIMITS) == np.inf
+    assert cv.twist_alpha_star(jacobian, np.zeros(6), LIMITS)['alpha'] == np.inf
 
 
 def test_alpha_star_scales_with_the_requested_rate(validator):
@@ -172,9 +204,42 @@ def test_alpha_star_scales_with_the_requested_rate(validator):
     jacobian = validator.compute_system_jacobian(configuration)
     twist = jacobian @ (0.1 * np.ones(7))
 
-    full = cv.twist_alpha_star(jacobian, twist, LIMITS)
-    half = cv.twist_alpha_star(jacobian, 0.5 * twist, LIMITS)
+    full = cv.twist_alpha_star(jacobian, twist, LIMITS)['alpha']
+    half = cv.twist_alpha_star(jacobian, 0.5 * twist, LIMITS)['alpha']
     assert half == pytest.approx(2.0 * full, rel=1e-4)
+
+
+def test_task_twist_comes_from_the_targets_not_the_joint_path():
+    """Deriving the twist from the joint velocity being evaluated is circular.
+
+    v = J qdot is producible by that very J by construction, so alpha* could
+    never fall below the reciprocal of the velocity usage and the test would
+    be vacuous. The task twist depends only on the SE(3) targets, so it is
+    identical whichever interpolant is chosen.
+    """
+    from scipy.spatial.transform import Rotation
+
+    positions = np.array([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]])
+    quaternions = np.stack([
+        Rotation.identity().as_quat(),
+        Rotation.from_euler('z', 30, degrees=True).as_quat(),
+    ])
+    twist = cv.task_twist([0.0, 0.1], positions, quaternions, 0, 0.1)
+
+    np.testing.assert_allclose(twist[:3], [2.0, 0.0, 0.0], atol=1e-9)
+    assert np.rad2deg(np.linalg.norm(twist[3:])) == pytest.approx(300.0, rel=1e-6)
+
+
+def test_task_twist_is_sign_insensitive_to_the_quaternions():
+    """q and -q are the same rotation, and the input carries sign flips."""
+    from scipy.spatial.transform import Rotation
+
+    positions = np.zeros((2, 3))
+    first = Rotation.identity().as_quat()
+    second = Rotation.from_euler('y', 20, degrees=True).as_quat()
+    positive = cv.task_twist([0.0, 0.1], positions, [first, second], 0, 0.1)
+    negative = cv.task_twist([0.0, 0.1], positions, [first, -second], 0, 0.1)
+    np.testing.assert_allclose(positive, negative, atol=1e-9)
 
 
 def test_conditioning_records_where_the_worst_value_occurs(validator,

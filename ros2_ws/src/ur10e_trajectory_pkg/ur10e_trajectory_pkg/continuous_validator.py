@@ -227,55 +227,109 @@ def twist_alpha_star(jacobian, desired_twist, velocity_limits):
 
         max alpha  s.t.  J qdot = alpha * v,  |qdot| <= qdot_max
 
-    A genuine linear program over the redundant joint space, not a headroom
-    ratio. alpha >= 1 means the twist is achievable at this configuration;
-    below 1 it cannot be tracked at the requested rate, whatever the condition
-    number says.
+    Returns a dict, not a float, because solver failure and a feasible
+    optimum of zero are different answers and collapsing them hides the one
+    that matters. An earlier version returned 0.0 for both, which reported a
+    rank-deficient Jacobian as physically infeasible when the LP had simply
+    not solved.
+
+    The equality residual is retained so a caller can tell an optimum that
+    satisfies the constraints from one that merely claims to.
     """
     desired_twist = np.asarray(desired_twist, dtype=float)
     if np.linalg.norm(desired_twist) <= 1e-12:
-        return np.inf                       # no motion cannot be infeasible
+        return {'alpha': np.inf, 'status': 'no_commanded_motion',
+                'solved': True, 'equality_residual': 0.0}
+
+    # Solve against a UNIT twist. With the raw twist the equality constraint
+    # mixes the Jacobian's scale with the twist's, and on a near-singular
+    # Jacobian HiGHS returned alpha = 0 while reporting 'optimal' -- a
+    # degenerate point, not the optimum. Normalising conditions the problem;
+    # alpha for the original twist is then beta / |v|.
+    magnitude = float(np.linalg.norm(desired_twist))
+    unit_twist = desired_twist / magnitude
 
     joints = jacobian.shape[1]
-    # Variables [qdot (n), alpha]; maximise alpha by minimising -alpha.
     objective = np.zeros(joints + 1)
     objective[-1] = -1.0
-    equality = np.hstack([jacobian, -desired_twist.reshape(-1, 1)])
+    equality = np.hstack([jacobian, -unit_twist.reshape(-1, 1)])
     bounds = [(-v, v) for v in velocity_limits] + [(0.0, None)]
 
-    solution = linprog(objective, A_eq=equality, b_eq=np.zeros(jacobian.shape[0]),
+    solution = linprog(objective, A_eq=equality,
+                       b_eq=np.zeros(jacobian.shape[0]),
                        bounds=bounds, method='highs')
-    return float(solution.x[-1]) if solution.success else 0.0
+    if not solution.success:
+        return {'alpha': None, 'status': str(solution.message),
+                'solved': False, 'equality_residual': None}
+
+    rates = solution.x[:joints]
+    alpha = float(solution.x[-1]) / magnitude
+    residual = float(np.max(np.abs(jacobian @ rates - alpha * desired_twist)))
+    return {'alpha': alpha, 'status': 'optimal', 'solved': True,
+            'equality_residual': residual,
+            'bound_residual': float(np.max(np.abs(rates)
+                                           - np.asarray(velocity_limits)))}
+
+
+def task_twist(times, positions, quaternions, index, dt):
+    """Desired twist from the SE(3) TARGET trajectory, not from a joint path.
+
+    Translation by difference, rotation by log(R_i^T R_i+1) / dt. Deriving the
+    twist from the joint velocity being evaluated makes the question circular:
+    v = J qdot is producible by that very J by construction, even when it is
+    rank deficient, so alpha* could never fall below the reciprocal of the
+    velocity usage. Task feasibility has to ask about the motion the task
+    demands, which is independent of whichever interpolant was chosen.
+    """
+    index = int(np.clip(index, 0, len(positions) - 2))
+    linear = (np.asarray(positions[index + 1])
+              - np.asarray(positions[index])) / dt
+
+    start = Rotation.from_quat(quaternions[index]).as_matrix()
+    end = Rotation.from_quat(quaternions[index + 1]).as_matrix()
+    angular = Rotation.from_matrix(start.T @ end).as_rotvec() / dt
+    return np.concatenate((linear, angular))
 
 
 def conditioning_and_twist(validator, interpolator, dense_times,
-                           velocity_limits, condition_threshold=50.0):
-    """Arm conditioning and true twist feasibility between waypoints.
+                           velocity_limits, condition_threshold=50.0,
+                           task_twists=None, waypoint_times=None):
+    """Arm conditioning and task-twist feasibility between waypoints.
 
     Records WHERE the worst conditioning occurs and for how long the threshold
-    is exceeded. Without that, an infinite value proves nothing about the
-    interior: the legacy start posture is itself singular, so t = 0 is
-    guaranteed to report infinity whatever the trajectory does.
+    is exceeded. Without that an infinite value proves nothing about the
+    interior, since the legacy start posture is itself singular and guarantees
+    infinity at t = 0.
+
+    task_twists, when given, are the twists the TASK demands, so alpha* asks a
+    real question. Without them the check reports conditioning only and says
+    so, rather than computing a tautology.
     """
     conditions = np.empty(len(dense_times))
-    alphas = np.empty(len(dense_times))
+    alphas = []
+    unsolved = 0
     for index, instant in enumerate(dense_times):
         configuration = interpolator(instant)
         singular = np.linalg.svd(
             validator.compute_arm_jacobian(configuration), compute_uv=False)
         conditions[index] = (singular[0] / singular[-1] if singular[-1] > 1e-12
                              else np.inf)
-        twist = (validator.compute_system_jacobian(configuration)
-                 @ interpolator.derivative(1)(instant))
-        alphas[index] = twist_alpha_star(
-            validator.compute_system_jacobian(configuration), twist,
-            velocity_limits)
+        if task_twists is None:
+            continue
+        segment = int(np.clip(np.searchsorted(waypoint_times, instant) - 1,
+                              0, len(task_twists) - 1))
+        result = twist_alpha_star(
+            validator.compute_system_jacobian(configuration),
+            task_twists[segment], velocity_limits)
+        if result['solved'] and result['alpha'] is not None:
+            alphas.append(result['alpha'])
+        else:
+            unsolved += 1
 
     exceeded = conditions > condition_threshold
     interior = dense_times > dense_times[0]
     worst = int(np.argmax(np.nan_to_num(conditions, posinf=1e308)))
-    worst_alpha = int(np.argmin(alphas))
-    return {
+    report = {
         'max_condition_number': float(conditions[worst]),
         'max_condition_at_time_s': float(dense_times[worst]),
         'seconds_above_condition_threshold': float(
@@ -284,10 +338,16 @@ def conditioning_and_twist(validator, interpolator, dense_times,
                                       and not (exceeded & interior).any()),
         'interior_max_condition_number': float(
             np.max(conditions[interior]) if interior.any() else 0.0),
-        'min_alpha_star': float(alphas[worst_alpha]),
-        'min_alpha_star_at_time_s': float(dense_times[worst_alpha]),
-        'twist_feasible': bool(alphas.min() >= 1.0),
+        'twist_evaluated': task_twists is not None,
+        'twist_unsolved_samples': unsolved,
     }
+    if task_twists is None or not alphas:
+        report['min_alpha_star'] = None
+        report['twist_feasible'] = None
+    else:
+        report['min_alpha_star'] = float(min(alphas))
+        report['twist_feasible'] = bool(min(alphas) >= 1.0)
+    return report
 
 
 def command_stream_derivatives(dense_times, dense_path):
@@ -337,7 +397,13 @@ def validate(validator, path, waypoint_times, positions, quaternions,
                                    waypoint_times, positions, quaternions),
         'conditioning': conditioning_and_twist(
             validator, interpolator, dense_times, velocity_limits,
-            condition_threshold),
+            condition_threshold,
+            task_twists=[
+                task_twist(waypoint_times, positions, quaternions, i,
+                           waypoint_times[i + 1] - waypoint_times[i])
+                for i in range(len(waypoint_times) - 1)
+            ],
+            waypoint_times=waypoint_times),
         'velocity_headroom': velocity_headroom(interpolator, dense_times,
                                                velocity_limits),
     }
@@ -346,6 +412,6 @@ def validate(validator, path, waypoint_times, positions, quaternions,
         and not report['position_limit_violations']
         and not report['collision']['collision_found']
         and report['tracking']['within_tolerance']
-        and report['conditioning']['twist_feasible']
+        and report['conditioning']['twist_feasible'] is not False
     )
     return report
