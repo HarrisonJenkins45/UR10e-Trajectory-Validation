@@ -230,6 +230,38 @@ def test_task_twist_comes_from_the_targets_not_the_joint_path():
     assert np.rad2deg(np.linalg.norm(twist[3:])) == pytest.approx(300.0, rel=1e-6)
 
 
+def test_the_angular_twist_is_expressed_in_the_world_frame():
+    """The Jacobian returns a world-frame twist, so this must match it.
+
+    log(R_prev^T R_next) is expressed in the STARTING BODY frame, and pairing
+    it with a world-frame translation gives a six-vector mixing two frames.
+    A start orientation of identity hides the error completely, since the two
+    frames coincide there, so this test starts elsewhere and rotates about an
+    axis that moves under that start.
+    """
+    from scipy.spatial.transform import Rotation
+
+    # Start rotated 90 deg about world X, so world Z maps to body -Y.
+    start = Rotation.from_euler('x', 90, degrees=True)
+    # Then rotate a further 30 deg about the WORLD Z axis.
+    delta_world = Rotation.from_euler('z', 30, degrees=True)
+    end = delta_world * start
+
+    positions = np.zeros((2, 3))
+    twist = cv.task_twist([0.0, 0.1], positions,
+                          [start.as_quat(), end.as_quat()], 0, 0.1)
+
+    # A world-frame angular velocity must point along world Z.
+    axis = twist[3:] / np.linalg.norm(twist[3:])
+    np.testing.assert_allclose(axis, [0.0, 0.0, 1.0], atol=1e-9)
+
+    # The body-frame form would point along body Z, which is world -Y here.
+    body = (Rotation.from_matrix(start.as_matrix().T @ end.as_matrix())
+            .as_rotvec())
+    body_axis = body / np.linalg.norm(body)
+    assert not np.allclose(body_axis, [0.0, 0.0, 1.0], atol=1e-6)
+
+
 def test_task_twist_is_sign_insensitive_to_the_quaternions():
     """q and -q are the same rotation, and the input carries sign flips."""
     from scipy.spatial.transform import Rotation
@@ -280,3 +312,92 @@ def test_declared_higher_order_limits_are_starting_values_not_inherited():
     assert cv.ARM_ACCELERATION_LIMIT_RAD_S2 > 0
     assert cv.ARM_JERK_LIMIT_RAD_S3 > cv.ARM_ACCELERATION_LIMIT_RAD_S2
     assert cv.RAIL_ACCELERATION_LIMIT_M_S2 > 0
+
+
+def test_an_unsolved_lp_makes_the_trajectory_indeterminate_not_passing(validator,
+                                                                       smooth_path):
+    """One unsolved sample among many passing ones must not read as a pass.
+
+    An LP that did not solve says nothing about feasibility, so folding it
+    into a boolean loses exactly the case worth knowing about.
+    """
+    times = _times(len(smooth_path))
+    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+
+    original = cv.twist_alpha_star
+    calls = {'n': 0}
+
+    def sometimes_failing(jacobian, twist, limits):
+        calls['n'] += 1
+        if calls['n'] == 3:
+            return {'alpha': None, 'status': 'simulated failure',
+                    'solved': False, 'equality_residual': None}
+        return original(jacobian, twist, limits)
+
+    cv.twist_alpha_star = sometimes_failing
+    try:
+        report = cv.conditioning_and_twist(
+            validator, interpolator, dense_times, LIMITS,
+            task_twists=[np.array([0.01, 0, 0, 0, 0, 0.01])] * len(times),
+            waypoint_times=times)
+    finally:
+        cv.twist_alpha_star = original
+
+    assert report['twist_unsolved_samples'] >= 1
+    assert report['twist_status'] == 'indeterminate'
+    assert report['twist_feasible'] is None
+
+
+def test_twist_status_is_not_applicable_without_task_twists(validator,
+                                                            smooth_path):
+    """Absent a task, there is no twist to be feasible for."""
+    times = _times(len(smooth_path))
+    dense_times, interpolator, _ = cv.interpolate(smooth_path, times, 100.0)
+    report = cv.conditioning_and_twist(validator, interpolator, dense_times,
+                                       LIMITS)
+    assert report['twist_status'] == 'not_applicable'
+
+
+def test_conditioning_gates_the_overall_result(validator):
+    """A trajectory through a singular configuration must not pass.
+
+    The overall verdict previously ignored the conditioning threshold
+    entirely, so a path could report passed while passing through a
+    singularity.
+    """
+    singular = np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 0.0, 0.0])))
+    path = np.stack([singular + i * 1e-4 for i in range(4)])
+    times = _times(4)
+    poses = [validator.robot.fkine(q, end='tool0') for q in path]
+    positions = np.stack([p.t for p in poses])
+    quaternions = np.stack([np.roll(np.array(p.UnitQuaternion().A), -1)
+                            for p in poses])
+
+    report = cv.validate(validator, path, times, positions, quaternions,
+                         LIMITS, rate_hz=100.0)
+    assert report['conditioning']['max_condition_number'] > 50.0
+    assert report['conditioning_ok'] is False
+    assert report['passed'] is False
+
+
+def test_recovery_mode_waives_conditioning_and_nothing_else(validator):
+    """The exception exists so a robot parked singular can leave, not to
+    weaken every approach."""
+    singular = np.concatenate(([1.0], np.deg2rad([0.0, -135.0, 90.0, -90.0, 0.0, 0.0])))
+    path = np.stack([singular + i * 1e-4 for i in range(4)])
+    times = _times(4)
+    poses = [validator.robot.fkine(q, end='tool0') for q in path]
+    positions = np.stack([p.t for p in poses])
+    quaternions = np.stack([np.roll(np.array(p.UnitQuaternion().A), -1)
+                            for p in poses])
+
+    waived = cv.validate(validator, path, times, positions, quaternions,
+                         LIMITS, rate_hz=100.0, recovery_mode=True)
+    assert waived['conditioning_ok'] is True
+
+    # Velocity is still enforced: the same path at an impossible rate fails.
+    fast = np.stack([singular + i * 0.5 for i in range(4)])
+    report = cv.validate(validator, fast, times, positions, quaternions,
+                         LIMITS, rate_hz=100.0, recovery_mode=True)
+    assert report['limit_violations']
+    assert report['passed'] is False

@@ -287,7 +287,14 @@ def task_twist(times, positions, quaternions, index, dt):
 
     start = Rotation.from_quat(quaternions[index]).as_matrix()
     end = Rotation.from_quat(quaternions[index + 1]).as_matrix()
-    angular = Rotation.from_matrix(start.T @ end).as_rotvec() / dt
+
+    # WORLD-frame angular velocity: log(R_next R_prev^T), not
+    # log(R_prev^T R_next). The latter is expressed in the STARTING BODY
+    # frame, and pairing it with a world-frame translation produces a
+    # six-vector mixing two frames, which then gets multiplied against a
+    # world-frame Jacobian. The error is invisible whenever the start
+    # orientation is identity, because the frames coincide there.
+    angular = Rotation.from_matrix(end @ start.T).as_rotvec() / dt
     return np.concatenate((linear, angular))
 
 
@@ -341,12 +348,24 @@ def conditioning_and_twist(validator, interpolator, dense_times,
         'twist_evaluated': task_twists is not None,
         'twist_unsolved_samples': unsolved,
     }
-    if task_twists is None or not alphas:
+    # Four states, not a boolean. An LP that did not solve says nothing about
+    # feasibility, and folding it into a pass was how one unsolved sample
+    # among many passing ones produced True.
+    if task_twists is None:
         report['min_alpha_star'] = None
-        report['twist_feasible'] = None
+        report['twist_status'] = 'not_applicable'
+    elif unsolved:
+        report['min_alpha_star'] = float(min(alphas)) if alphas else None
+        report['twist_status'] = 'indeterminate'
+    elif not alphas:
+        report['min_alpha_star'] = None
+        report['twist_status'] = 'indeterminate'
     else:
         report['min_alpha_star'] = float(min(alphas))
-        report['twist_feasible'] = bool(min(alphas) >= 1.0)
+        report['twist_status'] = 'pass' if min(alphas) >= 1.0 else 'fail'
+    report['twist_feasible'] = (report['twist_status'] == 'pass'
+                                if report['twist_status'] in ('pass', 'fail')
+                                else None)
     return report
 
 
@@ -371,7 +390,8 @@ def command_stream_derivatives(dense_times, dense_path):
 
 
 def validate(validator, path, waypoint_times, positions, quaternions,
-             velocity_limits, rate_hz=CONTROLLER_HZ, condition_threshold=50.0):
+             velocity_limits, rate_hz=CONTROLLER_HZ, condition_threshold=50.0,
+             recovery_mode=False):
     """Full continuous check of one command trajectory."""
     dense_times, interpolator, dense_path = interpolate(
         path, waypoint_times, rate_hz)
@@ -407,11 +427,22 @@ def validate(validator, path, waypoint_times, positions, quaternions,
         'velocity_headroom': velocity_headroom(interpolator, dense_times,
                                                velocity_limits),
     }
+    # recovery_mode waives CONDITIONING only, and only while no Cartesian task
+    # is active. Velocity, acceleration, jerk, collision and joint limits are
+    # never waived: the exception exists so a robot parked at a singular pose
+    # can leave it, not to weaken every approach.
+    conditioning = report['conditioning']
+    conditioning_ok = recovery_mode or (
+        conditioning['max_condition_number'] <= condition_threshold)
+    report['recovery_mode'] = recovery_mode
+    report['conditioning_ok'] = bool(conditioning_ok)
+
     report['passed'] = bool(
         not report['limit_violations']
         and not report['position_limit_violations']
         and not report['collision']['collision_found']
         and report['tracking']['within_tolerance']
-        and report['conditioning']['twist_feasible'] is not False
+        and conditioning_ok
+        and conditioning['twist_status'] in ('pass', 'not_applicable')
     )
     return report
