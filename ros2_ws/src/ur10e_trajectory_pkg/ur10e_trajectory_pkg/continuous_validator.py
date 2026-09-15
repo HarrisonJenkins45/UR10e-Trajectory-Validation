@@ -505,6 +505,96 @@ def validate(validator, path, waypoint_times, positions, quaternions,
 
 
 # --------------------------------------------------------------------------
+# The two commands: warmup, then the task from its chosen start
+# --------------------------------------------------------------------------
+
+def validate_task_command(validator, path, positions, quaternions, dt,
+                          velocity_limits=None, rate_hz=CONTROLLER_HZ,
+                          condition_threshold=50.0):
+    """Command 2: the task played from its first waypoint, with no transition.
+
+    Waypoint times start at 0 and nothing is prepended: the warmup has brought
+    the arm to path[0] at rest. The entry velocity and acceleration are
+    recorded against the limits, since the warmup ENDS at rest and any entry
+    state is a step at handover; a spin-up is what keeps them small.
+    """
+    velocity_limits = (validator.velocity_limits if velocity_limits is None
+                       else np.asarray(velocity_limits, dtype=float))
+    path = np.asarray(path, dtype=float)
+    times = np.arange(len(path)) * float(dt)
+    report = validate(validator, path, times, positions, quaternions,
+                      velocity_limits=velocity_limits, rate_hz=rate_hz,
+                      condition_threshold=condition_threshold)
+    interpolator = PchipInterpolator(times, path, axis=0)
+    entry_velocity = np.abs(interpolator.derivative(1)(0.0))
+    entry_acceleration = np.abs(interpolator.derivative(2)(0.0))
+    report.update(
+        command='task',
+        transition_s=0.0,
+        entry_velocity=entry_velocity.tolist(),
+        entry_velocity_ratio=float(np.max(entry_velocity / velocity_limits)),
+        entry_acceleration=entry_acceleration.tolist(),
+        entry_acceleration_ratio=float(np.max(
+            entry_acceleration / motion_limits.acceleration_vector())),
+    )
+    return report
+
+
+def validate_warmup(validator, warmup_result, velocity_limits=None):
+    """Command 1: the warmup's controller-rate stream, checked sample by sample.
+
+    Limits by finite difference of the stream the controller receives, joint
+    limits, collision at EVERY sample (the stream is dense, so there is no
+    resolution to converge), and rest at both ends. Arm conditioning is
+    recorded but does not gate: no Cartesian task is active during a warmup,
+    which is exactly the case recovery_mode exists for.
+    """
+    velocity_limits = (validator.velocity_limits if velocity_limits is None
+                       else np.asarray(velocity_limits, dtype=float))
+    report = {'command': 'warmup', 'status': warmup_result['status']}
+    if warmup_result['status'] != 'ok':
+        report['passed'] = False
+        report['reason'] = warmup_result.get('reason')
+        return report
+
+    times = np.asarray(warmup_result['times'], dtype=float)
+    positions = np.asarray(warmup_result['positions'], dtype=float)
+    commanded = command_stream_derivatives(times, positions)
+    step = times[1] - times[0]
+    first_velocity = np.abs(positions[1] - positions[0]) / step
+    last_velocity = np.abs(positions[-1] - positions[-2]) / step
+
+    collisions = [float(times[i]) for i, q in enumerate(positions)
+                  if validator.check_all_collisions(q)]
+    conditions = []
+    for q in positions[::max(1, len(positions) // 400)]:
+        singular = np.linalg.svd(validator.compute_arm_jacobian(q),
+                                 compute_uv=False)
+        conditions.append(singular[0] / singular[-1] if singular[-1] > 1e-12
+                          else np.inf)
+    report.update(
+        samples=int(len(times)),
+        duration_s=float(times[-1]),
+        peak_command_stream={k: v.tolist() for k, v in commanded.items()},
+        limit_violations=limit_violations(commanded, velocity_limits),
+        position_limit_violations=position_limit_violations(validator, positions),
+        collision_queries=int(len(positions)),
+        collision_times_s=collisions[:10],
+        collision_found=bool(collisions),
+        # First and last sampled steps: a rest-to-rest move approaches zero
+        # speed at both ends at the stream's resolution.
+        start_speed_ratio=float(np.max(first_velocity / velocity_limits)),
+        end_speed_ratio=float(np.max(last_velocity / velocity_limits)),
+        max_arm_condition_number=float(np.max(conditions)),
+        conditioning_gates=False,
+    )
+    report['passed'] = bool(not report['limit_violations']
+                            and not report['position_limit_violations']
+                            and not report['collision_found'])
+    return report
+
+
+# --------------------------------------------------------------------------
 # Committed measurement, so recorded figures can be reproduced
 # --------------------------------------------------------------------------
 
@@ -531,6 +621,19 @@ def graph_path_twist_margins(validator, path, waypoint_times, positions,
     return out
 
 
+def _json_default(value):
+    """NumPy scalars and arrays as their JSON equivalents, booleans kept."""
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f'unserialisable {type(value).__name__}')
+
+
 def main(argv=None):
     import argparse
     import json
@@ -551,11 +654,45 @@ def main(argv=None):
     parser.add_argument('--limits', choices=['urdf', 'retired_uniform_cap'],
                         default='urdf')
     parser.add_argument('--out', default=None)
+    parser.add_argument('--command', choices=['graph_margins', 'task'],
+                        default='graph_margins',
+                        help='task: validate command 2 on a free-start graph '
+                             'path, from its first waypoint with no transition')
     args = parser.parse_args(argv)
 
     validator = _validator(args.urdf, get_package_share_directory('ur_description'))
     with open(args.graph, encoding='utf-8') as handle:
-        path = np.asarray(json.load(handle)['path'], dtype=float)
+        graph = json.load(handle)
+    path = np.asarray(graph['path'], dtype=float)
+
+    if args.command == 'task':
+        if graph.get('start_mode') != 'free':
+            parser.error('--command task needs a free-start graph artifact')
+        spin_up = graph.get('spin_up')
+        targets, task_quaternions, dt, _ = load_trajectory(
+            None, graph['recorded_waypoints'], with_metadata=True,
+            spin_up_s=None if spin_up is None else spin_up['requested_duration_s'])
+        if len(targets) != len(path):
+            parser.error(f'path has {len(path)} states but the trajectory has '
+                         f'{len(targets)} samples')
+        report = validate_task_command(validator, path, targets,
+                                       task_quaternions, dt, rate_hz=args.rate)
+        document = {'command': 'task', 'graph': args.graph, 'rate_hz': args.rate,
+                    'spin_up': spin_up, 'report': report}
+        conditioning = report['conditioning']
+        print(f"task passed={report['passed']} limit_violations="
+              f"{list(report['limit_violations'])} collision="
+              f"{report['collision']['collision_found']} tracking="
+              f"{report['tracking']['within_tolerance']} max_cond="
+              f"{conditioning['max_condition_number']:.1f} twist="
+              f"{conditioning['twist_status']} min_alpha*="
+              f"{conditioning['min_alpha_star']} entry_velocity_ratio="
+              f"{report['entry_velocity_ratio']:.4f} entry_acceleration_ratio="
+              f"{report['entry_acceleration_ratio']:.4f}")
+        if args.out:
+            with open(args.out, 'w', encoding='utf-8') as handle:
+                json.dump(document, handle, indent=1, default=_json_default)
+        return 0 if report['passed'] else 1
     layers = len(path) - 1
     targets, quaternions, dt, _ = load_trajectory(None, layers, with_metadata=True)
 

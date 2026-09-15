@@ -451,3 +451,79 @@ def test_recovery_mode_waives_conditioning_and_nothing_else(validator):
                          LIMITS, rate_hz=100.0, recovery_mode=True)
     assert report['limit_violations']
     assert report['passed'] is False
+
+
+# --------------------------------------------------------------------------
+# The two commands
+# --------------------------------------------------------------------------
+
+def _poses(validator, path):
+    poses = [validator.robot.fkine(q, end='tool0') for q in path]
+    return (np.stack([p.t for p in poses]),
+            np.stack([np.roll(np.array(p.UnitQuaternion().A), -1) for p in poses]))
+
+
+def test_the_task_command_is_validated_from_its_first_waypoint(validator, smooth_path):
+    """No transition: times start at 0 and the first configuration is the
+    first waypoint's, so the entry state is the path's own."""
+    positions, quaternions = _poses(validator, smooth_path)
+    report = cv.validate_task_command(validator, smooth_path, positions,
+                                      quaternions, DT, rate_hz=100.0)
+    assert report['command'] == 'task' and report['transition_s'] == 0.0
+    assert bool(report['tracking']['within_tolerance']) is True
+    assert report['entry_velocity_ratio'] < 0.1
+    assert len(report['entry_velocity']) == 7
+
+
+def test_a_task_that_starts_moving_reports_a_large_entry_state(validator, smooth_path):
+    """Without a spin-up the first steps are full-speed, and the entry
+    velocity is what the warmup, ending at rest, would have to jump to."""
+    fast = smooth_path.copy()
+    fast[:, 5] += np.arange(len(fast)) * 0.25       # wrist_2 at 2.5 rad/s
+    positions, quaternions = _poses(validator, fast)
+    report = cv.validate_task_command(validator, fast, positions, quaternions,
+                                      DT, rate_hz=100.0)
+    assert report['entry_velocity_ratio'] > 0.5
+
+
+def _warmup(validator):
+    from ur10e_trajectory_pkg import warmup
+    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    start = home + np.concatenate(([0.3], np.deg2rad([15.0, -10.0, 10.0, 5.0, 20.0, 30.0])))
+    return warmup.plan_warmup(validator, home, start, rate_hz=200.0)
+
+
+def test_a_clear_warmup_passes_and_is_at_rest_at_both_ends(validator):
+    report = cv.validate_warmup(validator, _warmup(validator))
+    assert report['passed'] is True
+    assert report['collision_queries'] == report['samples']
+    assert report['start_speed_ratio'] < 1e-3 and report['end_speed_ratio'] < 1e-3
+    assert report['conditioning_gates'] is False
+
+
+def test_a_warmup_that_collides_anywhere_fails(validator, monkeypatch):
+    result = _warmup(validator)
+    calls = {'n': 0}
+
+    def collides_midway(q, verbose=False):
+        calls['n'] += 1
+        return calls['n'] == len(result['positions']) // 2
+
+    monkeypatch.setattr(validator, 'check_all_collisions', collides_midway)
+    report = cv.validate_warmup(validator, result)
+    assert report['collision_found'] is True and report['passed'] is False
+
+
+def test_a_warmup_stream_with_a_step_violates_the_limits(validator):
+    result = _warmup(validator)
+    positions = np.asarray(result['positions'])
+    positions[len(positions) // 2:, 0] += 0.2       # 0.2 m rail step
+    report = cv.validate_warmup(validator, dict(result, positions=positions.tolist()))
+    assert 'linear_rail_joint' in report['limit_violations']
+    assert report['passed'] is False
+
+
+def test_a_warmup_that_was_refused_is_reported_not_validated(validator):
+    report = cv.validate_warmup(validator, {'status': 'no_direct_warmup',
+                                            'reason': 'blocked'})
+    assert report['passed'] is False and report['reason'] == 'blocked'
