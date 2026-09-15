@@ -188,27 +188,114 @@ def posture_margin(validator, configuration):
     return float(singular[-1] / singular[0]) if singular[0] > 1e-12 else 0.0
 
 
-def collision_distance(validator, configuration, max_distance=0.5):
-    """Closest approach to the environment, not merely a collision flag.
+def arm_link_indices(validator):
+    """PyBullet link indices moved by an arm joint: a revolute joint in their chain.
 
-    Clearance is what distinguishes two poses that are both collision-free,
-    and the whole point of ranking is to tell them apart.
+    Everything else is fixed to the world or rides the carriage without
+    rotating, so its distance to the environment says nothing about the arm's
+    posture. Derived from the model's joint tree rather than a list of names,
+    so a renamed or added fixed link cannot slip back in. Cached on the
+    validator.
+    """
+    import pybullet as pb
+
+    cached = getattr(validator, '_arm_link_indices', None)
+    if cached is not None:
+        return cached
+    client = validator._pb_client
+    parents, revolute = {}, {}
+    for index in range(pb.getNumJoints(validator.robot_id, physicsClientId=client)):
+        info = pb.getJointInfo(validator.robot_id, index, physicsClientId=client)
+        revolute[index] = info[2] == pb.JOINT_REVOLUTE
+        parents[index] = info[16]
+    indices = set()
+    for index in parents:
+        link = index
+        while link != -1:
+            if revolute[link]:
+                indices.add(index)
+                break
+            link = parents[link]
+    validator._arm_link_indices = frozenset(indices)
+    return validator._arm_link_indices
+
+
+def collision_distance(validator, configuration, max_distance=0.5):
+    """Closest approach of the ARM to the environment, not merely a flag.
+
+    Clearance is what distinguishes two poses that are both collision-free.
+    Only links moved by an arm joint count (arm_link_indices). It used to skip
+    only the two rail links, so base_link_inertia -- fixed to the carriage --
+    set a constant 0.049 m against the floor for every posture, and the gate
+    measured nothing about the arm.
     """
     import pybullet as pb
 
     for pb_index, value in zip(validator._pb_joint_indices, configuration):
         pb.resetJointState(validator.robot_id, pb_index, float(value),
                            physicsClientId=validator._pb_client)
+    arm_links = arm_link_indices(validator)
     closest = max_distance
     for body in (validator.floor_id, validator.wall_id):
         for contact in pb.getClosestPoints(
                 bodyA=validator.robot_id, bodyB=body, distance=max_distance,
                 physicsClientId=validator._pb_client):
-            name = validator._pb_link_name_by_index.get(contact[3])
-            if name in validator._rail_link_names:
+            if contact[3] not in arm_links:
                 continue
             closest = min(closest, float(contact[8]))
     return closest
+
+
+# Singularity robustness: the arm must stay within the task's conditioning gate
+# under small joint errors, not merely at the nominal joints. Posture margin at
+# the nominal joints missed poses that exceeded the gate a few degrees away.
+TASK_CONDITION_GATE = 50.0
+SINGULARITY_NEIGHBOURHOOD_DEG = 5.0
+SINGULARITY_RANDOM_SAMPLES = 64
+SINGULARITY_SEED = 20260915
+
+
+def arm_condition_number(validator, configuration):
+    singular = np.linalg.svd(validator.compute_arm_jacobian(configuration),
+                             compute_uv=False)
+    return float(singular[0] / singular[-1]) if singular[-1] > 1e-12 else np.inf
+
+
+def singularity_robustness(validator, configuration,
+                           degrees=SINGULARITY_NEIGHBOURHOOD_DEG,
+                           random_samples=SINGULARITY_RANDOM_SAMPLES,
+                           seed=SINGULARITY_SEED, gate=TASK_CONDITION_GATE):
+    """Worst arm condition number over a +/-degrees neighbourhood.
+
+    The neighbourhood is every arm joint alone at +degrees and -degrees, plus
+    random_samples configurations with all arm joints offset uniformly within
+    +/-degrees, from a fixed seed. The rail does not enter the arm Jacobian,
+    so it is not perturbed.
+    """
+    configuration = np.asarray(configuration, dtype=float)
+    step = np.deg2rad(degrees)
+    offsets = []
+    for joint in range(6):
+        for sign in (1.0, -1.0):
+            offset = np.zeros(6)
+            offset[joint] = sign * step
+            offsets.append(offset)
+    rng = np.random.default_rng(seed)
+    offsets += list(rng.uniform(-step, step, (random_samples, 6)))
+
+    nominal = arm_condition_number(validator, configuration)
+    worst, worst_offset = nominal, np.zeros(6)
+    for offset in offsets:
+        trial = configuration.copy()
+        trial[ARM_SLICE] += offset
+        condition = arm_condition_number(validator, trial)
+        if condition > worst:
+            worst, worst_offset = condition, offset
+    return {'nominal_condition': nominal, 'worst_condition': worst,
+            'worst_offset_deg': np.rad2deg(worst_offset).tolist(),
+            'neighbourhood_deg': degrees, 'samples': len(offsets),
+            'random_samples': random_samples, 'seed': seed, 'gate': gate,
+            'passed': bool(worst <= gate)}
 
 
 def static_gates(validator, configuration, min_clearance_m=0.02,

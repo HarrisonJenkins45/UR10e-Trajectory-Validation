@@ -461,3 +461,32 @@ def test_a_shared_pose_that_does_not_reproduce_invalidates_the_check():
     assert report['criteria']['shared_poses_reproduce_exactly'] is False
     assert report['verdict'].startswith('invalid')
 
+
+def test_entry_at_rest_zeroes_the_entry_state_and_records_the_prefix(validator, placement):
+    state = runner.prepare_placement(
+        validator, placement['name'], placement['layers'], placement['positions'],
+        placement['quaternions'], DT, runner.Meter(), entry_at_rest=True)
+    assert state['counts']['entry_state_policy'] == 'at_rest'
+    assert state['counts']['max_prefix_entry_ratio'] > 0.0
+    for entry in state['valid']:
+        np.testing.assert_array_equal(entry['entry_velocity'], 0.0)
+        np.testing.assert_array_equal(entry['entry_acceleration'], 0.0)
+
+
+def test_spin_up_placement_targets_start_at_the_recorded_first_pose():
+    try:
+        nominal = runner.placement_targets(sweep.placements()[0],
+                                           np.eye(4), spin_up_s=None)
+        spun = runner.placement_targets(sweep.placements()[0], np.eye(4),
+                                        spin_up_s=2.0)
+    except FileNotFoundError:
+        pytest.skip('packaged trajectory CSV not present')
+    assert len(spun[0]) == runner.PREFIX_LAYERS == len(nominal[0])
+    np.testing.assert_allclose(spun[0][0], nominal[0][0], atol=1e-12)
+    assert spun[3]['spin_up']['duration_s'] == pytest.approx(2.0)
+    # Spun up, the prefix barely moves: layer 1 is far closer to layer 0.
+    from scipy.spatial.transform import Rotation
+    def step(q):
+        return np.linalg.norm((Rotation.from_quat(q[1]) * Rotation.from_quat(q[0]).inv()).as_rotvec())
+    assert step(spun[1]) < 0.01 * step(nominal[1])
+

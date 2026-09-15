@@ -265,7 +265,8 @@ def layer0_task_gates(validator, configuration, twist, velocity_limits):
 
 def prepare_placement(validator, name, layers, positions, quaternions, dt,
                       meter, velocity_limits=None, tolerance=0.35,
-                      acceleration_limits=None, layer0_extra_seed_only=None):
+                      acceleration_limits=None, layer0_extra_seed_only=None,
+                      entry_at_rest=False):
     """Cache everything about a placement that does not depend on a ready pose.
 
     layers holds canonical configurations for layers 0, 1 and 2, or None when
@@ -277,6 +278,11 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
     and survive deduplication; counting them says nothing about branches. What
     matters is whether a whole BRANCH exists only through them, which is what
     branch_clusters_independent excludes.
+
+    entry_at_rest treats the task as starting from rest, so every approach is
+    a rest-to-rest warmup. Valid only for a spin-up trajectory, whose prefix
+    is essentially at rest; the largest prefix entry state is still recorded
+    against the limits so the assumption can be checked.
     """
     velocity_limits = (validator.velocity_limits if velocity_limits is None
                        else np.asarray(velocity_limits, dtype=float))
@@ -300,6 +306,7 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
     layer1_cache, layer2_cache = {}, {}
     rejections = {}
     valid = []
+    prefix_entry_ratios = []
 
     for index, candidate in enumerate(layers[0]):
         failed = layer0_task_gates(validator, candidate, twist, velocity_limits)
@@ -341,6 +348,12 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
             continue
         entry_velocity, entry_acceleration = sweep.entry_state_from_prefix(
             prefix, dt)
+        prefix_entry_ratios.append(max(
+            float(np.max(np.abs(entry_velocity) / velocity_limits)),
+            float(np.max(np.abs(entry_acceleration) / acceleration_limits))))
+        if entry_at_rest:
+            entry_velocity = np.zeros_like(entry_velocity)
+            entry_acceleration = np.zeros_like(entry_acceleration)
         valid.append({'candidate_index': index, 'configuration': candidate,
                       'extra_seed_only': bool(
                           layer0_extra_seed_only[index]
@@ -353,6 +366,9 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
 
     counts['task_gate_rejections'] = rejections
     counts['valid_candidates'] = len(valid)
+    counts['entry_state_policy'] = 'at_rest' if entry_at_rest else 'pchip_prefix'
+    counts['max_prefix_entry_ratio'] = (max(prefix_entry_ratios)
+                                        if prefix_entry_ratios else None)
     counts['layer1_states_expanded'] = len(layer1_cache)
     counts['layer2_states_expanded'] = len(layer2_cache)
     counts['valid_two_step_continuations'] = int(
@@ -685,22 +701,37 @@ def nominal_seeds(nominal_layers, name='nominal'):
             for k, layer in enumerate(nominal_layers)]
 
 
-def generated_placement(validator, placement, nominal_RG, meter,
-                        nominal_layers=None, csv_path=None):
-    """Targets and layers 0-2 for one placement, generated at that placement."""
+def placement_targets(placement, nominal_RG, spin_up_s=None, csv_path=None):
+    """The first PREFIX_LAYERS targets of a placement, optionally spun up.
+
+    With a spin-up the builder needs recorded samples beyond the prefix to
+    warp, so enough are requested and the prefix is sliced from the result.
+    """
     from ur10e_trajectory_pkg.ClientNode import (
         DEFAULT_CSV_PATH,
         build_trajectory_targets,
     )
-    from ur10e_trajectory_pkg import candidate_generator
-    from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q, RAIL_INDEX
 
     placement_RG = sweep.placement_transform(placement, nominal_RG)
+    recorded = PREFIX_LAYERS if spin_up_s is None else PREFIX_LAYERS + 60
     (x, y, z, quaternions, times), metadata = build_trajectory_targets(
-        csv_path or DEFAULT_CSV_PATH, PREFIX_LAYERS, placement_RG=placement_RG,
-        return_metadata=True)
-    positions = np.column_stack((x, y, z))
+        csv_path or DEFAULT_CSV_PATH, recorded, placement_RG=placement_RG,
+        return_metadata=True, spin_up_s=spin_up_s)
+    positions = np.column_stack((x, y, z))[:PREFIX_LAYERS]
+    quaternions = np.asarray(quaternions)[:PREFIX_LAYERS]
     dt = float(times[1] - times[0])
+    return positions, quaternions, dt, dict(metadata, prefix_samples=PREFIX_LAYERS)
+
+
+def generated_placement(validator, placement, nominal_RG, meter,
+                        nominal_layers=None, csv_path=None, spin_up_s=None):
+    """Targets and layers 0-2 for one placement, generated at that placement."""
+    from ur10e_trajectory_pkg import candidate_generator
+    from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
+
+    placement_RG = sweep.placement_transform(placement, nominal_RG)
+    positions, quaternions, dt, metadata = placement_targets(
+        placement, nominal_RG, spin_up_s, csv_path)
 
     extra = None if nominal_layers is None else nominal_seeds(nominal_layers)
     start = time.perf_counter()
@@ -850,7 +881,8 @@ def stability_check(base_results, extra_results, shared_results,
     }
 
 
-def build_placements(validator, names, meter, candidates=None, csv_path=None):
+def build_placements(validator, names, meter, candidates=None, csv_path=None,
+                     spin_up_s=None):
     """Generate every named placement through the one path.
 
     names is a list of envelope names or "all". Nominal is generated first,
@@ -877,7 +909,8 @@ def build_placements(validator, names, meter, candidates=None, csv_path=None):
     else:
         with counting_collisions(validator, meter):
             nominal = generated_placement(validator, envelope['nominal'],
-                                          nominal_RG, meter)
+                                          nominal_RG, meter, csv_path=csv_path,
+                                          spin_up_s=spin_up_s)
         layers = nominal['layers']
     placements = []
     for name in names:
@@ -887,7 +920,7 @@ def build_placements(validator, names, meter, candidates=None, csv_path=None):
         with counting_collisions(validator, meter):
             placements.append(generated_placement(
                 validator, envelope[name], nominal_RG, meter,
-                nominal_layers=layers))
+                nominal_layers=layers, csv_path=csv_path, spin_up_s=spin_up_s))
     return placements, {'candidates_document': candidates_document,
                         'trajectory_metadata': trajectory_metadata,
                         'nominal_RG': nominal_RG, 'dt': dt}
@@ -943,7 +976,7 @@ def pilot_ready_poses(pool, count=8, strata=sweep.RAIL_STRATA, rail_travel=3.0):
 
 
 def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
-             exhaustive=False, progress=False):
+             exhaustive=False, progress=False, entry_at_rest=False):
     """Prepare each placement, then evaluate every ready pose against it.
 
     progress prints one flushed line per ready pose with elapsed time and a
@@ -957,7 +990,8 @@ def run_once(validator, ready_poses, placements, meter, tolerance=0.35,
                 validator, placement['name'], placement['layers'],
                 placement['positions'], placement['quaternions'],
                 placement['dt'], meter, tolerance=tolerance,
-                layer0_extra_seed_only=placement.get('layer0_extra_seed_only')))
+                layer0_extra_seed_only=placement.get('layer0_extra_seed_only'),
+                entry_at_rest=entry_at_rest))
 
     results, pose_seconds = [], []
     for index, entry in enumerate(ready_poses):
@@ -1182,6 +1216,12 @@ def main(argv=None):
                         help='sensitivity study: replace RAIL_VEL_SAFETY_CAP '
                              'for this run, before generation, so '
                              'continuations are re-derived under it')
+    parser.add_argument('--spin-up-s', type=float, default=None,
+                        help='generate every placement from the spun-up '
+                             'trajectory')
+    parser.add_argument('--entry-at-rest', action='store_true',
+                        help='treat the task as starting from rest, so each '
+                             'approach is a rest-to-rest warmup (spin-up only)')
     parser.add_argument('--all-pool', action='store_true',
                         help='evaluate every ready pose in the pool, not a '
                              'pilot selection')
@@ -1223,8 +1263,11 @@ def main(argv=None):
         parser.error(f'unknown placements {unknown}')
 
     generation_meter = Meter()
+    if args.entry_at_rest and args.spin_up_s is None:
+        parser.error('--entry-at-rest is only valid with --spin-up-s')
     placements, context = build_placements(validator, names, generation_meter,
-                                           args.candidates)
+                                           args.candidates,
+                                           spin_up_s=args.spin_up_s)
     candidates_document = context['candidates_document']
     trajectory_metadata, dt = context['trajectory_metadata'], context['dt']
     generated = [p['generation']['seconds'] for p in placements
@@ -1257,7 +1300,7 @@ def main(argv=None):
         with counting_collisions(validator, meter), counting_static_gates(meter):
             results, placement_records, pose_seconds = run_once(
                 validator, pilot, placements, meter, args.tolerance,
-                progress=True)
+                progress=True, entry_at_rest=args.entry_at_rest)
         runs.append((results, placement_records, pose_seconds, meter))
 
     results, placement_records, pose_seconds, meter = runs[0]
@@ -1272,7 +1315,8 @@ def main(argv=None):
                 counting_static_gates(check_meter):
             full, _, full_seconds = run_once(validator, pilot, placements,
                                              check_meter, args.tolerance,
-                                             exhaustive=True)
+                                             exhaustive=True,
+                                             entry_at_rest=args.entry_at_rest)
         exhaustive_check = {
             'ran': True,
             'branch_outcomes_agree': (
@@ -1306,6 +1350,8 @@ def main(argv=None):
         'ready_pose_selection': ('entire pool' if args.all_pool
                                  else PILOT_SELECTION_RULE),
         'rail_velocity_cap_override': args.rail_velocity_cap,
+        'spin_up_s': args.spin_up_s,
+        'entry_at_rest': args.entry_at_rest,
         'poses_json': args.poses_json,
         'pose_filter': {'skip_poses_in': args.skip_poses_in,
                         'only_poses_in': args.only_poses_in,
