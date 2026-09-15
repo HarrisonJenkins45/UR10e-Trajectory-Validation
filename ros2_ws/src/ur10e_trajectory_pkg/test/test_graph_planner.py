@@ -348,3 +348,38 @@ def test_a_sliding_rail_is_named_as_the_entry_motion(oracle):
     assert report['velocity_ratio'][0] == pytest.approx(0.1, rel=1e-6)
     assert report['joints_over_tolerance'] == ['linear_rail_joint']
 
+
+
+def test_layer_0_is_restricted_to_starts_the_home_can_warm_up_to(monkeypatch):
+    """The coupling: the planner may only start where the home can reach.
+
+    One reachable candidate, one whose warmup has no direct plan, one whose
+    warmup validates below the self-clearance floor. Later layers are
+    untouched, being reached along the path rather than from the home.
+    """
+    from ur10e_trajectory_pkg import continuous_validator as cv
+    from ur10e_trajectory_pkg import warmup as wu
+
+    reachable = np.array([1.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    grazing = np.array([1.1, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    blocked = np.array([1.2, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    layers = [[reachable, grazing, blocked], [np.zeros(7)]]
+
+    def fake_plan(validator, home, start, rate_hz=200.0):
+        if np.allclose(start, blocked):
+            return {'status': 'no_direct_warmup'}
+        return {'status': 'ok', 'target': start}
+
+    def fake_validate(validator, plan):
+        below = np.allclose(plan['target'], grazing)
+        return {'passed': not below, 'collision_found': False,
+                'self_clearance': {'passed': not below, 'min_distance_m': 0.004}}
+
+    monkeypatch.setattr(wu, 'plan_warmup', fake_plan)
+    monkeypatch.setattr(cv, 'validate_warmup', fake_validate)
+    kept, stats = graph_planner.filter_home_reachable(None, layers, np.zeros(7))
+
+    assert [len(layer) for layer in kept] == [1, 1]
+    assert np.allclose(kept[0][0], reachable)
+    assert stats['kept'] == 1 and stats['removed'] == 2
+    assert stats['reasons'] == {'no_direct_warmup': 1, 'warmup_self_clearance': 1}

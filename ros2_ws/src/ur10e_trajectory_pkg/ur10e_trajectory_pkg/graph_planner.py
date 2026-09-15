@@ -408,6 +408,48 @@ def best_condition_lower_bound(document, num_layers):
     return {'value': float(bests[worst]), 'layer': worst}
 
 
+def filter_home_reachable(validator, layers, home, rate_hz=200.0):
+    """Restrict layer 0 to starts the home can warm up to directly.
+
+    The planner chooses where the task starts, so it is the planner's job to
+    choose a start the home can reach, rather than the home's job to reach
+    every IK family a placement offers. A layer-0 candidate survives only if
+    a rest-to-rest warmup from the home plans and passes validation, the
+    self-clearance floor included.
+
+    Layer 0 only: later layers are reached along the path, not from the home.
+    """
+    import time
+
+    from ur10e_trajectory_pkg import continuous_validator as cv
+    from ur10e_trajectory_pkg import warmup as wu
+
+    started = time.perf_counter()
+    home = np.asarray(home, dtype=float)
+    kept, reasons = [], {}
+
+    def note(reason):
+        reasons[reason] = reasons.get(reason, 0) + 1
+
+    for row in layers[0]:
+        plan = wu.plan_warmup(validator, home, row, rate_hz=rate_hz)
+        if plan['status'] != 'ok':
+            note(plan['status'])
+            continue
+        report = cv.validate_warmup(validator, plan)
+        if not report['passed']:
+            note('warmup_self_clearance' if not report['self_clearance']['passed']
+                 else 'warmup_collision' if report['collision_found']
+                 else 'warmup_limits')
+            continue
+        kept.append(row)
+    seconds = time.perf_counter() - started
+    return ([kept] + list(layers[1:]),
+            {'home': home.tolist(), 'layer_0_candidates': len(layers[0]),
+             'kept': len(kept), 'removed': len(layers[0]) - len(kept),
+             'reasons': reasons, 'seconds': seconds})
+
+
 def filter_self_clearance(validator, layers, floor):
     """Drop candidates whose non-adjacent self-clearance is below floor."""
     import time
@@ -464,6 +506,11 @@ def main(argv=None):
     parser.add_argument('--max-candidate-condition', type=float,
                         default=GRAPH_CANDIDATE_CONDITION_LIMIT,
                         help='drop candidates above this arm condition number')
+    parser.add_argument('--home', type=float, nargs=7, default=None,
+                        help='restrict layer-0 starts to those this home can '
+                             'warm up to directly')
+    parser.add_argument('--home-json', default=None,
+                        help='home_choice.json to take the chosen home from')
     parser.add_argument('--min-self-clearance', type=float, default=None,
                         help='drop candidates below this non-adjacent '
                              'self-clearance (default SELF_CLEARANCE_FLOOR_M)')
@@ -495,6 +542,13 @@ def main(argv=None):
                             else args.min_self_clearance)
     layers, self_clearance_filter = filter_self_clearance(
         validator, layers, self_clearance_floor)
+    home = args.home
+    if args.home_json is not None:
+        with open(args.home_json, encoding='utf-8') as handle:
+            home = json.load(handle)['chosen']['configuration']
+    home_filter = None
+    if home is not None:
+        layers, home_filter = filter_home_reachable(validator, layers, home)
     condition_bound = best_condition_lower_bound(candidates_document, num_layers)
     generated_RG = (candidates_document.get('manifest', {})
                     .get('trajectory', {}).get('placement_RG'))
@@ -547,6 +601,7 @@ def main(argv=None):
         'candidate_filters': {
             'condition': candidates_document['condition_filter'],
             'self_clearance': self_clearance_filter,
+            'home_reachable': home_filter,
             'best_condition_lower_bound': condition_bound,
         },
         'path_max_condition': (None if result is None else max(
@@ -578,6 +633,10 @@ def main(argv=None):
           f"{self_clearance_filter['removed_total']} "
           f"({self_clearance_filter['queries']} queries, "
           f"{self_clearance_filter['ms_per_query']:.3f} ms each)")
+    if home_filter is not None:
+        print(f"layer-0 starts the home can reach: {home_filter['kept']} of "
+              f"{home_filter['layer_0_candidates']} "
+              f"({home_filter['seconds']:.1f} s, {home_filter['reasons']})")
     if result is None:
         print(f"best achievable worst candidate condition is at least "
               f"{condition_bound['value']:.2f} (layer {condition_bound['layer']})")
