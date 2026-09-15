@@ -1,15 +1,26 @@
+import json
+import sys
+import time
+
 import numpy as np
 import rclpy
 import pandas as pd
 from rclpy.node import Node
-from ur10e_interfaces.srv import ValidateTrajectory
+from ur10e_interfaces.srv import ExecuteWarmup, ValidateTrajectory
 from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import LEGACY_MATLAB_START_Q
 from scipy.spatial.transform import Rotation as R
 
 
 
-TEST_VALID_TRAJ=False
+# The plan a demo run executes: exported by home_pose commands --plan-out,
+# only for a plan whose warmup and task both passed validation.
+DEFAULT_PLAN_PATH = '/root/ros2_ws/task_plan.json'
+PLAN_KEYS = ('home', 'q_path', 'task_start', 'recorded_waypoints', 'spin_up_s',
+             'placement', 'target_frame')
+# Extra wait after the warmup's duration before sending the task, so the
+# warmup playback has finished when command 2 arrives.
+PLAYBACK_MARGIN_S = 1.0
 
 # Start configuration sent with every request, as
 # [rail_m, shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3].
@@ -29,29 +40,36 @@ class TrajectoryClientNode(Node):
     def __init__(self):
         super().__init__('trajectory_client_node')
         self.cli = self.create_client(ValidateTrajectory, 'validate_trajectory')
+        self.warmup_cli = self.create_client(ExecuteWarmup, 'execute_warmup')
 
+        for client, name in ((self.warmup_cli, 'execute_warmup'),
+                             (self.cli, 'validate_trajectory')):
+            while not client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f'Waiting for {name} service...')
 
-        while not self.cli.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Waiting for validate_trajectory service...')
+    def send_warmup(self, q_start, q_target):
+        """Command 1: rest-to-rest from where the arm is to the task start."""
+        req = ExecuteWarmup.Request()
+        req.q_start = np.asarray(q_start, dtype=float).tolist()
+        req.q_target = np.asarray(q_target, dtype=float).tolist()
+        return self.warmup_cli.call_async(req)
 
-    def send_request(self, x_pts, y_pts, z_pts, quat, simTime, q_start=None):
+    def send_request(self, x_pts, y_pts, z_pts, quat, simTime, q_start, q_path):
+        """Command 2: the task, as the validated joint path from its start."""
         req = ValidateTrajectory.Request()
-        req.ee_positions_x = x_pts
-        req.ee_positions_y = y_pts
-        req.ee_positions_z = z_pts
-        # quat is an (N, 4) array of [x, y, z, w] quaternions -- ROS service
-        # fields can't carry a 2D array directly, so flatten it the same way
-        # ee_positions_x/y/z are already plain 1D lists. Validate_trajServer.py
-        # reshapes it back to (N, 4) on the way in.
+        req.ee_positions_x = list(x_pts)
+        req.ee_positions_y = list(y_pts)
+        req.ee_positions_z = list(z_pts)
+        # quat is an (N, 4) array of [x, y, z, w] quaternions, flattened
+        # because service fields cannot carry a 2D array; the server reshapes.
         req.ee_quat = np.asarray(quat).flatten().tolist()
-        req.sim_time=simTime
-        # Start pose, required by the service: it rejects an omitted field
-        # rather than defaulting, so the assumption lives here at the call
-        # site rather than inside the server.
-        req.q_start = Q_START if q_start is None else list(q_start)
-        # Targets are in the fixed rail-base frame, never the moving
-        # carriage frame. Declared so the server can reject a mismatch
-        # instead of silently validating the wrong trajectory.
+        req.sim_time = list(simTime)
+        # Where the arm is: after command 1, the warmup's end configuration.
+        req.q_start = np.asarray(q_start, dtype=float).tolist()
+        # The validated joint path the service verifies and plays, never
+        # re-solving it.
+        req.q_path = np.asarray(q_path, dtype=float).flatten().tolist()
+        # Targets are in the fixed rail-base frame, never the moving carriage.
         req.target_frame = frames.TARGET_FRAME
 
         self.future = self.cli.call_async(req)
@@ -279,55 +297,90 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
     }
 
 
+def load_task_plan(path):
+    """A validated plan, checked for what the two commands need."""
+    with open(path, encoding='utf-8') as handle:
+        plan = json.load(handle)
+    missing = [key for key in PLAN_KEYS if key not in plan]
+    if missing:
+        raise ValueError(f'plan {path} is missing {missing}')
+    q_path = np.asarray(plan['q_path'], dtype=float)
+    if q_path.ndim != 2 or q_path.shape[1] != 7 or len(q_path) < 2:
+        raise ValueError(f'plan q_path has shape {q_path.shape}, expected (N, 7)')
+    home = np.asarray(plan['home'], dtype=float)
+    if home.shape != (7,):
+        raise ValueError(f'plan home has {home.size} values, expected 7')
+    if not np.allclose(plan['task_start'], q_path[0], atol=1e-12):
+        raise ValueError('plan task_start is not the first configuration of q_path')
+    if plan['target_frame'] != frames.TARGET_FRAME:
+        raise ValueError(f"plan targets are in {plan['target_frame']!r}, "
+                         f'not {frames.TARGET_FRAME!r}')
+    return dict(plan, q_path=q_path, home=home, task_start=q_path[0])
+
+
+def plan_targets(plan, csv_path=DEFAULT_CSV_PATH):
+    """Rebuild the targets the plan was validated against, one per q_path row."""
+    placement_RG = None
+    if plan['placement'] != 'nominal':
+        from ur10e_trajectory_pkg.failure_census import placement_RG_for
+        placement_RG = placement_RG_for(plan['placement'], csv_path)
+    x, y, z, quaternions, times = build_trajectory_targets(
+        csv_path, plan['recorded_waypoints'], placement_RG=placement_RG,
+        spin_up_s=plan['spin_up_s'])
+    if len(x) != len(plan['q_path']):
+        raise ValueError(f"the plan's q_path has {len(plan['q_path'])} "
+                         f'configurations but its targets number {len(x)}')
+    return x, y, z, quaternions, times
+
+
 def main(args=None):
+    """Command 1 then command 2, from an exported, validated plan.
+
+    ros2 run ur10e_trajectory_pkg trajectory_client [plan.json]
+
+    The simulated arm starts at the plan's home. The warmup brings it to the
+    task start, and the task then plays from the warmup's end configuration
+    as the exact joint path that was validated.
+    """
+    from rclpy.utilities import remove_ros_args
+
     rclpy.init(args=args)
+    argv = remove_ros_args(sys.argv if args is None else args)[1:]
+    plan_path = argv[0] if argv else DEFAULT_PLAN_PATH
     client_node = TrajectoryClientNode()
+    logger = client_node.get_logger()
 
+    try:
+        plan = load_task_plan(plan_path)
+        x_pts, y_pts, z_pts, q_B_G, simTime = plan_targets(plan)
+    except (OSError, ValueError) as exc:
+        logger.error(f'Cannot run plan {plan_path}: {exc}')
+        client_node.destroy_node()
+        rclpy.shutdown()
+        return
 
-    # ------------- Start SISFOS Logic ------------#
-
-    x_pts, y_pts, z_pts, q_B_G, simTime = build_trajectory_targets()
-
-    # ------------- End SISIFOS Logic ------------#
-
-    #Override SISFOS request with a know valid trajectory
-    if TEST_VALID_TRAJ:
-        client_node.get_logger().info('Using a known valid trajectory')
-
-        # --- Simulation Timing Configuration ---
-        t_traj = 10.0  # Time to follow the trajectory (seconds)
-        tTransition = 2.0  # Time moving from Home to circle start (seconds)
-        tFinal = t_traj + tTransition
-        radius = 0.80
-        omega = 2.0 * np.pi * 0.03
-        numWayPts = 100
-        # Generate time vector for waypoints
-        tWaypoints = np.linspace(tTransition, tFinal, numWayPts)
-        t_rel = tWaypoints - tTransition  # Relative time array
-        # Vectorized trajectory generation in YZ plane (x = 0.2 m offset)
-        x_pts = np.full(numWayPts, 0.2)
-        y_pts = 0.0 + radius * np.cos(omega * t_rel)
-        z_pts = 0.5 + radius * np.sin(omega * t_rel)
-        q_B_G = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64), (numWayPts, 1))
-        # simTime must be re-generated at numWayPts length too -- the SISIFOS
-        # simTime above is 300 samples; sending it alongside these 100-sample
-        # position/quat arrays would send mismatched lengths to the server.
-        simTime = tWaypoints
-
-    # Send positions to ROS service
-    future = client_node.send_request(
-        x_pts.tolist(), y_pts.tolist(), z_pts.tolist(), q_B_G, simTime.tolist()
-    )
-
-    # Block until validation server finishes processing
+    # Command 1: warmup from home to the task start.
+    future = client_node.send_warmup(plan['home'], plan['task_start'])
     rclpy.spin_until_future_complete(client_node, future)
+    warmup = future.result()
+    if not warmup.success:
+        logger.error(f'Warmup refused: {warmup.message}')
+        client_node.destroy_node()
+        rclpy.shutdown()
+        return
+    logger.info(f'{warmup.message}; waiting {warmup.duration_s:.2f} s for it to play')
+    time.sleep(warmup.duration_s + PLAYBACK_MARGIN_S)
 
-    # Handle server response
+    # Command 2: the task from where the warmup ended.
+    future = client_node.send_request(
+        x_pts, y_pts, z_pts, q_B_G, simTime,
+        q_start=warmup.end_configuration, q_path=plan['q_path'])
+    rclpy.spin_until_future_complete(client_node, future)
     response = future.result()
     if response.success:
-        client_node.get_logger().info(f'Success: {response.message}')
+        logger.info(f'Success: {response.message}')
     else:
-        client_node.get_logger().error(f'Failed: {response.message}')
+        logger.error(f'Failed: {response.message}')
 
     client_node.destroy_node()
     rclpy.shutdown()
