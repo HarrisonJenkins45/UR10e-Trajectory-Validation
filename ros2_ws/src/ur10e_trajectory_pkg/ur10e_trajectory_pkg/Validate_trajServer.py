@@ -6,17 +6,11 @@ from ur10e_interfaces.srv import ValidateTrajectory
 
 from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
+from ur10e_trajectory_pkg.task_path import verify_task_path
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
-# Module-level debug toggles (easier to find/flip than buried in __init__)
+# Module-level debug toggle (easier to find/flip than buried in __init__)
 SKIP_COLLISION = False         # bypass collision checking for debugging
-USE_SEGMENT_FINDER = True    # use find_feasible_segments + the 1st viable segment
-                               # instead of process_matlab_validation's all-or-nothing
-                               # validation, for REAL requests via validation_callback
-MIN_SEGMENT_LENGTH = 10       # shortest run of feasible waypoints accepted as a segment
-DEFAULT_T_TRAJ = 10.0         # matches process_matlab_validation's own default t_traj;
-                               # used to derive dt_waypoint for the segment-finder path,
-                               # since incoming requests carry positions but not timing
 
 # How far the MEASURED start may sit from the first solved configuration. The
 # task plays from that configuration with no transition, so a larger offset
@@ -73,6 +67,27 @@ def resolve_start_pose(q_start_field):
             f'[rail_m, 6x arm_rad], got {q_start.size}'
         )
     return q_start, 'q_start supplied by client'
+
+
+def resolve_task_path(q_path_field, num_waypoints):
+    """The request's joint path as an (N, 7) array, or a reason it is unusable.
+
+    Required: the service plays the path the planner produced and validation
+    checked, and no longer re-solves, since a re-solve could follow a
+    different branch.
+    """
+    if len(q_path_field) == 0:
+        raise ValueError(
+            'q_path is required: send the validated joint path, flattened '
+            f'[N x {NUM_JOINTS}], one configuration per target. The service no '
+            'longer re-solves the trajectory, because a re-solve can follow a '
+            'different branch from the one that was validated')
+    q_path = np.asarray(q_path_field, dtype=float)
+    if q_path.size != num_waypoints * NUM_JOINTS:
+        raise ValueError(
+            f'q_path has {q_path.size} values; {num_waypoints} targets need '
+            f'{num_waypoints * NUM_JOINTS} ({NUM_JOINTS} per target)')
+    return q_path.reshape(num_waypoints, NUM_JOINTS)
 
 
 def check_measured_start(validator, q_measured, first_configuration,
@@ -211,60 +226,45 @@ class TrajectoryValidationNode(Node):
         ee_quat = np.array(request.ee_quat).reshape(-1, 4)
         simTime=np.array(request.sim_time)
 
-        if USE_SEGMENT_FINDER:
-            num_waypts = len(ee_x)
-            # process_matlab_validation derives dt_waypoint internally as
-            # (t_final - t_transition) / (num_waypts - 1), which simplifies
-            # to t_traj / (num_waypts - 1); matched here since incoming
-            # requests carry positions only, no explicit timing.
-            # dt_waypoint = DEFAULT_T_TRAJ / (num_waypts - 1)
-            dt_waypoint= simTime[1]-simTime[0]
-            segments = self.validator.find_feasible_segments(
-                ee_x, ee_y, ee_z, ee_quat, q_start, min_length=MIN_SEGMENT_LENGTH,
-                dt_waypoint=dt_waypoint, verbose=True
-            )
-            # The task plays from its first waypoint with no transition: the
-            # warmup command has already brought the arm there. So only a
-            # segment covering EVERY waypoint can be played, and the measured
-            # start must be that segment's first configuration.
-            full = [s for s in segments
-                    if s['start_idx'] == 0 and s['end_idx'] == num_waypts - 1]
-            q_dot_matrix, q_interp = np.array([]), np.array([])
-            if not full:
-                is_valid = False
-                longest = max(segments, key=lambda s: s['length']) if segments else None
-                message = ('The task is not feasible from waypoint 0 to the end, so it '
-                           'cannot be played from its start'
-                           + ('' if longest is None else
-                              f' (longest feasible segment [{longest["start_idx"]}, '
-                              f'{longest["end_idx"]}], {longest["length"]}/{num_waypts})')
-                           + f' [start: {start_desc}]')
-            else:
-                segment = full[0]
-                start_ok, start_details = check_measured_start(
-                    self.validator, q_start, segment['q_full'][0],
-                    (ee_x[0], ee_y[0], ee_z[0]), ee_quat[0])
-                if not start_ok:
-                    is_valid = False
-                    message = ('Measured start is not the task start: '
-                               + '; '.join(start_details['failures'])
-                               + '. Run the warmup command first.')
-                else:
-                    is_valid = True
-                    q_dot_matrix, q_interp, _ = self.validator.process_task_segment(
-                        segment, dt_waypoint, verbose=True)
-                    message = (f'Task feasible over all {num_waypts} waypoints from the '
-                               f'measured start; playing with no transition '
-                               f'[start: {start_desc}]')
+        num_waypts = len(ee_x)
+        dt_waypoint = simTime[1] - simTime[0]
+        q_dot_matrix, q_interp = np.array([]), np.array([])
+        try:
+            q_path = resolve_task_path(request.q_path, num_waypts)
+        except ValueError as exc:
+            is_valid, message = False, str(exc)
         else:
-            # Run validation and generate interpolated trajectory frames
-            is_valid, q_dot_matrix, q_interp, message = self.validator.process_matlab_validation(
-                ee_x, ee_y, ee_z, ee_quat, q_start
-            )
+            # Play exactly the validated path: verify it here, check the arm
+            # is at its first configuration, and never re-solve.
+            verification = verify_task_path(
+                self.validator, q_path, np.column_stack((ee_x, ee_y, ee_z)),
+                ee_quat, dt_waypoint)
+            start_ok, start_details = check_measured_start(
+                self.validator, q_start, q_path[0], (ee_x[0], ee_y[0], ee_z[0]),
+                ee_quat[0])
+            if not verification['ok']:
+                is_valid = False
+                message = ('The joint path does not verify against its targets: '
+                           + '; '.join(verification['failures']))
+            elif not start_ok:
+                is_valid = False
+                message = ('Measured start is not the path start: '
+                           + '; '.join(start_details['failures'])
+                           + '. Run the warmup command first.')
+            else:
+                is_valid = True
+                segment = {'start_idx': 0, 'end_idx': num_waypts - 1,
+                           'length': num_waypts, 'q_full': q_path}
+                q_dot_matrix, q_interp, _ = self.validator.process_task_segment(
+                    segment, dt_waypoint, verbose=True)
+                message = (f'Verified joint path over all {num_waypts} waypoints '
+                           f'(worst step {verification["max_step_ratio"]:.3f}x the '
+                           f'velocity limits); playing it from the measured start '
+                           f'with no transition [start: {start_desc}]')
 
         if is_valid:
             response.success = True
-            response.message = message if USE_SEGMENT_FINDER else 'Trajectory is valid. Starting streaming playback...'
+            response.message = message
             response.joint_velocities = q_dot_matrix.flatten().tolist()
 
             # Start streaming the trajectory over /joint_states

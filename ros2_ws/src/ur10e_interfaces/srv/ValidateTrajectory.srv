@@ -36,6 +36,18 @@ float64[] q_start
 # array of numbers gives nobody a way to notice it.
 string target_frame
 
+# The joint path to play, flattened [N x 7] in q_full order, one configuration
+# per target, in the same order: the path the planner produced and offline
+# validation checked, in its chosen winding. REQUIRED.
+#
+# The service used to re-solve the trajectory itself, greedily from q_start.
+# A re-solve can follow a different solution branch from the one that was
+# validated, so the robot could run a path nobody checked. The service now
+# verifies THIS path against the targets, joint limits, velocity limits and
+# collision, checks the measured start against its first configuration, and
+# plays exactly it.
+float64[] q_path
+
 ---
 # 2. RESPONSE (Output sent back to the main script)
 bool success

@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Command 2 plays the validated path: the service verifies it and never re-solves."""
+import numpy as np
+import pytest
+from ament_index_python.packages import get_package_share_directory
+from scipy.spatial.transform import Rotation
+
+from ur10e_trajectory_pkg import Validate_trajServer as server
+from ur10e_trajectory_pkg.task_path import verify_task_path
+from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
+
+from test_geometry_invariants import _urdf_path
+
+DT = 0.1
+
+
+@pytest.fixture(scope='module')
+def validator():
+    return TrajectoryValidator(
+        _urdf_path(), mesh_base_path=get_package_share_directory('ur_description'))
+
+
+@pytest.fixture(scope='module')
+def path():
+    start = np.concatenate(([1.2], np.deg2rad([10.0, -110.0, 80.0, -60.0, 70.0, 20.0])))
+    return np.stack([start + np.concatenate(([0.002 * i], np.full(6, 0.004 * i)))
+                     for i in range(12)])
+
+
+def _targets(validator, path):
+    poses = [validator.robot.fkine(q, end='tool0') for q in path]
+    return (np.stack([p.t for p in poses]),
+            np.stack([Rotation.from_matrix(p.R).as_quat() for p in poses]))
+
+
+def test_the_path_that_generated_the_targets_verifies(validator, path):
+    positions, quaternions = _targets(validator, path)
+    report = verify_task_path(validator, path, positions, quaternions, DT)
+    assert report['ok'] is True and report['failures'] == []
+    assert report['max_position_error_m'] < 1e-9
+    assert report['max_step_ratio'] < 1.0
+
+
+def test_a_configuration_on_another_branch_misses_its_target(validator, path):
+    positions, quaternions = _targets(validator, path)
+    other = path.copy()
+    other[6:, 3] += 0.05                   # elbow off the solution from waypoint 6
+    report = verify_task_path(validator, other, positions, quaternions, DT,
+                              velocity_limits=np.full(7, 10.0))
+    assert report['ok'] is False
+    assert any('miss their target, first at waypoint 6' in f for f in report['failures'])
+
+
+def test_an_unlifted_wrap_is_a_velocity_violation(validator, path):
+    """A path must arrive lifted: a raw 2*pi jump between steps is a full
+    revolution, not a no-op."""
+    positions, quaternions = _targets(validator, path)
+    wrapped = path.copy()
+    wrapped[5:, 6] -= 2 * np.pi
+    report = verify_task_path(validator, wrapped, positions, quaternions, DT)
+    assert report['ok'] is False
+    assert any('exceed the velocity limits, first from waypoint 4' in f
+               for f in report['failures'])
+
+
+def test_a_colliding_configuration_fails(validator, path, monkeypatch):
+    positions, quaternions = _targets(validator, path)
+    monkeypatch.setattr(validator, 'check_all_collisions',
+                        lambda q, verbose=False: bool(np.isclose(q[0], path[3][0])))
+    report = verify_task_path(validator, path, positions, quaternions, DT)
+    assert report['collisions'] == 1
+    assert any('in collision, first at waypoint 3' in f for f in report['failures'])
+
+
+def test_a_path_of_the_wrong_length_fails(validator, path):
+    positions, quaternions = _targets(validator, path)
+    report = verify_task_path(validator, path[:-1], positions, quaternions, DT)
+    assert report['ok'] is False and 'shape' in report['failures'][0]
+
+
+def test_the_request_must_carry_the_joint_path():
+    with pytest.raises(ValueError, match='no longer re-solves'):
+        server.resolve_task_path([], 10)
+    with pytest.raises(ValueError, match='need 70'):
+        server.resolve_task_path([0.0] * 69, 10)
+    assert server.resolve_task_path([0.0] * 70, 10).shape == (10, 7)
