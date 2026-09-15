@@ -7,6 +7,7 @@ from ur10e_interfaces.srv import ExecuteWarmup, ValidateTrajectory
 from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
 from ur10e_trajectory_pkg import warmup
+from ur10e_trajectory_pkg.motion_limits import limit_statuses
 from ur10e_trajectory_pkg.continuous_validator import (
     validate_task_command,
     validate_warmup,
@@ -138,11 +139,21 @@ def plan_and_validate_warmup(validator, q_start, q_target, playback_hz):
             frames, plan)
 
 
-def continuous_failures(report):
-    """Human-readable reasons a continuous validation report did not pass."""
+def continuous_failures(report, statuses=None):
+    """Human-readable reasons a continuous validation report did not pass.
+
+    statuses is motion_limits.limit_statuses(validator). With it, every
+    exceeded limit names its provenance, so a refusal on an assumed limit
+    (jerk, today, on every joint) says so rather than reading as a hardware
+    limit.
+    """
     failures = []
-    if report.get('limit_violations'):
-        failures.append('limits exceeded on ' + ', '.join(sorted(report['limit_violations'])))
+    for joint, kinds in sorted((report.get('limit_violations') or {}).items()):
+        for kind, detail in sorted(kinds.items()):
+            text = f'{joint} {kind} {detail["peak"]:.3g} > {detail["limit"]:.3g}'
+            if statuses is not None and kind in statuses:
+                text += f' ({statuses[kind][JOINT_NAMES.index(joint)]} limit)'
+            failures.append(text)
     if report.get('position_limit_violations'):
         failures.append('joint limits left between waypoints')
     if report.get('collision', {}).get('collision_found'):
@@ -336,7 +347,8 @@ class TrajectoryValidationNode(Node):
                 is_valid = bool(continuous['passed'])
                 if not is_valid:
                     message = ('Continuous validation of the joint path failed: '
-                               + '; '.join(continuous_failures(continuous)))
+                               + '; '.join(continuous_failures(
+                                   continuous, limit_statuses(self.validator))))
             if is_valid:
                 segment = {'start_idx': 0, 'end_idx': num_waypts - 1,
                            'length': num_waypts, 'q_full': q_path}

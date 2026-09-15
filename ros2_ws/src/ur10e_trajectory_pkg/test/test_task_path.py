@@ -94,11 +94,14 @@ def test_a_continuous_failure_is_explained_not_just_refused():
                'tracking': {'within_tolerance': True}, 'conditioning_ok': True,
                'conditioning': {'twist_status': 'pass'}}
     assert server.continuous_failures(passing) == []
-    failing = dict(passing, limit_violations={'wrist_1_joint': {}},
+    failing = dict(passing,
+                   limit_violations={'elbow_joint': {'jerk': {'peak': 1108.0, 'limit': 500.0}}},
                    collision={'collision_found': True},
                    conditioning={'twist_status': 'fail'})
-    reasons = server.continuous_failures(failing)
-    assert 'limits exceeded on wrist_1_joint' in reasons
+    statuses = {'jerk': ['assumed'] * 7, 'velocity': ['certified'] * 7,
+                'acceleration': ['provisional'] * 7}
+    reasons = server.continuous_failures(failing, statuses)
+    assert 'elbow_joint jerk 1.11e+03 > 500 (assumed limit)' in reasons
     assert 'collision between waypoints' in reasons
     assert 'task twist fail' in reasons
 

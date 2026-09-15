@@ -268,6 +268,7 @@ def limit_statuses(validator):
         'velocity': [entry['status'] for entry in document['velocity']],
         'acceleration': [RAIL_ACCELERATION.status]
                         + [ARM_ACCELERATION.status] * 6,
+        'jerk': [RAIL_JERK.status] + [ARM_JERK.status] * 6,
     }
 
 
