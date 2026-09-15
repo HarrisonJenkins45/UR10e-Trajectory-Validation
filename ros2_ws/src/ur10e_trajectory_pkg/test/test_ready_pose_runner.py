@@ -490,3 +490,14 @@ def test_spin_up_placement_targets_start_at_the_recorded_first_pose():
         return np.linalg.norm((Rotation.from_quat(q[1]) * Rotation.from_quat(q[0]).inv()).as_rotvec())
     assert step(spun[1]) < 0.01 * step(nominal[1])
 
+
+def test_prefix_entry_state_is_recorded_per_joint(validator, placement):
+    state = runner.prepare_placement(
+        validator, placement['name'], placement['layers'], placement['positions'],
+        placement['quaternions'], DT, runner.Meter())
+    per_velocity = state['counts']['prefix_entry_velocity_ratio_max_per_joint']
+    per_acceleration = state['counts']['prefix_entry_acceleration_ratio_max_per_joint']
+    assert len(per_velocity) == len(per_acceleration) == 7
+    assert max(max(per_velocity), max(per_acceleration)) == pytest.approx(
+        state['counts']['max_prefix_entry_ratio'])
+

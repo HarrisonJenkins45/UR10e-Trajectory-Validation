@@ -307,6 +307,7 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
     rejections = {}
     valid = []
     prefix_entry_ratios = []
+    prefix_velocity_ratios, prefix_acceleration_ratios = [], []
 
     for index, candidate in enumerate(layers[0]):
         failed = layer0_task_gates(validator, candidate, twist, velocity_limits)
@@ -348,9 +349,12 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
             continue
         entry_velocity, entry_acceleration = sweep.entry_state_from_prefix(
             prefix, dt)
-        prefix_entry_ratios.append(max(
-            float(np.max(np.abs(entry_velocity) / velocity_limits)),
-            float(np.max(np.abs(entry_acceleration) / acceleration_limits))))
+        velocity_ratio = np.abs(entry_velocity) / velocity_limits
+        acceleration_ratio = np.abs(entry_acceleration) / acceleration_limits
+        prefix_entry_ratios.append(max(float(np.max(velocity_ratio)),
+                                       float(np.max(acceleration_ratio))))
+        prefix_velocity_ratios.append(velocity_ratio)
+        prefix_acceleration_ratios.append(acceleration_ratio)
         if entry_at_rest:
             entry_velocity = np.zeros_like(entry_velocity)
             entry_acceleration = np.zeros_like(entry_acceleration)
@@ -369,6 +373,15 @@ def prepare_placement(validator, name, layers, positions, quaternions, dt,
     counts['entry_state_policy'] = 'at_rest' if entry_at_rest else 'pchip_prefix'
     counts['max_prefix_entry_ratio'] = (max(prefix_entry_ratios)
                                         if prefix_entry_ratios else None)
+    # Per joint, over every candidate's chosen continuation: which joint the
+    # entry motion comes from. These are over candidates CONSIDERED, not the
+    # path a planner would execute.
+    counts['prefix_entry_velocity_ratio_max_per_joint'] = (
+        np.max(prefix_velocity_ratios, axis=0).tolist()
+        if prefix_velocity_ratios else None)
+    counts['prefix_entry_acceleration_ratio_max_per_joint'] = (
+        np.max(prefix_acceleration_ratios, axis=0).tolist()
+        if prefix_acceleration_ratios else None)
     counts['layer1_states_expanded'] = len(layer1_cache)
     counts['layer2_states_expanded'] = len(layer2_cache)
     counts['valid_two_step_continuations'] = int(

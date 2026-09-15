@@ -329,3 +329,26 @@ def test_census_targets_match_what_the_client_sends():
     # a measurement, and it is load-bearing: at the origin the targets sit in
     # the floor and collision fires on every attempt.
     assert np.any(LEGACY_PLACEMENT_POSITION_RG != 0.0)
+
+
+def test_a_named_placement_builds_the_same_targets_as_its_transform():
+    """The generator and the planner must place a trajectory identically."""
+    from ur10e_trajectory_pkg import ready_pose_sweep as sweep
+    from ur10e_trajectory_pkg.ClientNode import build_trajectory_targets
+
+    try:
+        placement_RG = failure_census.placement_RG_for('rotate_r+')
+        targets, quaternions, _ = failure_census.load_trajectory(
+            None, 6, placement_RG=placement_RG)
+        _, nominal = build_trajectory_targets(num_waypoints=2, return_metadata=True)
+    except FileNotFoundError:
+        pytest.skip('packaged trajectory CSV not present')
+    envelope = {p['name']: p for p in sweep.placements()}
+    expected = sweep.placement_transform(envelope['rotate_r+'], nominal['placement_RG'])
+    np.testing.assert_allclose(placement_RG, expected, atol=1e-12)
+    # Rotation about the first target leaves its position where nominal put it.
+    np.testing.assert_allclose(targets[0], np.asarray(nominal['placement_RG'])[:3, 3],
+                               atol=1e-12)
+    with pytest.raises(ValueError, match='unknown placement'):
+        failure_census.placement_RG_for('nowhere')
+

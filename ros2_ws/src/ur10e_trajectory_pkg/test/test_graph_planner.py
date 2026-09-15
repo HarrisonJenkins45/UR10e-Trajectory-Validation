@@ -322,3 +322,29 @@ def test_start_lifts_add_every_legal_winding(validator, oracle):
         np.testing.assert_allclose(
             np.angle(np.exp(1j * (state[1:] - canonical[0][1:]))), 0, atol=1e-9)
 
+
+# --------------------------------------------------------------------------
+# Executed-path entry state
+# --------------------------------------------------------------------------
+
+def test_a_path_at_rest_passes_the_declared_tolerance(oracle):
+    at_rest = [np.asarray(oracle[0])] * 3
+    report = graph_planner.entry_state_report(
+        at_rest, 0.1, np.full(7, 1.0), np.full(7, 5.0))
+    assert report['at_rest'] is True
+    assert report['joints_over_tolerance'] == []
+    assert report['tolerance_fraction'] == graph_planner.AT_REST_TOLERANCE_FRACTION
+
+
+def test_a_sliding_rail_is_named_as_the_entry_motion(oracle):
+    """The tool can hold still while the rail slides and the arm compensates;
+    the report must say which joint moves, not only that something does."""
+    start = np.asarray(oracle[0])
+    path = [start + np.concatenate(([0.01 * i], np.zeros(6))) for i in range(3)]
+    report = graph_planner.entry_state_report(path, 0.1, np.full(7, 1.0),
+                                              np.full(7, 5.0))
+    assert report['at_rest'] is False
+    assert report['dominant_joint'] == 'linear_rail_joint'
+    assert report['velocity_ratio'][0] == pytest.approx(0.1, rel=1e-6)
+    assert report['joints_over_tolerance'] == ['linear_rail_joint']
+

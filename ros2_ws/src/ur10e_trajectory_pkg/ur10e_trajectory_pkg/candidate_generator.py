@@ -302,6 +302,8 @@ def main(argv=None):
                         help='RECORDED waypoints; a spin-up adds samples')
     parser.add_argument('--spin-up-s', type=float, default=None,
                         help='prepend a spin-up so the task starts from rest')
+    parser.add_argument('--placement', default='nominal',
+                        help='envelope placement to generate candidates at')
     parser.add_argument('--out', default='candidates.json')
     parser.add_argument('--modes',
                         default='arm_isolation,rail_isolation,interaction')
@@ -309,8 +311,13 @@ def main(argv=None):
 
     from ament_index_python.packages import get_package_share_directory
     mesh_path = get_package_share_directory('ur_description')
+    from ur10e_trajectory_pkg.failure_census import placement_RG_for
+    placement_RG = (None if args.placement == 'nominal'
+                    else placement_RG_for(args.placement))
     targets, quaternions, dt, trajectory_metadata = load_trajectory(
-        None, args.waypoints, with_metadata=True, spin_up_s=args.spin_up_s)
+        None, args.waypoints, with_metadata=True, spin_up_s=args.spin_up_s,
+        placement_RG=placement_RG)
+    trajectory_metadata['placement'] = args.placement
     modes = [m.strip() for m in args.modes.split(',') if m.strip()]
 
     validator = _validator(args.urdf, mesh_path)

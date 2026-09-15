@@ -100,6 +100,49 @@ def state_key(configuration):
     return tuple(np.round(np.asarray(configuration, dtype=float), STATE_DECIMALS))
 
 
+# Declared before any placement's executed path was measured: the task counts
+# as starting at rest if every joint's entry velocity is within this fraction
+# of its velocity limit AND its entry acceleration within this fraction of its
+# acceleration limit. A recorded check here; a constraint only if needed.
+AT_REST_TOLERANCE_FRACTION = 0.02
+
+
+def entry_state_report(path, dt, velocity_limits, acceleration_limits,
+                       tolerance=AT_REST_TOLERANCE_FRACTION):
+    """Per-joint entry velocity and acceleration of an executed path.
+
+    From the first three states, as PCHIP derives them. The warmup ends at
+    rest, so a joint entering above tolerance meets it with a step. With a
+    spin-up the task's tool motion at the first waypoints is essentially zero,
+    so any entry motion is the redundancy -- the rail sliding while the tool
+    holds still -- which is a planner choice rather than a task demand.
+    """
+    from ur10e_trajectory_pkg.configurations import JOINT_NAMES
+    from ur10e_trajectory_pkg.ready_pose_sweep import entry_state_from_prefix
+
+    velocity, acceleration = entry_state_from_prefix(np.asarray(path[:3], float), dt)
+    velocity_ratio = np.abs(velocity) / np.asarray(velocity_limits, float)
+    acceleration_ratio = np.abs(acceleration) / np.asarray(acceleration_limits, float)
+    worst = np.maximum(velocity_ratio, acceleration_ratio)
+    dominant = int(np.argmax(worst))
+    return {
+        'velocity': velocity.tolist(),
+        'acceleration': acceleration.tolist(),
+        'velocity_ratio': velocity_ratio.tolist(),
+        'acceleration_ratio': acceleration_ratio.tolist(),
+        'max_velocity_ratio': float(np.max(velocity_ratio)),
+        'max_acceleration_ratio': float(np.max(acceleration_ratio)),
+        'dominant_joint': JOINT_NAMES[dominant],
+        'dominant_kind': ('velocity' if velocity_ratio[dominant] >= acceleration_ratio[dominant]
+                          else 'acceleration'),
+        'tolerance_fraction': tolerance,
+        'at_rest': bool(np.all(velocity_ratio <= tolerance)
+                        and np.all(acceleration_ratio <= tolerance)),
+        'joints_over_tolerance': [JOINT_NAMES[i] for i in range(len(worst))
+                                  if worst[i] > tolerance],
+    }
+
+
 def path_cost(q_start, path, velocity_limits, dt,
               transition_seconds=TRANSITION_SECONDS):
     """q_start None means a free start: the path's own first state, no
@@ -354,6 +397,8 @@ def main(argv=None):
                              'canonical')
     parser.add_argument('--spin-up-s', type=float, default=None,
                         help='spin-up the candidates were generated with')
+    parser.add_argument('--placement', default='nominal',
+                        help='envelope placement the candidates were generated at')
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
@@ -367,11 +412,22 @@ def main(argv=None):
 
     mesh_path = get_package_share_directory('ur_description')
     validator = _validator(args.urdf, mesh_path)
+    from ur10e_trajectory_pkg.failure_census import placement_RG_for
+    placement_RG = (None if args.placement == 'nominal'
+                    else placement_RG_for(args.placement))
     targets, quaternions, dt, trajectory_metadata = load_trajectory(
-        None, args.layers, with_metadata=True, spin_up_s=args.spin_up_s)
+        None, args.layers, with_metadata=True, spin_up_s=args.spin_up_s,
+        placement_RG=placement_RG)
     num_layers = len(targets)
     layers, candidates_document = load_candidates(args.candidates, num_layers,
                                                   include_oracle=False)
+    generated_RG = (candidates_document.get('manifest', {})
+                    .get('trajectory', {}).get('placement_RG'))
+    if generated_RG is None or not np.allclose(generated_RG,
+                                               trajectory_metadata['placement_RG'],
+                                               atol=1e-9):
+        print(f'candidates were not generated at placement {args.placement!r}')
+        return 1
     if candidates_document.get('num_waypoints') != num_layers:
         print(f"candidates cover {candidates_document.get('num_waypoints')} "
               f'waypoints but this trajectory has {num_layers}; generate them '
@@ -412,6 +468,11 @@ def main(argv=None):
         'q_start': None if q_start is None else np.asarray(q_start).tolist(),
         'chosen_start': (None if result is None
                          else np.asarray(result[0][0]).tolist()),
+        'placement': args.placement,
+        'placement_RG': np.asarray(trajectory_metadata['placement_RG']).tolist(),
+        'entry_state': (None if result is None else entry_state_report(
+            result[0], dt, graph.velocity_limits,
+            motion_limits.acceleration_vector())),
         'counters': graph.counters,
         'velocity_limits': motion_limits.effective_limits(validator),
         'edge_velocity_limits': graph.velocity_limits.tolist(),
@@ -432,6 +493,11 @@ def main(argv=None):
     else:
         print(f'path cost: {result[1]:.4f} over {len(result[0])} states')
         print(f'start ({args.start}): {np.round(result[0][0], 4).tolist()}')
+        entry = document['entry_state']
+        print(f"entry state: at_rest={entry['at_rest']} max velocity ratio "
+              f"{entry['max_velocity_ratio']:.5f} max acceleration ratio "
+              f"{entry['max_acceleration_ratio']:.5f} dominant "
+              f"{entry['dominant_joint']} ({entry['dominant_kind']})")
     if reference_cost is not None:
         print(f'greedy tracker cost, same function: {reference_cost:.4f}')
     for name, value in graph.counters.items():

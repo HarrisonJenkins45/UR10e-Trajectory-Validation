@@ -393,7 +393,30 @@ def main(argv=None):
     return 0
 
 
-def load_trajectory(csv_path, num_waypoints, with_metadata=False, spin_up_s=None):
+def placement_RG_for(name, csv_path=None):
+    """Rail-base placement of the trajectory's first pose for an envelope placement.
+
+    The nominal placement is the builder's own legacy placement; every other is
+    ready_pose_sweep.placement_transform applied to it, rotating about the
+    first target.
+    """
+    from ur10e_trajectory_pkg import ready_pose_sweep
+    from ur10e_trajectory_pkg.ClientNode import (
+        DEFAULT_CSV_PATH,
+        build_trajectory_targets,
+    )
+
+    _, metadata = build_trajectory_targets(csv_path or DEFAULT_CSV_PATH, 2,
+                                           return_metadata=True)
+    envelope = {p['name']: p for p in ready_pose_sweep.placements()}
+    if name not in envelope:
+        raise ValueError(f'unknown placement {name!r}')
+    return ready_pose_sweep.placement_transform(envelope[name],
+                                                metadata['placement_RG'])
+
+
+def load_trajectory(csv_path, num_waypoints, with_metadata=False, spin_up_s=None,
+                    placement_RG=None):
     """Targets exactly as the service receives them.
 
     Delegates to the client's own builder rather than rebuilding the
@@ -408,7 +431,7 @@ def load_trajectory(csv_path, num_waypoints, with_metadata=False, spin_up_s=None
     )
 
     result = build_trajectory_targets(
-        csv_path or DEFAULT_CSV_PATH, num_waypoints,
+        csv_path or DEFAULT_CSV_PATH, num_waypoints, placement_RG=placement_RG,
         return_metadata=with_metadata, spin_up_s=spin_up_s)
     if with_metadata:
         (x, y, z, quaternions, times), metadata = result
