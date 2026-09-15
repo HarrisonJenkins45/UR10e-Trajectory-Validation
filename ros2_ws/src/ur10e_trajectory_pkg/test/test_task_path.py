@@ -106,3 +106,35 @@ def test_a_continuous_failure_is_explained_not_just_refused():
 def test_the_service_validates_continuously_at_the_offline_rate():
     assert server.SERVICE_VALIDATION_HZ == 200.0
 
+
+
+# --------------------------------------------------------------------------
+# Command 1: the service plans, validates and frames the warmup itself
+# --------------------------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def home():
+    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+
+
+def test_a_valid_warmup_is_framed_at_the_playback_rate(validator, home):
+    target = home + np.concatenate(([0.3], np.deg2rad([15.0, -10.0, 10.0, 5.0, 20.0, 30.0])))
+    ok, message, frames, plan = server.plan_and_validate_warmup(validator, home, target, 30.0)
+    assert ok is True and 'Warmup validated' in message
+    np.testing.assert_allclose(frames[0], home, atol=1e-12)
+    np.testing.assert_allclose(frames[-1], target, atol=1e-12)
+    assert len(frames) == int(np.ceil(plan['duration_s'] * 30.0)) + 1
+
+
+def test_a_blocked_warmup_is_refused_and_nothing_is_framed(validator, home, monkeypatch):
+    monkeypatch.setattr(validator, 'check_all_collisions', lambda q, verbose=False: True)
+    target = home + np.concatenate(([0.3], np.zeros(6)))
+    ok, message, frames, plan = server.plan_and_validate_warmup(validator, home, target, 30.0)
+    assert ok is False and frames is None
+    assert 'no_direct_warmup' in message
+
+
+def test_warmup_requests_need_full_configurations():
+    with pytest.raises(ValueError, match='q_target must have 7'):
+        server.resolve_configuration([0.0] * 6, 'q_target')
+    assert server.resolve_configuration([0.0] * 7, 'q_start').shape == (7,)

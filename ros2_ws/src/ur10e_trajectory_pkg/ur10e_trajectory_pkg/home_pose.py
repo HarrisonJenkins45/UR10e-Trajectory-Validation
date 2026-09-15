@@ -197,6 +197,30 @@ def choose_start_winding(validator, home, path):
     return best, summary
 
 
+def task_plan(home, lifted_path, graph, graph_path, winding):
+    """What the client needs to run both commands, exactly as validated.
+
+    The home, the task's joint path in its chosen winding (command 2's
+    q_path, whose first configuration is command 1's target), and what
+    rebuilds the same targets: recorded waypoints, spin-up and placement.
+    Written only for a plan whose warmup and task both passed validation.
+    """
+    spin_up = graph.get('spin_up')
+    lifted_path = np.asarray(lifted_path, dtype=float)
+    return {
+        'schema_version': SCHEMA_VERSION,
+        'home': np.asarray(home, dtype=float).tolist(),
+        'q_path': lifted_path.tolist(),
+        'task_start': lifted_path[0].tolist(),
+        'start_winding': list(winding),
+        'recorded_waypoints': graph['recorded_waypoints'],
+        'spin_up_s': None if spin_up is None else spin_up['requested_duration_s'],
+        'placement': graph.get('placement', 'nominal'),
+        'target_frame': 'rail_base_link',
+        'source_graph': graph_path,
+    }
+
+
 def _load(path):
     with open(path, encoding='utf-8') as handle:
         return json.load(handle)
@@ -234,6 +258,8 @@ def main(argv=None):
     m.add_argument('--graph', required=True)
     m.add_argument('--rate', type=float, default=200.0)
     m.add_argument('--out', required=True)
+    m.add_argument('--plan-out', default=None,
+                   help='write the client plan, only if both commands pass')
     for p in (s, c, m):
         p.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
     args = parser.parse_args(argv)
@@ -305,6 +331,9 @@ def main(argv=None):
         warmup_validation=warmup_report, task_validation=task_report,
         both_commands_pass=bool(warmup_report['passed'] and task_report['passed']))
     _dump(document, args.out)
+    if args.plan_out and document['both_commands_pass']:
+        _dump(task_plan(home, best['path'], graph, args.graph, best['winding']),
+              args.plan_out)
     print('start winding', best['winding'], '| warmup', round(best['warmup']['duration_s'], 3),
           's bound by', best['warmup']['binding'], '| warmup validation passed',
           warmup_report['passed'], '| task validation passed', task_report['passed'])

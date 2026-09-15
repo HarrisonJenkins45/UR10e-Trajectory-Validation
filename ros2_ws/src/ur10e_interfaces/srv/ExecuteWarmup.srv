@@ -1,0 +1,24 @@
+# ExecuteWarmup.srv -- command 1
+
+# Move the arm from where it is to where the task starts, rest to rest, before
+# command 2 (ValidateTrajectory) plays the task from that configuration.
+#
+# The service does not trust the caller's motion: it plans the rest-to-rest
+# move itself, validates it (velocity, acceleration and jerk limits, joint
+# limits, collision at every sample, rest at both ends), and plays it only if
+# that passes. A blocked straight move is refused as no_direct_warmup rather
+# than detoured.
+
+# Measured configuration now, [rail_m, 6x arm_rad] in q_full order. REQUIRED.
+float64[] q_start
+
+# Configuration the task starts from: the first configuration of command 2's
+# q_path, in its chosen winding. REQUIRED.
+float64[] q_target
+
+---
+bool success
+string message
+float64 duration_s
+# Where the arm will be when the warmup finishes: command 2's q_start.
+float64[] end_configuration

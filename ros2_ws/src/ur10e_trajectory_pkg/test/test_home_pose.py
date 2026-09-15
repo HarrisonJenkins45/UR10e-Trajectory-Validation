@@ -152,3 +152,15 @@ def test_the_chosen_winding_has_a_valid_and_shortest_warmup(validator, compact):
     assert best is not None and best['warmup']['status'] == 'ok'
     ok = [s['duration_s'] for s in summary if s['status'] == 'ok']
     assert best['warmup']['duration_s'] == min(ok)
+
+
+def test_the_task_plan_carries_what_both_commands_need(compact):
+    path = np.stack([compact + np.concatenate(([0.0], np.full(6, 0.01 * i))) for i in range(4)])
+    graph = {'recorded_waypoints': 500, 'placement': 'nominal',
+             'spin_up': {'requested_duration_s': 2.0, 'duration_s': 2.0}}
+    plan = home_pose.task_plan(compact, path, graph, 'graph.json', [0, 0, 0, -1, 0, 0])
+    assert plan['task_start'] == plan['q_path'][0]
+    assert len(plan['q_path']) == 4 and len(plan['q_path'][0]) == 7
+    assert plan['spin_up_s'] == 2.0 and plan['recorded_waypoints'] == 500
+    assert plan['home'] == compact.tolist()
+    assert plan['start_winding'] == [0, 0, 0, -1, 0, 0]

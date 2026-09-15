@@ -2,11 +2,15 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState  # Standard ROS msg for joint encoders
-from ur10e_interfaces.srv import ValidateTrajectory
+from ur10e_interfaces.srv import ExecuteWarmup, ValidateTrajectory
 
 from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
-from ur10e_trajectory_pkg.continuous_validator import validate_task_command
+from ur10e_trajectory_pkg import warmup
+from ur10e_trajectory_pkg.continuous_validator import (
+    validate_task_command,
+    validate_warmup,
+)
 from ur10e_trajectory_pkg.task_path import verify_task_path
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
@@ -94,6 +98,44 @@ def resolve_task_path(q_path_field, num_waypoints):
             f'q_path has {q_path.size} values; {num_waypoints} targets need '
             f'{num_waypoints * NUM_JOINTS} ({NUM_JOINTS} per target)')
     return q_path.reshape(num_waypoints, NUM_JOINTS)
+
+
+def resolve_configuration(field, name):
+    """A request's 7-value configuration field, or a reason it is unusable."""
+    if len(field) != NUM_JOINTS:
+        raise ValueError(f'{name} must have {NUM_JOINTS} values '
+                         f'[rail_m, 6x arm_rad], got {len(field)}')
+    return np.asarray(field, dtype=float)
+
+
+def plan_and_validate_warmup(validator, q_start, q_target, playback_hz):
+    """Command 1: plan the rest-to-rest warmup, validate it, and frame it.
+
+    Returns (ok, message, frames, plan). Nothing is framed for playback
+    unless the plan exists and its controller-rate stream validates.
+    """
+    plan = warmup.plan_warmup(validator, q_start, q_target)
+    if plan['status'] != warmup.OK:
+        return False, f"No warmup: {plan['status']} ({plan.get('reason')})", None, plan
+    report = validate_warmup(validator, plan)
+    if not report['passed']:
+        reasons = []
+        if report.get('limit_violations'):
+            reasons.append('limits exceeded on '
+                           + ', '.join(sorted(report['limit_violations'])))
+        if report.get('position_limit_violations'):
+            reasons.append('joint limits left')
+        if report.get('collision_found'):
+            reasons.append('collision along the move')
+        return (False, 'Warmup failed validation: ' + '; '.join(reasons),
+                None, plan)
+    _, frames, _, _ = warmup.sample_rest_to_rest(q_start, q_target,
+                                                 plan['duration_s'], playback_hz)
+    binding = plan['binding']
+    return (True,
+            f"Warmup validated: {plan['duration_s']:.3f} s rest to rest, bound by "
+            f"{binding['joint']} {binding['kind']} ({binding['status']})",
+            frames, plan)
 
 
 def continuous_failures(report):
@@ -188,17 +230,23 @@ class TrajectoryValidationNode(Node):
             JointState, '/joint_states', 10
         )
 
-        # Service Server
+        # Service Servers: command 1 (warmup), then command 2 (the task)
         self.srv = self.create_service(
             ValidateTrajectory, 'validate_trajectory', self.validation_callback
+        )
+        self.warmup_srv = self.create_service(
+            ExecuteWarmup, 'execute_warmup', self.warmup_callback
         )
 
         # Playback Timer Attributes
         self.playback_timer = None
         self.playback_frames = None
         self.current_frame_idx = 0
+        # Frames are generated AND published at this rate. Publishing at a
+        # different rate from the one frames were generated at replays the
+        # motion at the wrong speed: 30 Hz frames used to be published at
+        # 60 Hz, showing every trajectory at twice real speed.
         self.framerate = 30
-        self.playbackFrameRate=60
 
         self.joint_names = list(JOINT_NAMES)
 
@@ -313,6 +361,30 @@ class TrajectoryValidationNode(Node):
 
         return response
 
+    def warmup_callback(self, request, response):
+        """Command 1: validate and play the warmup to the task's start."""
+        self.get_logger().info('Received warmup request...')
+        response.duration_s = 0.0
+        response.end_configuration = []
+        try:
+            q_start = resolve_configuration(request.q_start, 'q_start')
+            q_target = resolve_configuration(request.q_target, 'q_target')
+        except ValueError as exc:
+            response.success = False
+            response.message = f'Error: {exc}'
+            return response
+        ok, message, frames, plan = plan_and_validate_warmup(
+            self.validator, q_start, q_target, self.framerate)
+        response.success = ok
+        response.message = message
+        if ok:
+            response.duration_s = float(plan['duration_s'])
+            response.end_configuration = q_target.tolist()
+            self.start_trajectory_playback(frames)
+        else:
+            self.get_logger().error(message)
+        return response
+
     def start_trajectory_playback(self, q_interp):
         """Initializes timer to stream trajectory frames sequentially."""
         if self.playback_timer is not None:
@@ -320,7 +392,7 @@ class TrajectoryValidationNode(Node):
 
         self.playback_frames = q_interp
         self.current_frame_idx = 0
-        timer_period = 1.0 / self.playbackFrameRate
+        timer_period = 1.0 / self.framerate
 
         self.playback_timer = self.create_timer(timer_period, self.publish_next_frame)
         self.get_logger().info(f'Streaming {len(q_interp)} frames at {self.framerate} Hz...')
