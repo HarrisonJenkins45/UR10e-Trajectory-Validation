@@ -6,11 +6,17 @@ from ur10e_interfaces.srv import ValidateTrajectory
 
 from ur10e_trajectory_pkg import frames
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
+from ur10e_trajectory_pkg.continuous_validator import validate_task_command
 from ur10e_trajectory_pkg.task_path import verify_task_path
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 # Module-level debug toggle (easier to find/flip than buried in __init__)
 SKIP_COLLISION = False         # bypass collision checking for debugging
+
+# Rate at which the service validates the motion BETWEEN waypoints before
+# playing: the same continuous checks run offline, on the exact path received.
+# 200 Hz matches the offline command-2 validation (about 11 s end to end).
+SERVICE_VALIDATION_HZ = 200.0
 
 # How far the MEASURED start may sit from the first solved configuration. The
 # task plays from that configuration with no transition, so a larger offset
@@ -88,6 +94,25 @@ def resolve_task_path(q_path_field, num_waypoints):
             f'q_path has {q_path.size} values; {num_waypoints} targets need '
             f'{num_waypoints * NUM_JOINTS} ({NUM_JOINTS} per target)')
     return q_path.reshape(num_waypoints, NUM_JOINTS)
+
+
+def continuous_failures(report):
+    """Human-readable reasons a continuous validation report did not pass."""
+    failures = []
+    if report.get('limit_violations'):
+        failures.append('limits exceeded on ' + ', '.join(sorted(report['limit_violations'])))
+    if report.get('position_limit_violations'):
+        failures.append('joint limits left between waypoints')
+    if report.get('collision', {}).get('collision_found'):
+        failures.append('collision between waypoints')
+    if not report.get('tracking', {}).get('within_tolerance', True):
+        failures.append('tool leaves the target path between waypoints')
+    if not report.get('conditioning_ok', True):
+        failures.append('arm conditioning above the gate')
+    status = report.get('conditioning', {}).get('twist_status')
+    if status not in (None, 'pass', 'not_applicable'):
+        failures.append(f'task twist {status}')
+    return failures
 
 
 def check_measured_start(validator, q_measured, first_configuration,
@@ -252,7 +277,19 @@ class TrajectoryValidationNode(Node):
                            + '; '.join(start_details['failures'])
                            + '. Run the warmup command first.')
             else:
-                is_valid = True
+                # The discrete checks see waypoints only. The motion between
+                # them -- interpolation overshoot, acceleration, jerk,
+                # collision, conditioning, alpha* -- is validated here on the
+                # exact path received, so nothing plays that was not
+                # continuously validated.
+                continuous = validate_task_command(
+                    self.validator, q_path, np.column_stack((ee_x, ee_y, ee_z)),
+                    ee_quat, dt_waypoint, rate_hz=SERVICE_VALIDATION_HZ)
+                is_valid = bool(continuous['passed'])
+                if not is_valid:
+                    message = ('Continuous validation of the joint path failed: '
+                               + '; '.join(continuous_failures(continuous)))
+            if is_valid:
                 segment = {'start_idx': 0, 'end_idx': num_waypts - 1,
                            'length': num_waypts, 'q_full': q_path}
                 q_dot_matrix, q_interp, _ = self.validator.process_task_segment(

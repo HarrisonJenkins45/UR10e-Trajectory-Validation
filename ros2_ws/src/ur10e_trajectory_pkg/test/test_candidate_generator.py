@@ -347,3 +347,46 @@ def test_continuation_only_adds_candidates(validator, trajectory):
     assert not any(r['mode'] == generator.CONTINUATION_MODE and r['waypoint_index'] == 0
                    for r in records), 'waypoint 0 has no previous waypoint to seed from'
 
+
+def test_continuation_does_not_accumulate_near_duplicates(validator, trajectory):
+    """Unmerged, every waypoint kept everything the previous one had plus its
+    own, growing by the whole independent count per layer. Merged, each layer
+    holds at most the ordinary candidates plus genuinely new ones."""
+    positions, quaternions = trajectory
+    without, _ = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=len(positions), continuation=False)
+    with_continuation, _ = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=len(positions), continuation=True)
+    for index in range(1, len(positions)):
+        ordinary = len(without[index])
+        assert len(with_continuation[index]) <= 2 * ordinary, (
+            f'layer {index}: {len(with_continuation[index])} candidates against '
+            f'{ordinary} ordinary')
+    only = [sum(1 for e in with_continuation[i]
+                if all(p['mode'] == generator.CONTINUATION_MODE for p in e['provenance']))
+            for i in range(1, len(positions))]
+    # Unmerged, continuation-only candidates grew by a whole layer's ordinary
+    # count per waypoint and soon exceeded it. Merged, they stay below it.
+    largest_ordinary = max(len(without[i]) for i in range(len(positions)))
+    assert max(only) <= largest_ordinary, (
+        f'continuation-only counts {only} exceed a layer of ordinary candidates '
+        f'({largest_ordinary})')
+
+
+def test_a_near_duplicate_result_merges_into_the_existing_candidate():
+    tolerance = generator.CONTINUATION_MERGE_TOLERANCE
+    base = generator.collect_candidates([
+        _record([0.1, -2.0, 1.0, -1.0, 0.5, 0.2], 1.5, waypoint_index=3)])
+    near = _record([0.1 + tolerance / 2, -2.0, 1.0, -1.0, 0.5, 0.2], 1.5,
+                   waypoint_index=3, mode=generator.CONTINUATION_MODE,
+                   seed_origin='waypoint2:candidate0')
+    far = _record([0.1 + 5 * tolerance, -2.0, 1.0, -1.0, 0.5, 0.2], 1.5,
+                  waypoint_index=3, mode=generator.CONTINUATION_MODE)
+    generator.attach_merged_provenance(base, [near, far])
+    provenance = base[3][0]['provenance']
+    assert [p['mode'] for p in provenance].count(generator.CONTINUATION_MODE) == 1
+    assert provenance[-1]['merged_within'] == tolerance
+    assert len(base[3]) == 1
+

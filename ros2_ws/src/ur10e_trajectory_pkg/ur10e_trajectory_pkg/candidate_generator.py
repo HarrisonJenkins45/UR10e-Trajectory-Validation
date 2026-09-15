@@ -173,41 +173,101 @@ def run_interaction(validator, targets, quaternions, arm_seeds):
 EXTRA_SEED_MODE = 'extra_seed'
 CONTINUATION_MODE = 'continuation'
 
+# Declared before any run with merging: a continuation result within this of
+# an existing candidate at the same waypoint -- wrapped radians on every arm
+# joint, metres on the rail -- is the same solution, not a new one. Far below
+# one step's velocity budget (0.1 m on the rail, at least 0.2 rad on the arm),
+# so merging cannot remove a reachable successor except at the very edge of
+# that budget.
+CONTINUATION_MERGE_TOLERANCE = 0.01
 
-def run_continuation(validator, targets, quaternions, base_records):
-    """Seed each waypoint from every candidate found at the previous one.
+
+def _vector(entry):
+    return np.concatenate(([entry['rail_position']], entry['q_arm_canonical']))
+
+
+def _within(a, b, tolerance):
+    return (abs(a[RAIL_INDEX] - b[RAIL_INDEX]) <= tolerance
+            and float(np.max(np.abs(np.angle(np.exp(1j * (a[ARM_SLICE] - b[ARM_SLICE]))))))
+            <= tolerance)
+
+
+def run_continuation(validator, targets, quaternions, base_records,
+                     tolerance=CONTINUATION_MERGE_TOLERANCE):
+    """Seed each waypoint from every distinct candidate at the previous one.
 
     Every other mode solves each waypoint independently, so a branch the
-    graph is following can go unfound at a single waypoint and disconnect the
-    graph. Measured at coupled_14: the only reachable branch had candidates at
-    355 and 357 but none at 356, and re-solving 356 from the branch returned
-    valid solutions every time. Seeding from the previous waypoint's
-    candidates re-solves every branch found there, so none can vanish for one
-    step.
+    graph was following could go unfound at one waypoint and disconnect it.
+    Measured at coupled_14: the only reachable branch had candidates at 355
+    and 357 but none at 356, and re-solving 356 from the branch returned valid
+    solutions every time.
 
-    Waypoints run in order and the seeds include what continuation itself
-    found, so a branch is carried forward as far as it stays solvable.
+    Results are MERGED. The rail makes the arm redundant, so re-solving from a
+    candidate lands a hair away from solutions already found, and exact
+    deduplication cannot merge them: unmerged, the count grew by the whole
+    independent count at every waypoint (49, 98, 159, ... 706 over 12 layers
+    at coupled_14; a median 0.0016 from an existing candidate, 92% within
+    0.01). A result within tolerance of an existing candidate is not a new
+    candidate; it is returned separately so its provenance can be attached to
+    the one it matches. Seeds come from the merged set, so growth is bounded
+    by the number of genuinely distinct solutions.
+
+    Returns (kept_records, merged_records).
     """
     by_waypoint = {}
     for record in base_records:
         by_waypoint.setdefault(record['waypoint_index'], []).append(record)
-    out = []
+    kept, merged = [], []
     previous = collect_candidates(by_waypoint.get(0, [])).get(0, [])
     for index in range(1, len(targets)):
-        records = []
+        existing = [_vector(e) for e in
+                    collect_candidates(by_waypoint.get(index, [])).get(index, [])]
+        kept_here = []
         for number, entry in enumerate(previous):
-            records += solve_one(
-                validator, targets[index], quaternions[index],
-                np.asarray(entry['q_arm_canonical'], dtype=float),
-                entry['rail_position'],
-                dict(mode=CONTINUATION_MODE, waypoint_index=index,
-                     entry_kind='continuation', arm_seed_number=number,
-                     rail_seed_number=None,
-                     seed_origin=f'waypoint{index - 1}:candidate{number}'))
-        out += records
+            for record in solve_one(
+                    validator, targets[index], quaternions[index],
+                    np.asarray(entry['q_arm_canonical'], dtype=float),
+                    entry['rail_position'],
+                    dict(mode=CONTINUATION_MODE, waypoint_index=index,
+                         entry_kind='continuation', arm_seed_number=number,
+                         rail_seed_number=None,
+                         seed_origin=f'waypoint{index - 1}:candidate{number}')):
+                if not record['accepted']:
+                    kept_here.append(record)
+                    continue
+                vector = np.concatenate(([record['rail_position']],
+                                         record['q_arm_canonical']))
+                if any(_within(vector, other, tolerance) for other in existing):
+                    merged.append(record)
+                else:
+                    existing.append(vector)
+                    kept_here.append(record)
+        kept += kept_here
         previous = collect_candidates(
-            by_waypoint.get(index, []) + records).get(index, [])
-    return out
+            by_waypoint.get(index, []) + kept_here).get(index, [])
+    return kept, merged
+
+
+def attach_merged_provenance(candidates, merged_records,
+                             tolerance=CONTINUATION_MERGE_TOLERANCE):
+    """Record merged continuation results on the candidate each one matched."""
+    for record in merged_records:
+        entries = candidates.get(record['waypoint_index'], [])
+        vector = np.concatenate(([record['rail_position']], record['q_arm_canonical']))
+        matches = [e for e in entries if _within(vector, _vector(e), tolerance)]
+        if not matches:
+            continue
+        nearest = min(matches, key=lambda e: float(np.max(np.abs(
+            np.angle(np.exp(1j * (vector - _vector(e))))))))
+        nearest['provenance'].append({
+            'mode': CONTINUATION_MODE, 'merged_within': tolerance,
+            'seed_origin': record.get('seed_origin'),
+            'attempt': record['attempt'],
+            'solver_iterations': record['solver_iterations'],
+            'arm_seed_number': record.get('arm_seed_number'),
+            'rail_seed_number': None, 'rail_seed': record.get('rail_seed'),
+        })
+    return candidates
 
 
 def run_extra_seeds(validator, targets, quaternions, extra_seeds):
@@ -252,9 +312,12 @@ def generate_layers(validator, targets, quaternions, dt, q_start,
     records += run_interaction(validator, targets, quaternions, arm_seeds)
     if extra_seeds:
         records += run_extra_seeds(validator, targets, quaternions, extra_seeds)
+    merged = []
     if continuation:
-        records += run_continuation(validator, targets, quaternions, records)
-    return collect_candidates(records), records
+        kept, merged = run_continuation(validator, targets, quaternions, records)
+        records += kept
+    candidates = attach_merged_provenance(collect_candidates(records), merged)
+    return candidates, records + merged
 
 
 def only_from_extra_seeds(entries):
@@ -377,10 +440,12 @@ def main(argv=None):
     if 'interaction' in modes:
         records += run_interaction(validator, targets, quaternions, arm_seeds)
 
+    merged = []
     if not args.no_continuation:
-        records += run_continuation(validator, targets, quaternions, records)
+        kept, merged = run_continuation(validator, targets, quaternions, records)
+        records += kept
         modes = modes + [CONTINUATION_MODE]
-    candidates = collect_candidates(records)
+    candidates = attach_merged_provenance(collect_candidates(records), merged)
     document = {
         'schema_version': SCHEMA_VERSION,
         'environment': environment.describe(),
@@ -389,6 +454,9 @@ def main(argv=None):
             rail_grid_m=list(RAIL_GRID_M),
             upstream_arm_seed_deg=list(UPSTREAM_ARM_SEED_DEG),
             dedup_decimals=DEDUP_DECIMALS,
+            continuation_merge_tolerance=(None if args.no_continuation
+                                          else CONTINUATION_MERGE_TOLERANCE),
+            continuation_merged_results=len(merged),
             rail_seed_source='corrected tracking path, per waypoint',
         ),
         'num_waypoints': len(targets),

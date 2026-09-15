@@ -84,3 +84,25 @@ def test_the_request_must_carry_the_joint_path():
     with pytest.raises(ValueError, match='need 70'):
         server.resolve_task_path([0.0] * 69, 10)
     assert server.resolve_task_path([0.0] * 70, 10).shape == (10, 7)
+
+
+def test_a_continuous_failure_is_explained_not_just_refused():
+    """The service refuses a path whose motion between waypoints fails, and
+    says why, so the caller can tell a collision from a limit or a twist."""
+    passing = {'limit_violations': {}, 'position_limit_violations': [],
+               'collision': {'collision_found': False},
+               'tracking': {'within_tolerance': True}, 'conditioning_ok': True,
+               'conditioning': {'twist_status': 'pass'}}
+    assert server.continuous_failures(passing) == []
+    failing = dict(passing, limit_violations={'wrist_1_joint': {}},
+                   collision={'collision_found': True},
+                   conditioning={'twist_status': 'fail'})
+    reasons = server.continuous_failures(failing)
+    assert 'limits exceeded on wrist_1_joint' in reasons
+    assert 'collision between waypoints' in reasons
+    assert 'task twist fail' in reasons
+
+
+def test_the_service_validates_continuously_at_the_offline_rate():
+    assert server.SERVICE_VALIDATION_HZ == 200.0
+
