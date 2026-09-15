@@ -171,6 +171,43 @@ def run_interaction(validator, targets, quaternions, arm_seeds):
 
 
 EXTRA_SEED_MODE = 'extra_seed'
+CONTINUATION_MODE = 'continuation'
+
+
+def run_continuation(validator, targets, quaternions, base_records):
+    """Seed each waypoint from every candidate found at the previous one.
+
+    Every other mode solves each waypoint independently, so a branch the
+    graph is following can go unfound at a single waypoint and disconnect the
+    graph. Measured at coupled_14: the only reachable branch had candidates at
+    355 and 357 but none at 356, and re-solving 356 from the branch returned
+    valid solutions every time. Seeding from the previous waypoint's
+    candidates re-solves every branch found there, so none can vanish for one
+    step.
+
+    Waypoints run in order and the seeds include what continuation itself
+    found, so a branch is carried forward as far as it stays solvable.
+    """
+    by_waypoint = {}
+    for record in base_records:
+        by_waypoint.setdefault(record['waypoint_index'], []).append(record)
+    out = []
+    previous = collect_candidates(by_waypoint.get(0, [])).get(0, [])
+    for index in range(1, len(targets)):
+        records = []
+        for number, entry in enumerate(previous):
+            records += solve_one(
+                validator, targets[index], quaternions[index],
+                np.asarray(entry['q_arm_canonical'], dtype=float),
+                entry['rail_position'],
+                dict(mode=CONTINUATION_MODE, waypoint_index=index,
+                     entry_kind='continuation', arm_seed_number=number,
+                     rail_seed_number=None,
+                     seed_origin=f'waypoint{index - 1}:candidate{number}'))
+        out += records
+        previous = collect_candidates(
+            by_waypoint.get(index, []) + records).get(index, [])
+    return out
 
 
 def run_extra_seeds(validator, targets, quaternions, extra_seeds):
@@ -196,7 +233,7 @@ def run_extra_seeds(validator, targets, quaternions, extra_seeds):
 
 
 def generate_layers(validator, targets, quaternions, dt, q_start,
-                    num_layers=3, extra_seeds=None):
+                    num_layers=3, extra_seeds=None, continuation=True):
     """Candidates for the first num_layers waypoints of one placement.
 
     The same three modes as the full generator, restricted to a prefix. The
@@ -215,6 +252,8 @@ def generate_layers(validator, targets, quaternions, dt, q_start,
     records += run_interaction(validator, targets, quaternions, arm_seeds)
     if extra_seeds:
         records += run_extra_seeds(validator, targets, quaternions, extra_seeds)
+    if continuation:
+        records += run_continuation(validator, targets, quaternions, records)
     return collect_candidates(records), records
 
 
@@ -304,6 +343,9 @@ def main(argv=None):
                         help='prepend a spin-up so the task starts from rest')
     parser.add_argument('--placement', default='nominal',
                         help='envelope placement to generate candidates at')
+    parser.add_argument('--no-continuation', action='store_true',
+                        help='skip seeding each waypoint from the previous '
+                             "waypoint's candidates (for comparison only)")
     parser.add_argument('--out', default='candidates.json')
     parser.add_argument('--modes',
                         default='arm_isolation,rail_isolation,interaction')
@@ -335,6 +377,9 @@ def main(argv=None):
     if 'interaction' in modes:
         records += run_interaction(validator, targets, quaternions, arm_seeds)
 
+    if not args.no_continuation:
+        records += run_continuation(validator, targets, quaternions, records)
+        modes = modes + [CONTINUATION_MODE]
     candidates = collect_candidates(records)
     document = {
         'schema_version': SCHEMA_VERSION,

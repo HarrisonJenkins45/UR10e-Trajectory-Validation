@@ -297,3 +297,53 @@ def test_only_from_extra_seeds_reads_provenance():
     ]
     assert generator.only_from_extra_seeds(entries) == [entries[0]]
 
+
+# --------------------------------------------------------------------------
+# Continuation seeding
+# --------------------------------------------------------------------------
+
+def _near(a, b, tolerance=0.3):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    return (abs(a[0] - b[0]) <= tolerance
+            and np.max(np.abs(np.angle(np.exp(1j * (a[1:] - b[1:]))))) <= tolerance)
+
+
+def _configuration(entry):
+    return [entry['rail_position'], *entry['q_arm_canonical']]
+
+
+def test_continuation_carries_every_branch_to_the_next_waypoint(validator, trajectory):
+    """Independent per-waypoint seeding can miss a branch for one step and cut
+    the graph. With continuation, every candidate at waypoint i-1 has a
+    candidate near it at waypoint i on this smooth arc."""
+    positions, quaternions = trajectory
+    candidates, records = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=len(positions), continuation=True)
+    assert any(r['mode'] == generator.CONTINUATION_MODE for r in records)
+    for index in range(1, len(positions)):
+        for entry in candidates[index - 1]:
+            assert any(_near(_configuration(entry), _configuration(other))
+                       for other in candidates[index]), (
+                f'a branch at waypoint {index - 1} has no continuation at {index}')
+
+
+def test_continuation_only_adds_candidates(validator, trajectory):
+    positions, quaternions = trajectory
+    without, _ = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=3, continuation=False)
+    with_continuation, records = generator.generate_layers(
+        validator, positions, quaternions, 0.1, LEGACY_MATLAB_START_Q,
+        num_layers=3, continuation=True)
+    for index in range(3):
+        keys = {generator.candidate_key({'q_arm_canonical': e['q_arm_canonical'],
+                                         'rail_position': e['rail_position']})
+                for e in with_continuation[index]}
+        for entry in without[index]:
+            assert generator.candidate_key(
+                {'q_arm_canonical': entry['q_arm_canonical'],
+                 'rail_position': entry['rail_position']}) in keys
+    assert not any(r['mode'] == generator.CONTINUATION_MODE and r['waypoint_index'] == 0
+                   for r in records), 'waypoint 0 has no previous waypoint to seed from'
+
