@@ -9,10 +9,13 @@ HOME_CRITERIA:
 
   must pass, all of them
     static gates     clearance of ARM links to the environment >= 0.02 m,
-                     joint-limit fraction >= 0.05, not in collision
+                     joint-limit fraction >= 0.05, posture margin >= 0.02,
+                     not in collision
     singularity      arm condition <= 50, the task gate, across a +/-5 deg
                      neighbourhood: each arm joint alone at +/-5 deg, plus 64
-                     random +/-5 deg samples from a fixed seed
+                     random +/-5 deg samples from a fixed seed. A random sample's
+                     worst is a lower bound, so a chosen home above about 40
+                     is confirmed with a dense +/-5 deg sample first
     coverage         across all 29 envelope placements of the spin-up
                      trajectory, a direct collision-free warmup to every IK
                      family: connectivity 1.0 and family fraction 1.0. If no
@@ -59,7 +62,8 @@ SCHEMA_VERSION = 1
 REFINED_CANDIDATES = (70, 24, 67, 68)
 HOME_CRITERIA = (
     'Fixed before any candidate was evaluated. Must pass: static gates with '
-    'clearance on arm links only (>= 0.02 m) and joint-limit fraction >= 0.05; '
+    'clearance on arm links only (>= 0.02 m), joint-limit fraction >= 0.05 and '
+    'posture margin >= 0.02; '
     'arm condition <= 50 across +/-5 deg (each arm joint alone plus 64 random '
     'samples, fixed seed); coverage of all 29 spin-up placements with '
     'connectivity 1.0 and family fraction 1.0 (else best coverage, shortfall '
