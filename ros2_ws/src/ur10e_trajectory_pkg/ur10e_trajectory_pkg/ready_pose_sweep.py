@@ -629,6 +629,26 @@ def approach_collides(validator, position, step_bounds=None, counter=None,
     return collides
 
 
+def approach_self_clearance(validator, position, step_bounds=None):
+    """Worst non-adjacent self-clearance along an approach.
+
+    At the same instants approach_collides queries, so an approach is judged
+    on one sampling. The boolean test flickers on a grazing pair; this
+    reports how close the approach actually comes, which is what the floor
+    is stated against.
+    """
+    position = np.asarray(position, dtype=float)
+    indices = (np.array([0]) if len(position) < 2
+               else collision_check_indices(position, step_bounds))
+    worst, links, at = np.inf, None, None
+    for index in indices:
+        result = validator.self_clearance(position[index])
+        if result['distance_m'] < worst:
+            worst, links, at = result['distance_m'], result['links'], int(index)
+    return {'min_distance_m': float(worst), 'links': links, 'at_sample': at,
+            'samples': int(len(indices))}
+
+
 # Largest arm step between consecutive prefix layers that can be a genuine
 # motion rather than an unlifted wrap. Half a turn in one 0.1 s layer is
 # 31 rad/s, far beyond any joint's limit.
@@ -745,6 +765,7 @@ def destination_lifts(validator, target, ready, velocity_limits, duration):
 REASON_NO_DURATION = 'no_duration'
 REASON_JOINT_LIMITS = 'joint_limits'
 REASON_COLLISION = 'collision'
+REASON_SELF_CLEARANCE = 'self_clearance'
 
 
 def binding_limit(velocity, acceleration, velocity_limits, acceleration_limits,
@@ -782,10 +803,15 @@ def evaluate_approach(validator, ready, target, entry_velocity,
                       entry_acceleration, velocity_limits,
                       acceleration_limits, jerk_references=JERK_REFERENCES_RAD_S3,
                       step_bounds=None, collision_counter=None,
-                      duration=None, duration_lower=0.2, limit_statuses=None):
+                      duration=None, duration_lower=0.2, limit_statuses=None,
+                      min_self_clearance_m=None):
     """One ready pose to one layer-0 candidate, under the standard retiming.
 
-    Feasibility here means velocity, acceleration, collision and joint limits.
+    Feasibility here means velocity, acceleration, collision, self-clearance
+    and joint limits. The self-clearance floor applies along the approach,
+    not only at its ends: a home and a target that both clear the floor can
+    still pass close through it.
+
     Jerk is measured and reported against several references, never used to
     reject: the limit is assumed, with no published UR figure behind it, so
     rejecting on it would invent infeasibility.
@@ -827,12 +853,22 @@ def evaluate_approach(validator, ready, target, entry_velocity,
     # stride. A broadly sampled ready pose can be most of a joint range away
     # from its target, and 40 samples over a large move can step straight
     # through an obstacle.
+    if min_self_clearance_m is None:
+        min_self_clearance_m = motion_limits.SELF_CLEARANCE_FLOOR_M
     stats = {}
     if approach_collides(validator, position, step_bounds,
                          counter=collision_counter, stats=stats):
         return dict({'feasible': False, 'reason_code': REASON_COLLISION,
                      'reason': 'direct quintic collides; a collision-free '
                                'approach may still exist around the obstacle',
+                     'duration_s': duration}, **stats)
+
+    self_clearance = approach_self_clearance(validator, position, step_bounds)
+    if self_clearance['min_distance_m'] < min_self_clearance_m:
+        return dict({'feasible': False, 'reason_code': REASON_SELF_CLEARANCE,
+                     'reason': 'approach passes within the self-clearance '
+                               'floor of %.3f m' % min_self_clearance_m,
+                     'self_clearance': self_clearance,
                      'duration_s': duration}, **stats)
 
     peak_jerk = np.max(np.abs(jerk), axis=0)
@@ -858,6 +894,7 @@ def evaluate_approach(validator, ready, target, entry_velocity,
             for reference in jerk_references
         },
         'binding': binding,
+        'self_clearance': self_clearance,
         'matches_entry_state': True,     # by construction of the quintic
     }, **stats)
 

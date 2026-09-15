@@ -227,13 +227,18 @@ def test_collision_is_checked_in_duration_order_and_stops_at_first_feasible(
 
     branch = result['branches'][0]
     counts = result['counts']
-    assert len(seen) == 2
-    assert seen[0] <= seen[1]
+    # Checking stops at the first feasible alternative, however many
+    # infeasible ones precede it: here the injected collision, then a real
+    # approach that dips below the self-clearance floor.
+    assert len(seen) >= 2
+    assert seen == sorted(seen)
     assert branch['connected'] is True
-    assert branch['duration_s'] == pytest.approx(seen[1])
+    assert branch['duration_s'] == pytest.approx(seen[-1])
     # Pre-collision rejections (joint limits, duration) are listed too; only
     # one alternative reached the collision check and failed there.
     assert branch['failure_breakdown'].get(sweep.REASON_COLLISION) == 1
+    assert (branch['failure_breakdown'].get(sweep.REASON_SELF_CLEARANCE, 0)
+            == len(seen) - 2)
     # Every alternative is accounted for exactly once.
     assert branch['alternatives'] == (branch['collision_checked']
                                       + branch['rejected_before_collision']

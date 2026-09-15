@@ -93,6 +93,33 @@ def test_a_grazing_warmup_fails_validation(validator, compact, monkeypatch):
     assert report['self_clearance']['passed'] is False and report['passed'] is False
 
 
+def test_an_approach_passing_close_is_infeasible(validator, compact, monkeypatch):
+    """The home and the target can both clear the floor while the approach
+    between them does not, which is what the coverage sweep judges."""
+    target = compact + np.concatenate(([0.3], np.deg2rad([15.0, -10.0, 10.0, 5.0, 10.0, 20.0])))
+    limits = validator.velocity_limits
+    accelerations = np.full(len(limits), 1.0)
+    zeros = np.zeros(len(limits))
+    clear = sweep.evaluate_approach(validator, compact, target, zeros, zeros,
+                                    limits, accelerations)
+    assert clear['feasible'] is True
+    assert clear['self_clearance']['min_distance_m'] >= motion_limits.SELF_CLEARANCE_FLOOR_M
+
+    calls = {'n': 0}
+
+    def grazing(q, max_distance=0.05):
+        calls['n'] += 1
+        return {'distance_m': 0.05 if calls['n'] < 3 else 0.007,
+                'links': ('forearm_link', 'wrist_2_link')}
+
+    monkeypatch.setattr(validator, 'self_clearance', grazing)
+    graze = sweep.evaluate_approach(validator, compact, target, zeros, zeros,
+                                    limits, accelerations)
+    assert graze['feasible'] is False
+    assert graze['reason_code'] == sweep.REASON_SELF_CLEARANCE
+    assert graze['self_clearance']['min_distance_m'] == 0.007
+
+
 def test_graph_candidates_are_filtered_by_condition_and_self_clearance(tmp_path, validator,
                                                                        compact, monkeypatch):
     document = {'candidates': {'0': [
