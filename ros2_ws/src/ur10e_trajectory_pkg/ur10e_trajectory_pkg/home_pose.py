@@ -303,23 +303,34 @@ def main(argv=None):
 
     # commands: winding, warmup, and both validations for the chosen home
     from ur10e_trajectory_pkg import continuous_validator
-    from ur10e_trajectory_pkg.failure_census import load_trajectory
+    from ur10e_trajectory_pkg.failure_census import load_trajectory, placement_RG_for
 
     choice = _load(args.choice)
     graph = _load(args.graph)
     home = np.asarray(choice['chosen']['configuration'], dtype=float)
     best, summary = choose_start_winding(validator, home, graph['path'])
     document = {'schema_version': SCHEMA_VERSION, 'home': home.tolist(),
-                'graph': args.graph, 'winding_options': summary}
+                'graph': args.graph, 'placement': graph.get('placement', 'nominal'),
+                'winding_options': summary}
     if best is None:
         document['status'] = 'no valid warmup to any legal winding of the start'
         _dump(document, args.out)
         print(document['status'])
         return 1
     spin_up = graph.get('spin_up')
-    targets, quaternions, dt, _ = load_trajectory(
+    # Targets at the placement the graph was planned for, so a non-nominal
+    # placement is validated against its own targets, not nominal's.
+    placement = graph.get('placement', 'nominal')
+    targets, quaternions, dt, metadata = load_trajectory(
         None, graph['recorded_waypoints'], with_metadata=True,
-        spin_up_s=None if spin_up is None else spin_up['requested_duration_s'])
+        spin_up_s=None if spin_up is None else spin_up['requested_duration_s'],
+        placement_RG=None if placement == 'nominal' else placement_RG_for(placement))
+    if 'placement_RG' in graph and not np.allclose(
+            graph['placement_RG'], metadata['placement_RG'], atol=1e-9):
+        document['status'] = f'targets do not match the graph placement {placement!r}'
+        _dump(document, args.out)
+        print(document['status'])
+        return 1
     warmup_report = continuous_validator.validate_warmup(validator, best['warmup'])
     task_report = continuous_validator.validate_task_command(
         validator, best['path'], targets, quaternions, dt, rate_hz=args.rate)
