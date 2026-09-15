@@ -574,7 +574,11 @@ def evaluate_ready_pose(validator, ready, placement, meter,
                 candidate_index=alternative['candidate_index'],
                 winding=alternative['winding'],
                 collision_achieved_step=result.get('collision_achieved_step'),
-                binding=result.get('binding'))
+                binding=result.get('binding'),
+                # How close the accepted approach comes to the floor, so the
+                # margin can be read off rather than assumed from the fact
+                # that it passed.
+                self_clearance=result.get('self_clearance'))
         branches.append(branch)
 
     classification = sweep.classify(placement['valid'], all_outcomes)
