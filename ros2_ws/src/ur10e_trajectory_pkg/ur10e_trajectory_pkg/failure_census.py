@@ -393,7 +393,7 @@ def main(argv=None):
     return 0
 
 
-def load_trajectory(csv_path, num_waypoints, with_metadata=False):
+def load_trajectory(csv_path, num_waypoints, with_metadata=False, spin_up_s=None):
     """Targets exactly as the service receives them.
 
     Delegates to the client's own builder rather than rebuilding the
@@ -409,7 +409,7 @@ def load_trajectory(csv_path, num_waypoints, with_metadata=False):
 
     result = build_trajectory_targets(
         csv_path or DEFAULT_CSV_PATH, num_waypoints,
-        return_metadata=with_metadata)
+        return_metadata=with_metadata, spin_up_s=spin_up_s)
     if with_metadata:
         (x, y, z, quaternions, times), metadata = result
         return (np.column_stack((x, y, z)), quaternions,

@@ -126,6 +126,80 @@ DEFAULT_NUM_WAYPOINTS = 500
 TARGET_BOUND_M = 1.0
 
 
+# Profile of the spin-up prepended to the recorded motion. The recording starts
+# at full tumble rate, so without a spin-up the task begins moving and the arm
+# must already be moving to match it. Recorded time is warped as
+#
+#     tau(t) = t^3 / T^2 - t^4 / (2 T^3)   for 0 <= t <= T
+#     tau(t) = t - T / 2                   for t >= T
+#
+# so the playback rate tau'(t) = 3 s^2 - 2 s^3 (s = t / T) rises from 0 to 1
+# with zero rate AND zero rate-of-change at t = 0, and joins the recording
+# with rate 1 and zero rate-of-change at t = T. The first pose is the recorded
+# first pose, held at rest; every recorded pose is reproduced after T.
+SPIN_UP_PROFILE = 'smoothstep playback rate: tau(t) = t^3/T^2 - t^4/(2 T^3)'
+
+
+def spin_up_recorded_time(times, duration):
+    """Recorded time tau(t) for output times t under a spin-up of length duration."""
+    times = np.asarray(times, dtype=float)
+    T = float(duration)
+    ramp = times ** 3 / T ** 2 - times ** 4 / (2.0 * T ** 3)
+    return np.where(times <= T, ramp, times - T / 2.0)
+
+
+def apply_spin_up(motion, recorded_times, duration):
+    """Resample a relative motion so it starts from rest.
+
+    duration is rounded UP to a multiple of twice the recorded step, so the
+    join at T maps onto a recorded sample and only the spin-up itself is
+    interpolated (rotation by SLERP, translation linearly). All recorded motion
+    is kept; the output is T / 2 longer than the recording.
+
+    Returns (motion, output_times, record).
+    """
+    from scipy.spatial.transform import Rotation, Slerp
+
+    recorded_times = np.asarray(recorded_times, dtype=float)
+    steps = np.diff(recorded_times)
+    step = float(steps[0])
+    if not np.allclose(steps, step, atol=1e-9):
+        raise ValueError('spin-up needs uniformly sampled recorded times')
+    half_samples = int(np.ceil(float(duration) / (2.0 * step) - 1e-9))
+    T = 2.0 * half_samples * step
+    if T <= 0.0:
+        raise ValueError('spin-up duration must be positive')
+
+    count = len(recorded_times) + half_samples
+    output_times = recorded_times[0] + np.arange(count) * step
+    tau = recorded_times[0] + spin_up_recorded_time(output_times - recorded_times[0], T)
+    tau = np.clip(tau, recorded_times[0], recorded_times[-1])
+
+    motion = np.asarray(motion, dtype=float)
+    rotations = Rotation.from_matrix(motion[:, :3, :3])
+    warped = np.tile(np.eye(4), (count, 1, 1))
+    warped[:, :3, :3] = Slerp(recorded_times, rotations)(tau).as_matrix()
+    for axis in range(3):
+        warped[:, axis, 3] = np.interp(tau, recorded_times, motion[:, axis, 3])
+    # After the join every output sample IS a recorded sample; copy them so no
+    # interpolation round-off touches the reproduced motion.
+    warped[2 * half_samples:] = motion[half_samples:]
+
+    rates = np.linalg.norm(
+        (rotations[1:] * rotations[:-1].inv()).as_rotvec(), axis=1) / step
+    record = {
+        'duration_s': T,
+        'requested_duration_s': float(duration),
+        'profile': SPIN_UP_PROFILE,
+        'recorded_time_consumed_s': T / 2.0,
+        'samples_added': half_samples,
+        'recorded_start_rate_rad_s': float(rates[0]),
+        'peak_spin_up_angular_acceleration_rad_s2': float(rates[0] * 1.5 / T),
+        'task_starts_at_rest': True,
+    }
+    return warped, output_times, record
+
+
 def legacy_placement(first_quaternion):
     """The placement the old pipeline implied, stated outright.
 
@@ -140,7 +214,7 @@ def legacy_placement(first_quaternion):
 def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
                              num_waypoints=DEFAULT_NUM_WAYPOINTS,
                              placement_RG=None, bound_m=TARGET_BOUND_M,
-                             return_metadata=False):
+                             return_metadata=False, spin_up_s=None):
     """End-effector targets in the RAIL-BASE frame, per the frame contract.
 
     Reproduces relative motion, then places it:
@@ -153,6 +227,11 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
 
     Extracted from main() so diagnostics measure the same targets the service
     is sent. Returns (x, y, z, quaternions, times).
+
+    spin_up_s, when given, prepends a spin-up (apply_spin_up) so the task
+    starts from rest; num_waypoints then counts RECORDED samples, and the
+    output is longer by the samples the spin-up adds. Off by default, so
+    every existing baseline is unchanged.
     """
     frame = pd.read_csv(csv_path)
     quaternions_I = frame[['q_I_G_x', 'q_I_G_y', 'q_I_G_z', 'q_I_G_w']].to_numpy(
@@ -167,6 +246,9 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
 
     poses_I = frames.poses_from_positions_quaternions(positions_I, quaternions_I)
     motion = frames.relative_motion(poses_I)
+    spin_up = None
+    if spin_up_s is not None:
+        motion, sim_time, spin_up = apply_spin_up(motion, sim_time, spin_up_s)
 
     is_legacy = placement_RG is None
     if is_legacy:
@@ -192,6 +274,8 @@ def build_trajectory_targets(csv_path=DEFAULT_CSV_PATH,
         'bound_m': None if bound_m is None else float(bound_m),
         'translation_scale_factor': float(factor),
         'target_frame': frames.TARGET_FRAME,
+        'spin_up': spin_up,
+        'num_samples': int(len(sim_time)),
     }
 
 

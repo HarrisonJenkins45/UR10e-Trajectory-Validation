@@ -102,6 +102,25 @@ def state_key(configuration):
 
 def path_cost(q_start, path, velocity_limits, dt,
               transition_seconds=TRANSITION_SECONDS):
+    """q_start None means a free start: the path's own first state, no
+    transition edge charged."""
+    if q_start is None:
+        return (_path_cost_from(path[0], path[1:], velocity_limits, dt)
+                if len(path) > 1 else 0.0)
+    return _path_cost_fixed(q_start, path, velocity_limits, dt,
+                            transition_seconds)
+
+
+def _path_cost_from(start, path, velocity_limits, dt):
+    total, previous = 0.0, np.asarray(start, dtype=float)
+    for configuration in path:
+        total += edge_cost(previous, configuration, velocity_limits, dt)
+        previous = np.asarray(configuration, dtype=float)
+    return total
+
+
+def _path_cost_fixed(q_start, path, velocity_limits, dt,
+                     transition_seconds=TRANSITION_SECONDS):
     """Total edge cost of a path under the graph's own cost function.
 
     What makes a greedy path and a graph path comparable: the same limits and
@@ -206,19 +225,62 @@ class LayeredGraph:
                                       self.velocity_limits, dt)))
         return out
 
-    def shortest_path(self, q_start):
+    def start_states(self, lifts=False):
+        """Every layer-0 candidate as a start, optionally in every legal winding.
+
+        Canonical only by default. Each winding of a start is a distinct graph
+        state all the way down, so including them all can multiply the
+        frontier by the number of lifts (up to 2 per periodic arm joint).
+        """
+        from itertools import product
+
+        from ur10e_trajectory_pkg.joint_coordinates import feasible_lifts
+
+        states = []
+        for candidate in self.candidates[0]:
+            candidate = np.asarray(candidate, dtype=float)
+            if not lifts:
+                states.append(candidate)
+                continue
+            options = [feasible_lifts(value, self.limits[0][ARM_SLICE][i],
+                                      self.limits[1][ARM_SLICE][i],
+                                      PERIODIC_JOINTS[ARM_SLICE][i])
+                       for i, value in enumerate(candidate[ARM_SLICE])]
+            for arm in product(*options):
+                states.append(np.concatenate(([candidate[RAIL_INDEX]], arm)))
+        return states
+
+    def shortest_path(self, q_start=None, start_lifts=False):
         """Dynamic programming over the layered DAG.
 
         Edges only ever go from layer i to i+1, so one sweep per layer keeping
         the best cost per state is exact. Only the current frontier is held,
         which bounds memory regardless of depth.
-        """
-        frontier = {state_key(q_start): (0.0, np.asarray(q_start, float), None)}
-        history = [frontier]
-        first_empty = None
 
-        for layer in range(self.num_layers):
-            dt = self.transition_seconds if layer == 0 else self.dt
+        q_start None is a FREE start: a common source connects to every
+        layer-0 candidate at zero cost, so the planner chooses where the task
+        begins, and the path's first state is that choice. The arm is brought
+        there by a separate warmup command, so no transition edge exists and
+        the path has num_layers states. With a q_start, the path begins there
+        and the first edge is the transition, as before.
+        """
+        first_empty = None
+        if q_start is None:
+            frontier = {}
+            for state in self.start_states(start_lifts):
+                frontier.setdefault(state_key(state), (0.0, state, None))
+            self.counters['start_states'] = len(frontier)
+            history = [frontier]
+            if not frontier:
+                return None, 0, history
+            layers = range(1, self.num_layers)
+        else:
+            frontier = {state_key(q_start): (0.0, np.asarray(q_start, float), None)}
+            history = [frontier]
+            layers = range(self.num_layers)
+
+        for layer in layers:
+            dt = self.transition_seconds if (layer == 0 and q_start is not None) else self.dt
             nxt = {}
             for _, (cost, configuration, _) in frontier.items():
                 for successor, step in self.successors(configuration, layer, dt):
@@ -278,10 +340,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidates', required=True)
     parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
-    parser.add_argument('--layers', type=int, default=500)
+    parser.add_argument('--layers', type=int, default=500,
+                        help='RECORDED waypoints; a spin-up adds samples')
     parser.add_argument('--build', choices=['validation', 'generator'],
                         default='validation')
     parser.add_argument('--out', default='graph.json')
+    parser.add_argument('--start', choices=['legacy', 'free'], default='legacy',
+                        help='legacy: from LEGACY_MATLAB_START_Q through a '
+                             'transition edge; free: the planner chooses the '
+                             'first-waypoint candidate')
+    parser.add_argument('--start-lifts', action='store_true',
+                        help='free start in every legal winding, not only '
+                             'canonical')
+    parser.add_argument('--spin-up-s', type=float, default=None,
+                        help='spin-up the candidates were generated with')
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
@@ -295,10 +367,17 @@ def main(argv=None):
 
     mesh_path = get_package_share_directory('ur_description')
     validator = _validator(args.urdf, mesh_path)
-    targets, quaternions, dt, _ = load_trajectory(None, args.layers,
-                                                  with_metadata=True)
-    layers, _ = load_candidates(args.candidates, args.layers,
-                                include_oracle=False)
+    targets, quaternions, dt, trajectory_metadata = load_trajectory(
+        None, args.layers, with_metadata=True, spin_up_s=args.spin_up_s)
+    num_layers = len(targets)
+    layers, candidates_document = load_candidates(args.candidates, num_layers,
+                                                  include_oracle=False)
+    if candidates_document.get('num_waypoints') != num_layers:
+        print(f"candidates cover {candidates_document.get('num_waypoints')} "
+              f'waypoints but this trajectory has {num_layers}; generate them '
+              'with the same --waypoints and --spin-up-s')
+        return 1
+    q_start = LEGACY_MATLAB_START_Q if args.start == 'legacy' else None
 
     reference_cost = None
     if args.build == 'validation':
@@ -308,28 +387,36 @@ def main(argv=None):
         for record in records:
             if record['accepted']:
                 committed.setdefault(record['waypoint_index'], record['q_full'])
-        oracle = [committed.get(index) for index in range(args.layers)]
+        oracle = [committed.get(index) for index in range(num_layers)]
         if any(step is None for step in oracle):
             print('greedy tracking does not cover every layer; '
                   'the validation build needs a complete reference')
             return 1
         layers = inject_oracle(layers, oracle)
 
-    graph = LayeredGraph(validator, layers, args.layers, dt=dt)
+    graph = LayeredGraph(validator, layers, num_layers, dt=dt)
     if args.build == 'validation':
-        reference_cost = path_cost(LEGACY_MATLAB_START_Q, oracle,
-                                   graph.velocity_limits, dt)
-    result, first_empty, _ = graph.shortest_path(LEGACY_MATLAB_START_Q)
+        reference_cost = path_cost(q_start, oracle, graph.velocity_limits, dt)
+    result, first_empty, _ = graph.shortest_path(q_start,
+                                                 start_lifts=args.start_lifts)
 
     document = {
         'schema_version': SCHEMA_VERSION,
         'environment': environment.describe(),
         'build': args.build,
-        'layers': args.layers,
+        'layers': num_layers,
+        'recorded_waypoints': args.layers,
+        'spin_up': trajectory_metadata.get('spin_up'),
+        'start_mode': args.start,
+        'start_lifts': args.start_lifts,
+        'q_start': None if q_start is None else np.asarray(q_start).tolist(),
+        'chosen_start': (None if result is None
+                         else np.asarray(result[0][0]).tolist()),
         'counters': graph.counters,
         'velocity_limits': motion_limits.effective_limits(validator),
         'edge_velocity_limits': graph.velocity_limits.tolist(),
-        'transition_seconds': graph.transition_seconds,
+        'transition_seconds': (graph.transition_seconds if q_start is not None
+                               else None),
         'greedy_reference_cost': reference_cost,
         'complete_path': result is not None,
         'first_disconnected_layer': first_empty,
@@ -344,6 +431,7 @@ def main(argv=None):
         print(f'first disconnected layer: {first_empty}')
     else:
         print(f'path cost: {result[1]:.4f} over {len(result[0])} states')
+        print(f'start ({args.start}): {np.round(result[0][0], 4).tolist()}')
     if reference_cost is not None:
         print(f'greedy tracker cost, same function: {reference_cost:.4f}')
     for name, value in graph.counters.items():

@@ -298,7 +298,10 @@ def summarise(candidates, records, num_waypoints):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
-    parser.add_argument('--waypoints', type=int, default=500)
+    parser.add_argument('--waypoints', type=int, default=500,
+                        help='RECORDED waypoints; a spin-up adds samples')
+    parser.add_argument('--spin-up-s', type=float, default=None,
+                        help='prepend a spin-up so the task starts from rest')
     parser.add_argument('--out', default='candidates.json')
     parser.add_argument('--modes',
                         default='arm_isolation,rail_isolation,interaction')
@@ -307,7 +310,7 @@ def main(argv=None):
     from ament_index_python.packages import get_package_share_directory
     mesh_path = get_package_share_directory('ur_description')
     targets, quaternions, dt, trajectory_metadata = load_trajectory(
-        None, args.waypoints, with_metadata=True)
+        None, args.waypoints, with_metadata=True, spin_up_s=args.spin_up_s)
     modes = [m.strip() for m in args.modes.split(',') if m.strip()]
 
     validator = _validator(args.urdf, mesh_path)

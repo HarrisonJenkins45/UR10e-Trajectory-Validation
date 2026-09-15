@@ -267,3 +267,58 @@ def test_the_returned_path_has_continuous_windings(graph, oracle):
         delta = np.abs(np.asarray(path[index])[ARM_SLICE]
                        - np.asarray(path[index - 1])[ARM_SLICE])
         assert np.all(delta < TWO_PI / 2)
+
+
+# --------------------------------------------------------------------------
+# Free start
+# --------------------------------------------------------------------------
+
+def test_a_free_start_chooses_among_first_waypoint_candidates(validator, oracle):
+    """A common source reaches every layer-0 candidate at zero cost; the arm
+    is brought to the chosen start by a separate warmup, so no transition
+    edge exists."""
+    decoy = np.asarray(oracle[0]).copy()
+    decoy[2] += 0.3
+    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers[0] = [decoy] + list(layers[0])
+    graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
+
+    result, first_empty, _ = graph.shortest_path()
+    assert first_empty is None
+    path, cost = result
+    assert len(path) == LAYERS
+    assert graph.counters['start_states'] == 2
+    np.testing.assert_allclose(path[0], oracle[0], atol=1e-12)
+
+    fixed, _, _ = graph.shortest_path(oracle[0])
+    assert cost <= fixed[1] + 1e-12
+    assert cost == pytest.approx(graph_planner.path_cost(None, path,
+                                                         graph.velocity_limits, 0.1))
+
+
+def test_a_free_start_is_deterministic(validator, oracle):
+    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
+    first, _, _ = graph.shortest_path()
+    again, _, _ = graph.shortest_path()
+    np.testing.assert_allclose(np.asarray(again[0]), np.asarray(first[0]), atol=1e-12)
+
+
+def test_an_empty_first_layer_disconnects_a_free_start_at_layer_zero(validator, oracle):
+    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers[0] = []
+    graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
+    result, first_empty, _ = graph.shortest_path()
+    assert result is None and first_empty == 0
+
+
+def test_start_lifts_add_every_legal_winding(validator, oracle):
+    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
+    canonical = graph.start_states()
+    lifted = graph.start_states(lifts=True)
+    assert len(canonical) == 1 and len(lifted) > 1
+    for state in lifted:
+        np.testing.assert_allclose(
+            np.angle(np.exp(1j * (state[1:] - canonical[0][1:]))), 0, atol=1e-9)
+
