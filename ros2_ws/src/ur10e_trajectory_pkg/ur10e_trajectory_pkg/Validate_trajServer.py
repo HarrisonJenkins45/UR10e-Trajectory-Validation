@@ -18,6 +18,13 @@ DEFAULT_T_TRAJ = 10.0         # matches process_matlab_validation's own default 
                                # used to derive dt_waypoint for the segment-finder path,
                                # since incoming requests carry positions but not timing
 
+# How far the MEASURED start may sit from the first solved configuration. The
+# task plays from that configuration with no transition, so a larger offset
+# would be a step command at t = 0. Provisional: set from nothing measured
+# yet, to be replaced by encoder and controller tracking data.
+START_RAIL_TOL_M = 0.005
+START_ARM_TOL_RAD = 0.01
+
 
 def resolve_target_frame(target_frame_field):
     """Reject targets that are not in the fixed rail-base frame.
@@ -66,6 +73,54 @@ def resolve_start_pose(q_start_field):
             f'[rail_m, 6x arm_rad], got {q_start.size}'
         )
     return q_start, 'q_start supplied by client'
+
+
+def check_measured_start(validator, q_measured, first_configuration,
+                         target_position, target_quaternion):
+    """Whether the arm is where the task begins, before anything is played.
+
+    Two checks, both needed. The measured joints must match the first solved
+    configuration within START_RAIL_TOL_M and START_ARM_TOL_RAD, since the
+    task has no transition to absorb an offset; and forward kinematics of the
+    measured joints must reach the first target within the IK pose
+    tolerances, since joints can match a configuration that is not the one
+    the task was solved for only if the solve itself was wrong.
+
+    Returns (ok, details).
+    """
+    from scipy.spatial.transform import Rotation
+
+    from ur10e_trajectory_pkg.pose_metrics import (
+        IK_ORIENTATION_TOL_RAD,
+        IK_POSITION_TOL_M,
+    )
+
+    q_measured = np.asarray(q_measured, dtype=float)
+    first = np.asarray(first_configuration, dtype=float)
+    rail_offset = abs(q_measured[0] - first[0])
+    arm_offset = float(np.max(np.abs(q_measured[1:] - first[1:])))
+    pose = validator.robot.fkine(q_measured, end='tool0')
+    position_error = float(np.linalg.norm(pose.t - np.asarray(target_position)))
+    orientation_error = float(np.linalg.norm(
+        (Rotation.from_quat(target_quaternion).inv()
+         * Rotation.from_matrix(pose.R)).as_rotvec()))
+    failures = []
+    if rail_offset > START_RAIL_TOL_M:
+        failures.append(f'rail {rail_offset:.4f} m from the task start '
+                        f'(tolerance {START_RAIL_TOL_M} m)')
+    if arm_offset > START_ARM_TOL_RAD:
+        failures.append(f'arm joint {arm_offset:.4f} rad from the task start '
+                        f'(tolerance {START_ARM_TOL_RAD} rad)')
+    if position_error > IK_POSITION_TOL_M:
+        failures.append(f'first target missed by {position_error:.4f} m')
+    if orientation_error > IK_ORIENTATION_TOL_RAD:
+        failures.append(f'first target orientation off by '
+                        f'{np.rad2deg(orientation_error):.3f} deg')
+    return not failures, {
+        'rail_offset_m': float(rail_offset), 'arm_offset_rad': arm_offset,
+        'position_error_m': position_error,
+        'orientation_error_rad': orientation_error, 'failures': failures,
+    }
 
 
 class TrajectoryValidationNode(Node):
@@ -168,23 +223,39 @@ class TrajectoryValidationNode(Node):
                 ee_x, ee_y, ee_z, ee_quat, q_start, min_length=MIN_SEGMENT_LENGTH,
                 dt_waypoint=dt_waypoint, verbose=True
             )
-            if not segments:
+            # The task plays from its first waypoint with no transition: the
+            # warmup command has already brought the arm there. So only a
+            # segment covering EVERY waypoint can be played, and the measured
+            # start must be that segment's first configuration.
+            full = [s for s in segments
+                    if s['start_idx'] == 0 and s['end_idx'] == num_waypts - 1]
+            q_dot_matrix, q_interp = np.array([]), np.array([])
+            if not full:
                 is_valid = False
-                q_dot_matrix, q_interp = np.array([]), np.array([])
-                message = (f'No feasible segment of length >= {MIN_SEGMENT_LENGTH} found across '
-                           f'{num_waypts} waypoints [start: {start_desc}]')
+                longest = max(segments, key=lambda s: s['length']) if segments else None
+                message = ('The task is not feasible from waypoint 0 to the end, so it '
+                           'cannot be played from its start'
+                           + ('' if longest is None else
+                              f' (longest feasible segment [{longest["start_idx"]}, '
+                              f'{longest["end_idx"]}], {longest["length"]}/{num_waypts})')
+                           + f' [start: {start_desc}]')
             else:
-                # segment = segments[0]  # 1st viable segment is used as the full trajectory
-                segment= max(segments,key=lambda s: s['length'])
-                is_valid = True
-                q_dot_matrix, q_interp = self.validator.process_feasible_segment(
-                    segment, q_start, dt_waypoint, verbose=True
-                )
-                # message = (f'Using 1st feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
-                #            f'(length={segment["length"]}/{num_waypts}) as the full trajectory')
-                message = (f'Using largest feasible segment [{segment["start_idx"]}, {segment["end_idx"]}] '
-                           f'(length={segment["length"]}/{num_waypts}) as the full trajectory '
-                           f'[start: {start_desc}]')
+                segment = full[0]
+                start_ok, start_details = check_measured_start(
+                    self.validator, q_start, segment['q_full'][0],
+                    (ee_x[0], ee_y[0], ee_z[0]), ee_quat[0])
+                if not start_ok:
+                    is_valid = False
+                    message = ('Measured start is not the task start: '
+                               + '; '.join(start_details['failures'])
+                               + '. Run the warmup command first.')
+                else:
+                    is_valid = True
+                    q_dot_matrix, q_interp, _ = self.validator.process_task_segment(
+                        segment, dt_waypoint, verbose=True)
+                    message = (f'Task feasible over all {num_waypts} waypoints from the '
+                               f'measured start; playing with no transition '
+                               f'[start: {start_desc}]')
         else:
             # Run validation and generate interpolated trajectory frames
             is_valid, q_dot_matrix, q_interp, message = self.validator.process_matlab_validation(

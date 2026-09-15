@@ -1183,6 +1183,34 @@ class TrajectoryValidator:
 
             return q_dot, q_interp
     
+    def process_task_segment(self, segment, dt_waypoint, verbose=False):
+        """Controller-rate trajectory for a task that starts AT its first waypoint.
+
+        No transition is prepended. The arm is brought to the first solved
+        configuration by a separate warmup command, and the task itself starts
+        from rest there (a spin-up), so the old unchecked 2 s home-to-waypoint
+        window has nothing left to absorb. The segment must therefore begin at
+        waypoint 0.
+
+        Returns (q_dot, q_interp, t_sim), PCHIP through the solved
+        configurations exactly as before, minus the prepended start.
+        """
+        if segment['start_idx'] != 0:
+            raise ValueError(
+                f"a task without a transition must start at waypoint 0; this "
+                f"segment starts at {segment['start_idx']}")
+        q_full = np.asarray(segment['q_full'], dtype=float)
+        times = np.arange(len(q_full)) * float(dt_waypoint)
+        count = max(2, int(round(times[-1] * self.framerate)) + 1)
+        t_sim = np.linspace(0.0, times[-1], count)
+        interpolator = PchipInterpolator(times, q_full, axis=0)
+        q_interp = interpolator(t_sim)
+        q_dot = interpolator.derivative(1)(t_sim)
+        if verbose:
+            print(f'[task] {len(q_full)} waypoints -> {count} frames over '
+                  f'{times[-1]:.2f} s, no transition')
+        return q_dot, q_interp, t_sim
+
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,
                                   max_rail_vel_threshold=None,
                                    max_joint_vel_threshold=None,
