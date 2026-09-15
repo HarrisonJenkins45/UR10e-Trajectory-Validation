@@ -96,6 +96,12 @@ SWEPT_SAMPLES = 3
 STATE_DECIMALS = 6
 
 
+def _arm_condition(validator, configuration):
+    singular = np.linalg.svd(validator.compute_arm_jacobian(configuration),
+                             compute_uv=False)
+    return float(singular[0] / singular[-1]) if singular[-1] > 1e-12 else float('inf')
+
+
 def state_key(configuration):
     return tuple(np.round(np.asarray(configuration, dtype=float), STATE_DECIMALS))
 
@@ -350,21 +356,77 @@ class LayeredGraph:
         return (list(reversed(path)), final[1][0]), None, history
 
 
-def load_candidates(path, num_layers, include_oracle):
-    """Canonical configurations per layer, optionally with injected nodes."""
+# Conditioning margin on graph candidates. The continuous path's gate stays at
+# 50; candidates are held to half of it so the chosen branch leaves
+# refinement room to smooth without crossing the gate. Measured before
+# adopting: at nominal and coupled_14 every waypoint keeps candidates at or
+# below 25 (fewest 20 and 30), with the best near 6, so the tumble does not
+# force a near-singular path -- the velocity-only cost chose one.
+GRAPH_CANDIDATE_CONDITION_LIMIT = 25.0
+
+
+def load_candidates(path, num_layers, include_oracle, max_condition=None):
+    """Canonical configurations per layer, optionally with injected nodes.
+
+    max_condition drops candidates whose recorded arm condition number
+    exceeds it. The count removed per layer is returned in
+    document['condition_filter'].
+    """
     with open(path, encoding='utf-8') as handle:
         document = json.load(handle)
-    layers = []
+    layers, removed = [], []
     for index in range(num_layers):
         entries = document['candidates'].get(str(index), [])
-        rows = []
+        rows, dropped = [], 0
         for entry in entries:
             if not include_oracle and entry.get('provenance_tag') == 'tracking_oracle':
+                continue
+            if (max_condition is not None
+                    and entry.get('arm_condition_number', 0.0) > max_condition):
+                dropped += 1
                 continue
             rows.append(np.array([entry['rail_position'],
                                   *entry['q_arm_canonical']], dtype=float))
         layers.append(rows)
+        removed.append(dropped)
+    document['condition_filter'] = {'max_condition': max_condition,
+                                    'removed_per_layer': removed,
+                                    'removed_total': int(sum(removed))}
     return layers, document
+
+
+def best_condition_lower_bound(document, num_layers):
+    """No path can peak below this: the worst layer's best candidate.
+
+    A lower bound on the best achievable worst candidate condition, from the
+    unfiltered candidates. It does not prove a path achieving it is connected.
+    """
+    bests = [min((e.get('arm_condition_number', np.inf)
+                  for e in document['candidates'].get(str(i), [])), default=np.inf)
+             for i in range(num_layers)]
+    worst = int(np.argmax(bests))
+    return {'value': float(bests[worst]), 'layer': worst}
+
+
+def filter_self_clearance(validator, layers, floor):
+    """Drop candidates whose non-adjacent self-clearance is below floor."""
+    import time
+
+    started = time.perf_counter()
+    kept, removed, queries = [], [], 0
+    for rows in layers:
+        survivors = []
+        for row in rows:
+            queries += 1
+            if validator.self_clearance(row)['distance_m'] >= floor:
+                survivors.append(row)
+        removed.append(len(rows) - len(survivors))
+        kept.append(survivors)
+    seconds = time.perf_counter() - started
+    return kept, {'floor_m': floor, 'removed_per_layer': removed,
+                  'removed_total': int(sum(removed)), 'queries': queries,
+                  'seconds': seconds,
+                  'ms_per_query': 1000.0 * seconds / max(queries, 1)}
 
 
 def inject_oracle(layers, oracle_path):
@@ -399,6 +461,12 @@ def main(argv=None):
                         help='spin-up the candidates were generated with')
     parser.add_argument('--placement', default='nominal',
                         help='envelope placement the candidates were generated at')
+    parser.add_argument('--max-candidate-condition', type=float,
+                        default=GRAPH_CANDIDATE_CONDITION_LIMIT,
+                        help='drop candidates above this arm condition number')
+    parser.add_argument('--min-self-clearance', type=float, default=None,
+                        help='drop candidates below this non-adjacent '
+                             'self-clearance (default SELF_CLEARANCE_FLOOR_M)')
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
@@ -419,8 +487,15 @@ def main(argv=None):
         None, args.layers, with_metadata=True, spin_up_s=args.spin_up_s,
         placement_RG=placement_RG)
     num_layers = len(targets)
-    layers, candidates_document = load_candidates(args.candidates, num_layers,
-                                                  include_oracle=False)
+    layers, candidates_document = load_candidates(
+        args.candidates, num_layers, include_oracle=False,
+        max_condition=args.max_candidate_condition)
+    self_clearance_floor = (motion_limits.SELF_CLEARANCE_FLOOR_M
+                            if args.min_self_clearance is None
+                            else args.min_self_clearance)
+    layers, self_clearance_filter = filter_self_clearance(
+        validator, layers, self_clearance_floor)
+    condition_bound = best_condition_lower_bound(candidates_document, num_layers)
     generated_RG = (candidates_document.get('manifest', {})
                     .get('trajectory', {}).get('placement_RG'))
     if generated_RG is None or not np.allclose(generated_RG,
@@ -469,6 +544,15 @@ def main(argv=None):
         'chosen_start': (None if result is None
                          else np.asarray(result[0][0]).tolist()),
         'placement': args.placement,
+        'candidate_filters': {
+            'condition': candidates_document['condition_filter'],
+            'self_clearance': self_clearance_filter,
+            'best_condition_lower_bound': condition_bound,
+        },
+        'path_max_condition': (None if result is None else max(
+            _arm_condition(validator, q) for q in result[0])),
+        'path_min_self_clearance_m': (None if result is None else min(
+            validator.self_clearance(q)['distance_m'] for q in result[0])),
         'placement_RG': np.asarray(trajectory_metadata['placement_RG']).tolist(),
         'entry_state': (None if result is None else entry_state_report(
             result[0], dt, graph.velocity_limits,
@@ -488,6 +572,18 @@ def main(argv=None):
         json.dump(document, handle, indent=1, sort_keys=True)
 
     print(f"build={args.build}  complete_path={document['complete_path']}")
+    print(f"candidates removed: condition > {args.max_candidate_condition} "
+          f"{candidates_document['condition_filter']['removed_total']}, "
+          f"self-clearance < {self_clearance_floor} "
+          f"{self_clearance_filter['removed_total']} "
+          f"({self_clearance_filter['queries']} queries, "
+          f"{self_clearance_filter['ms_per_query']:.3f} ms each)")
+    if result is None:
+        print(f"best achievable worst candidate condition is at least "
+              f"{condition_bound['value']:.2f} (layer {condition_bound['layer']})")
+    else:
+        print(f"path max condition {document['path_max_condition']:.2f}, "
+              f"min self-clearance {document['path_min_self_clearance_m'] * 1000:.1f} mm")
     if result is None:
         print(f'first disconnected layer: {first_empty}')
     else:

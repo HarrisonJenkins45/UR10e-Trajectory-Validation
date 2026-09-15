@@ -18,7 +18,14 @@ from ur10e_trajectory_pkg.configurations import (
     PERIODIC_JOINTS,
 )
 # The cap lives with the other limits; re-exported here for existing callers.
-from ur10e_trajectory_pkg.motion_limits import RAIL_VEL_SAFETY_CAP  # noqa: F401
+from ur10e_trajectory_pkg.motion_limits import (  # noqa: F401
+    RAIL_VEL_SAFETY_CAP,
+    SELF_CLEARANCE_FLOOR_M,
+)
+
+# How far self_clearance looks. Pairs farther apart than this report this
+# distance, which is plenty above SELF_CLEARANCE_FLOOR_M and bounds the query.
+SELF_CLEARANCE_QUERY_DISTANCE_M = 0.05
 from ur10e_trajectory_pkg.joint_coordinates import (
     nearest_feasible_lift,
     winding_numbers,
@@ -910,6 +917,39 @@ class TrajectoryValidator:
                 return True
 
         return False
+
+    def self_clearance(self, q_full, max_distance=SELF_CLEARANCE_QUERY_DISTANCE_M):
+        """Smallest distance between non-adjacent robot links, and the pair.
+
+        One closest-points query over the robot against itself, filtered by
+        the same rule check_all_collisions applies to self-contacts: links
+        known to the kinematic model, not the same link, not adjacent after
+        collapsing rigid clusters. So pairs that overlap by design (the base
+        inertia link inside the carriage) are skipped exactly as the boolean
+        test skips them. Returns {'distance_m', 'links'}; distance_m is
+        max_distance when no eligible pair is within it, and negative when
+        links interpenetrate.
+        """
+        q_full = np.asarray(q_full, dtype=np.float64)
+        for pb_joint_idx, q_val in zip(self._pb_joint_indices, q_full):
+            pb.resetJointState(self.robot_id, pb_joint_idx, float(q_val),
+                               physicsClientId=self._pb_client)
+        best, pair = float(max_distance), None
+        for point in pb.getClosestPoints(bodyA=self.robot_id, bodyB=self.robot_id,
+                                         distance=max_distance,
+                                         physicsClientId=self._pb_client):
+            name_a = self._pb_link_name_by_index.get(point[3])
+            name_b = self._pb_link_name_by_index.get(point[4])
+            if (name_a not in self._link_index_by_name
+                    or name_b not in self._link_index_by_name):
+                continue
+            idx_a = self._link_index_by_name[name_a]
+            idx_b = self._link_index_by_name[name_b]
+            if idx_a == idx_b or self._is_adjacent(idx_a, idx_b):
+                continue
+            if float(point[8]) < best:
+                best, pair = float(point[8]), (name_a, name_b)
+        return {'distance_m': best, 'links': pair}
 
     def reset_rng(self):
         """Return the recovery generator to its initial state.

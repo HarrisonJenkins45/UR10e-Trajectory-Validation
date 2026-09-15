@@ -75,6 +75,15 @@ def worst_status(statuses):
 # validator, so the cap and the Limit describing it cannot disagree.
 RAIL_VEL_SAFETY_CAP = 1.0  # m/s
 
+# Minimum distance between non-adjacent links of the robot, enforced wherever
+# a configuration or path is accepted: graph candidates, continuous validation
+# of the task path, warmups and the home's static gates. A constraint, not a
+# ranking signal. Smaller than the 0.02 m environment floor because it is
+# measured against the robot's own meshes rather than an unsurveyed
+# environment. Declared after coupled_09's branch grazed a self-contact
+# (forearm to wrist_2 at 2-3 mm) that the boolean collision test flickered on.
+SELF_CLEARANCE_FLOOR_M = 0.010
+
 
 class Limit:
     """One limit, its units, its source and its status."""

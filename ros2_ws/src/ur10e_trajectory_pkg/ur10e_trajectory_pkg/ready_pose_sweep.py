@@ -299,7 +299,8 @@ def singularity_robustness(validator, configuration,
 
 
 def static_gates(validator, configuration, min_clearance_m=0.02,
-                 min_limit_fraction=0.05, min_posture_margin=0.02):
+                 min_limit_fraction=0.05, min_posture_margin=0.02,
+                 min_self_clearance_m=None):
     """Whether a candidate ready pose is admissible at all.
 
     collision_distance measures robot-to-ENVIRONMENT clearance only, so it
@@ -307,8 +308,16 @@ def static_gates(validator, configuration, min_clearance_m=0.02,
     plenty of self-colliding configurations, so the boolean self-collision
     check is a hard gate here rather than something the approach discovers
     later.
+
+    Self-clearance between non-adjacent links is a floor too
+    (motion_limits.SELF_CLEARANCE_FLOOR_M), measured by the validator's one
+    self_clearance function, so a pose that merely avoids contact by a
+    fraction of a millimetre is not admitted.
     """
+    if min_self_clearance_m is None:
+        min_self_clearance_m = motion_limits.SELF_CLEARANCE_FLOOR_M
     in_collision = bool(validator.check_all_collisions(configuration))
+    self_clearance = validator.self_clearance(configuration)
     clearance = collision_distance(validator, configuration)
     limits = joint_limit_clearance(validator, configuration)
     margin = posture_margin(validator, configuration)
@@ -317,7 +326,10 @@ def static_gates(validator, configuration, min_clearance_m=0.02,
         'collision_distance_m': clearance,
         'joint_limit_clearance': limits,
         'posture_margin': margin,
+        'self_clearance_m': self_clearance['distance_m'],
+        'self_clearance_links': self_clearance['links'],
         'passed': bool(not in_collision
+                       and self_clearance['distance_m'] >= min_self_clearance_m
                        and clearance >= min_clearance_m
                        and limits >= min_limit_fraction
                        and margin >= min_posture_margin),

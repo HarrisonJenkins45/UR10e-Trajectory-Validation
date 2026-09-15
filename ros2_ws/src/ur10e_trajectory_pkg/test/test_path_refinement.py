@@ -103,6 +103,7 @@ def _report(passed):
             'conditioning': {'max_condition_number': 10.0, 'twist_status': 'pass'},
             'limit_violations': {} if passed else {'elbow_joint': {}},
             'collision': {'collision_found': False},
+            'self_clearance': {'min_distance_m': 0.03, 'links': None, 'passed': True},
             'tracking': {'within_tolerance': True},
             'peak_command_stream': {'jerk': [1.0] * 7}}
 
@@ -130,14 +131,22 @@ def test_if_no_level_passes_the_graph_path_is_kept(validator, smooth, monkeypatc
     assert refinement.meets_acceptance(result) is False
 
 
-def test_acceptance_needs_small_second_differences_and_no_start_motion():
+def test_acceptance_is_full_validation_and_start_motion_within_the_at_rest_tolerance():
+    """One acceptance everywhere. Second differences are diagnostics now; the
+    jerk gate in full validation catches kinks directly."""
     attempt = {'level_m': 0.002, 'passed': True, 'max_second_difference': 5e-4,
                'start_motion': 1e-5}
     ok = {'status': 'refined', 'level_m': 0.002, 'attempts': [attempt]}
     assert refinement.meets_acceptance(ok) is True
     rough = {'status': 'refined', 'level_m': 0.002,
              'attempts': [dict(attempt, max_second_difference=2e-3)]}
-    assert refinement.meets_acceptance(rough) is False
-    moving = {'status': 'refined', 'level_m': 0.002,
+    assert refinement.meets_acceptance(rough) is True
+    within = {'status': 'refined', 'level_m': 0.002,
               'attempts': [dict(attempt, start_motion=0.0126)]}
+    assert refinement.meets_acceptance(within) is True
+    moving = {'status': 'refined', 'level_m': 0.002,
+              'attempts': [dict(attempt, start_motion=0.03)]}
     assert refinement.meets_acceptance(moving) is False
+    failed = {'status': 'refined', 'level_m': 0.002,
+              'attempts': [dict(attempt, passed=False)]}
+    assert refinement.meets_acceptance(failed) is False

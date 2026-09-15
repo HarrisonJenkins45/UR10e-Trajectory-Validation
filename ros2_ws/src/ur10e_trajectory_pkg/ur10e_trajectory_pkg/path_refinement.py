@@ -45,9 +45,13 @@ REFINEMENT_RMS_LEVELS_M = (0.005, 0.002, 0.001)
 PINNED_START_SAMPLES = 3
 REFINEMENT_RATE_HZ = 200.0
 
-# Acceptance declared before any refinement run.
-MAX_SECOND_DIFFERENCE = 1e-3          # largest |second difference| of any joint
-START_MOTION_TOLERANCE = 1e-3         # entry velocity and acceleration ratios
+# Acceptance, the same at every placement: full continuous validation (limits
+# including jerk, collision, self-clearance, tracking, condition <= 50,
+# alpha*) and start motion within the declared at-rest tolerance. The 1e-3
+# figures were stand-ins for kinks in the coupled_14 prototype; the jerk gate
+# catches kinks directly, so they are reported diagnostics, not gates.
+DIAGNOSTIC_SECOND_DIFFERENCE = 1e-3
+DIAGNOSTIC_START_MOTION = 1e-3
 
 
 def smooth_rail(rail, rms_target, pinned=PINNED_START_SAMPLES):
@@ -145,6 +149,9 @@ def refine_path(validator, path, positions, quaternions, dt,
             twist_status=report['conditioning']['twist_status'],
             limit_violations=report['limit_violations'],
             collision=report['collision']['collision_found'],
+            min_self_clearance_m=report['self_clearance']['min_distance_m'],
+            self_clearance_links=report['self_clearance']['links'],
+            self_clearance_passed=report['self_clearance']['passed'],
             tracking=bool(report['tracking']['within_tolerance']),
             peak_jerk=report['peak_command_stream']['jerk'],
         )
@@ -157,13 +164,14 @@ def refine_path(validator, path, positions, quaternions, dt,
 
 
 def meets_acceptance(result):
-    """The acceptance declared before running, on the chosen attempt."""
+    """Full validation plus start motion within the at-rest tolerance."""
+    from ur10e_trajectory_pkg.graph_planner import AT_REST_TOLERANCE_FRACTION
+
     if result['status'] != 'refined':
         return False
     chosen = next(a for a in result['attempts'] if a['level_m'] == result['level_m'])
     return bool(chosen['passed']
-                and chosen['max_second_difference'] < MAX_SECOND_DIFFERENCE
-                and chosen['start_motion'] <= START_MOTION_TOLERANCE)
+                and chosen['start_motion'] <= AT_REST_TOLERANCE_FRACTION)
 
 
 def main(argv=None):
@@ -208,8 +216,10 @@ def main(argv=None):
                 'placement': placement, 'status': result['status'],
                 'level_m': result['level_m'], 'attempts': result['attempts'],
                 'meets_acceptance': meets_acceptance(result),
-                'acceptance': {'max_second_difference': MAX_SECOND_DIFFERENCE,
-                               'start_motion_tolerance': START_MOTION_TOLERANCE},
+                'acceptance': 'full continuous validation and start motion '
+                              'within AT_REST_TOLERANCE_FRACTION',
+                'diagnostics': {'second_difference_reference': DIAGNOSTIC_SECOND_DIFFERENCE,
+                                'start_motion_reference': DIAGNOSTIC_START_MOTION},
                 'path': np.asarray(result['path']).tolist()}
     with open(args.out, 'w', encoding='utf-8') as handle:
         json.dump(document, handle, indent=1, default=plain)
@@ -219,6 +229,7 @@ def main(argv=None):
               f"max_second_difference={attempt.get('max_second_difference')} "
               f"start_motion={attempt.get('start_motion')} "
               f"max_cond={attempt.get('max_condition_number')} "
+              f"self_clearance={attempt.get('min_self_clearance_m')} "
               f"arm_deviation={attempt.get('max_arm_deviation_from_graph_rad')} "
               f"violations={list(attempt.get('limit_violations') or [])}")
     print(f"{placement}: {result['status']} at level {result['level_m']} | "

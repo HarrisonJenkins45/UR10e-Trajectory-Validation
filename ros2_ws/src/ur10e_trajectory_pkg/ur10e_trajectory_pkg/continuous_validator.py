@@ -159,6 +159,26 @@ def collision_along_path(validator, interpolator, times, samples):
     return None
 
 
+def self_clearance_along(validator, interpolator, times,
+                         samples=COLLISION_SAMPLE_LADDER[-1], floor=None):
+    """Smallest non-adjacent self-clearance on the interpolant.
+
+    At the same instants as the finest collision check. A path grazing a
+    self-contact fails here explicitly, instead of flickering in and out of
+    the boolean collision test as sampling shifts.
+    """
+    floor = motion_limits.SELF_CLEARANCE_FLOOR_M if floor is None else floor
+    worst = {'distance_m': np.inf, 'links': None}
+    worst_time = None
+    for instant in np.linspace(times[0], times[-1], samples):
+        result = validator.self_clearance(interpolator(instant))
+        if result['distance_m'] < worst['distance_m']:
+            worst, worst_time = result, float(instant)
+    return {'min_distance_m': float(worst['distance_m']), 'links': worst['links'],
+            'at_time_s': worst_time, 'samples': int(samples), 'floor_m': floor,
+            'passed': bool(worst['distance_m'] >= floor)}
+
+
 def collision_convergence(validator, interpolator, times,
                           ladder=COLLISION_SAMPLE_LADDER):
     """Re-check at rising resolutions until the verdict stops changing.
@@ -469,6 +489,8 @@ def validate(validator, path, waypoint_times, positions, quaternions,
             validator, dense_path),
         'collision': collision_convergence(validator, interpolator,
                                            waypoint_times),
+        'self_clearance': self_clearance_along(validator, interpolator,
+                                               waypoint_times),
         'tracking': tracking_error(validator, interpolator, dense_times,
                                    waypoint_times, positions, quaternions),
         'conditioning': conditioning_and_twist(
@@ -497,6 +519,7 @@ def validate(validator, path, waypoint_times, positions, quaternions,
         not report['limit_violations']
         and not report['position_limit_violations']
         and not report['collision']['collision_found']
+        and report['self_clearance']['passed']
         and report['tracking']['within_tolerance']
         and conditioning_ok
         and conditioning['twist_status'] in ('pass', 'not_applicable')
@@ -566,6 +589,9 @@ def validate_warmup(validator, warmup_result, velocity_limits=None):
 
     collisions = [float(times[i]) for i, q in enumerate(positions)
                   if validator.check_all_collisions(q)]
+    clearances = [validator.self_clearance(q) for q in positions]
+    closest = int(np.argmin([c['distance_m'] for c in clearances]))
+    floor = motion_limits.SELF_CLEARANCE_FLOOR_M
     conditions = []
     for q in positions[::max(1, len(positions) // 400)]:
         singular = np.linalg.svd(validator.compute_arm_jacobian(q),
@@ -581,6 +607,11 @@ def validate_warmup(validator, warmup_result, velocity_limits=None):
         collision_queries=int(len(positions)),
         collision_times_s=collisions[:10],
         collision_found=bool(collisions),
+        self_clearance={'min_distance_m': float(clearances[closest]['distance_m']),
+                        'links': clearances[closest]['links'],
+                        'at_time_s': float(times[closest]),
+                        'samples': int(len(positions)), 'floor_m': floor,
+                        'passed': bool(clearances[closest]['distance_m'] >= floor)},
         # First and last sampled steps: a rest-to-rest move approaches zero
         # speed at both ends at the stream's resolution.
         start_speed_ratio=float(np.max(first_velocity / velocity_limits)),
@@ -590,7 +621,8 @@ def validate_warmup(validator, warmup_result, velocity_limits=None):
     )
     report['passed'] = bool(not report['limit_violations']
                             and not report['position_limit_violations']
-                            and not report['collision_found'])
+                            and not report['collision_found']
+                            and report['self_clearance']['passed'])
     return report
 
 

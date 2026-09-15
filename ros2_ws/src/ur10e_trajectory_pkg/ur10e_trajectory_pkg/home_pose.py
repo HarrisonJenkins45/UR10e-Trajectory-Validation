@@ -9,6 +9,7 @@ HOME_CRITERIA:
 
   must pass, all of them
     static gates     clearance of ARM links to the environment >= 0.02 m,
+                     self-clearance between non-adjacent links >= 0.01 m,
                      joint-limit fraction >= 0.05, posture margin >= 0.02,
                      not in collision
     singularity      arm condition <= 50, the task gate, across a +/-5 deg
@@ -62,7 +63,9 @@ SCHEMA_VERSION = 1
 REFINED_CANDIDATES = (70, 24, 67, 68)
 HOME_CRITERIA = (
     'Fixed before any candidate was evaluated. Must pass: static gates with '
-    'clearance on arm links only (>= 0.02 m), joint-limit fraction >= 0.05 and '
+    'clearance on arm links only (>= 0.02 m), self-clearance between '
+    'non-adjacent links >= 0.01 m (added after the home was chosen), '
+    'joint-limit fraction >= 0.05 and '
     'posture margin >= 0.02; '
     'arm condition <= 50 across +/-5 deg (each arm joint alone plus 64 random '
     'samples, fixed seed); coverage of all 29 spin-up placements with '
