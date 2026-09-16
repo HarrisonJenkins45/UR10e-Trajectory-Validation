@@ -54,13 +54,20 @@ DIAGNOSTIC_SECOND_DIFFERENCE = 1e-3
 DIAGNOSTIC_START_MOTION = 1e-3
 
 
-def smooth_rail(rail, rms_target, pinned=PINNED_START_SAMPLES):
+def smooth_rail(rail, rms_target, pinned=PINNED_START_SAMPLES, bounds=None):
     """Rail positions smoothed to about rms_target, the start held fixed.
 
     Minimises |f - rail|^2 + lam |D f|^2 with D the second-difference
     operator and f[0:pinned] = rail[0]; lam is bisected (in log space) so the
     RMS deviation meets rms_target. If even the smoothest fit stays below the
     target, that fit is returned. Returns (f, lam, rms).
+
+    bounds, when given as (lower, upper), keeps the smoothed rail inside the
+    joint's travel. Smoothing a path that runs near an end of the rail cuts
+    the corner past it: coupled_08 left the limit by 8 mm and every level
+    failed validation on position limits, with nothing else wrong. The clip
+    is applied inside the fit, so the bisection measures the deviation the
+    caller actually gets rather than one the clip then changes.
     """
     rail = np.asarray(rail, dtype=float)
     n = len(rail)
@@ -75,6 +82,8 @@ def smooth_rail(rail, rms_target, pinned=PINNED_START_SAMPLES):
         A = np.eye(n - pinned) + lam * DtD[free, free]
         b = rail[free] - lam * DtD[free, :pinned] @ fixed
         f = np.concatenate((fixed, np.linalg.solve(A, b)))
+        if bounds is not None:
+            f = np.clip(f, bounds[0], bounds[1])
         return f, float(np.sqrt(np.mean((f - rail) ** 2)))
 
     low, high = -8.0, 14.0
@@ -132,7 +141,9 @@ def refine_path(validator, path, positions, quaternions, dt,
     path = np.asarray(path, dtype=float)
     attempts = []
     for level in levels:
-        rail, lam, rms = smooth_rail(path[:, 0], level)
+        lower, upper = validator.robot.qlim
+        rail, lam, rms = smooth_rail(path[:, 0], level,
+                                     bounds=(float(lower[0]), float(upper[0])))
         refined, solve = solve_arm_along(validator, path, rail, positions, quaternions)
         attempt = {'level_m': level, 'rail_rms_m': rms, 'smoothing_weight': lam, **solve}
         if refined is None:

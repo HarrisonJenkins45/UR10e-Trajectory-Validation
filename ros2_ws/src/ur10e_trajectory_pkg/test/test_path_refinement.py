@@ -150,3 +150,22 @@ def test_acceptance_is_full_validation_and_start_motion_within_the_at_rest_toler
     failed = {'status': 'refined', 'level_m': 0.002,
               'attempts': [dict(attempt, passed=False)]}
     assert refinement.meets_acceptance(failed) is False
+
+
+def test_smoothing_stays_inside_the_rail_limits():
+    """A rail that runs to the end of its travel and stops is the shape that
+    breaks: the smoother rounds the corner and undershoots past the limit.
+    coupled_08 left the limit by 8 mm that way, and every level failed on
+    position limits with nothing else wrong."""
+    n = 200
+    rail = np.concatenate((np.linspace(0.6, 0.0, n // 2), np.zeros(n - n // 2)))
+
+    free, _, _ = refinement.smooth_rail(rail, 0.005)
+    assert free.min() < 0.0
+
+    bounded, _, rms = refinement.smooth_rail(rail, 0.005, bounds=(0.0, 3.0))
+    assert bounded.min() >= 0.0
+    assert bounded.max() <= 3.0
+    # The reported deviation is the one the caller gets, measured after the
+    # clip rather than before it.
+    assert rms == pytest.approx(float(np.sqrt(np.mean((bounded - rail) ** 2))))
