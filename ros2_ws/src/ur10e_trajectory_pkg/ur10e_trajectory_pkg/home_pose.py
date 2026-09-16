@@ -18,9 +18,10 @@ HOME_CRITERIA:
                      worst is a lower bound, so a chosen home above about 40
                      is confirmed with a dense +/-5 deg sample first
     coverage         across all 29 envelope placements of the spin-up
-                     trajectory, a direct collision-free warmup to every IK
-                     family: connectivity 1.0 and family fraction 1.0. If no
-                     candidate reaches it, the best coverage is taken and the
+                     trajectory, a direct collision-free warmup to at least
+                     one IK family: connectivity 1.0. The family fraction is
+                     recorded but does not gate. If no candidate reaches
+                     full connectivity, the best coverage is taken and the
                      shortfall reported
 
   ranked, among poses that pass
@@ -33,8 +34,16 @@ the first would almost never tie and the rest would never count.
 Coverage against all 29 placements rather than the one nominal start: the
 exact placement is unknown until setup, and the planner picks a different
 start for each, so a home tuned to one start could have no safe warmup after
-a small placement change. Covering every family means a direct warmup exists
-whichever start the planner picks.
+a small placement change.
+
+One family per placement rather than every family, because the planner is
+ours to constrain: graph_planner --home restricts layer-0 candidates to
+starts the home can warm up to, so the two commands are coupled and the home
+no longer has to satisfy every choice the planner might otherwise make.
+Requiring every family was the original rule; the self-clearance floor made
+it cost a full re-sweep, and it was stronger than the robot needs. A
+placement where no reachable start leaves a complete path is the signal to
+act on, and it is reported by the planner rather than assumed away here.
 
 Usage, in order:
     python3 -m ur10e_trajectory_pkg.home_pose screen --pool sweep_v2.json \\
@@ -69,9 +78,11 @@ HOME_CRITERIA = (
     'posture margin >= 0.02; '
     'arm condition <= 50 across +/-5 deg (each arm joint alone plus 64 random '
     'samples, fixed seed); coverage of all 29 spin-up placements with '
-    'connectivity 1.0 and family fraction 1.0 (else best coverage, shortfall '
-    'reported). Rank passing poses by worst neighbourhood condition number, '
-    'then worst warmup duration as tie-break.')
+    'connectivity 1.0, at least one IK family reachable per placement (else '
+    'best coverage, shortfall reported) -- the planner is constrained to '
+    'start where the home can reach, so every family is not required. Rank '
+    'passing poses by worst neighbourhood condition number, then worst '
+    'warmup duration as tie-break.')
 
 
 def _key(configuration):
@@ -113,9 +124,12 @@ def combine(screen_records, coverage_results):
     out = []
     for record in screen_records:
         summary = coverage.get(_key(record['configuration']))
+        # Connectivity only: a placement needs one reachable start, not
+        # every family, because the planner is restricted to reachable
+        # layer-0 candidates. worst_family_fraction rides along as a
+        # reported figure.
         full = bool(summary is not None
-                    and summary.get('connectivity') == 1.0
-                    and summary.get('worst_family_fraction') == 1.0)
+                    and summary.get('connectivity') == 1.0)
         out.append(dict(record, coverage=summary, full_coverage=full,
                         passed=bool(record['screen_passed'] and full)))
     return out

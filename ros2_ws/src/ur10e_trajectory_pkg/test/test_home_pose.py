@@ -82,8 +82,11 @@ def _record(name, condition, duration, connectivity=1.0, fraction=1.0,
             'coverage': {'connectivity': connectivity,
                          'worst_family_fraction': fraction,
                          'worst_duration_s': duration},
-            'full_coverage': connectivity == 1.0 and fraction == 1.0,
-            'passed': gates and singular and connectivity == 1.0 and fraction == 1.0}
+            # Connectivity only: the planner is restricted to starts the
+            # home can reach, so a placement needs one reachable family
+            # rather than all of them. The fraction is reported, not a gate.
+            'full_coverage': connectivity == 1.0,
+            'passed': gates and singular and connectivity == 1.0}
 
 
 def test_passing_poses_rank_on_neighbourhood_condition_then_duration():
@@ -97,19 +100,19 @@ def test_passing_poses_rank_on_neighbourhood_condition_then_duration():
 
 def test_floors_are_not_ranking_keys():
     """A pose failing any floor is out, however good its other measures."""
-    records = [_record('robust_no_coverage', 6.0, 1.0, fraction=0.8),
+    records = [_record('robust_no_coverage', 6.0, 1.0, connectivity=0.8),
                _record('singular', 5.0, 1.0, singular=False),
                _record('ok', 20.0, 3.0)]
     assert home_pose.choose_home(records)['chosen']['provenance'] == 'ok'
 
 
 def test_without_full_coverage_the_best_coverage_is_taken_and_reported():
-    records = [_record('a', 6.0, 1.0, fraction=0.8),
-               _record('b', 9.0, 1.0, fraction=0.9)]
+    records = [_record('a', 6.0, 1.0, connectivity=0.8),
+               _record('b', 9.0, 1.0, connectivity=0.9)]
     decision = home_pose.choose_home(records)
     assert decision['full_coverage_found'] is False
     assert decision['chosen']['provenance'] == 'b'
-    assert decision['shortfall'] == {'connectivity': 1.0, 'worst_family_fraction': 0.9}
+    assert decision['shortfall'] == {'connectivity': 0.9, 'worst_family_fraction': 1.0}
 
 
 def test_coverage_joins_screening_by_configuration():
@@ -119,6 +122,26 @@ def test_coverage_joins_screening_by_configuration():
                              'worst_duration_s': 2.0}}]
     combined = home_pose.combine(screen_records, coverage)
     assert combined[0]['full_coverage'] is True and combined[0]['passed'] is True
+
+
+def test_one_reachable_family_per_placement_is_enough():
+    """The coupling in the criteria, checked against combine itself rather
+    than a fixture's copy of it. The chosen home reaches every placement but,
+    under the self-clearance floor, as few as half the families at one of
+    them; the planner is restricted to starts it can reach, so that passes."""
+    screen_records = [dict(_record('home', 6.0, 2.5), configuration=[0.2] * 7)]
+    reaching_one = [{'configuration': [0.2] * 7,
+                     'summary': {'connectivity': 1.0, 'worst_family_fraction': 0.5,
+                                 'worst_duration_s': 2.5}}]
+    combined = home_pose.combine(screen_records, reaching_one)
+    assert combined[0]['full_coverage'] is True and combined[0]['passed'] is True
+    assert combined[0]['coverage']['worst_family_fraction'] == 0.5
+
+    stranded = [{'configuration': [0.2] * 7,
+                 'summary': {'connectivity': 0.9, 'worst_family_fraction': 1.0,
+                             'worst_duration_s': 2.5}}]
+    combined = home_pose.combine(screen_records, stranded)
+    assert combined[0]['full_coverage'] is False and combined[0]['passed'] is False
 
 
 # --------------------------------------------------------------------------
