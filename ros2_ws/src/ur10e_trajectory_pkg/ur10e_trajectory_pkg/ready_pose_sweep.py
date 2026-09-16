@@ -98,9 +98,25 @@ COLLISION_STEP_RAIL_M = 0.05
 COLLISION_STEP_ARM_RAD = 0.05
 
 
+# Self-clearance resolution, finer than the collision resolution. Measured
+# rather than assumed: across 421 feasible approaches for the chosen home,
+# the worst clearances sit at the floor itself (minimum 10.0 mm, 5% within
+# 1 mm of it), so what the coarser stride steps over is exactly what decides
+# the verdict. A boolean collision test tolerates a coarse stride because
+# links either touch or do not; a margin does not.
+SELF_CLEARANCE_STEP_RAIL_M = 0.01
+SELF_CLEARANCE_STEP_ARM_RAD = 0.01
+
+
 def collision_step_bounds():
     """Per-joint resolution bound, in JOINT_NAMES order."""
     return np.array([COLLISION_STEP_RAIL_M] + [COLLISION_STEP_ARM_RAD] * 6)
+
+
+def self_clearance_step_bounds():
+    """Per-joint resolution bound for the clearance query, finer than above."""
+    return np.array([SELF_CLEARANCE_STEP_RAIL_M]
+                    + [SELF_CLEARANCE_STEP_ARM_RAD] * 6)
 
 
 def placements(envelope=PROVISIONAL_STAGE7_ENVELOPE_V2, seed=0):
@@ -632,12 +648,13 @@ def approach_collides(validator, position, step_bounds=None, counter=None,
 def approach_self_clearance(validator, position, step_bounds=None):
     """Worst non-adjacent self-clearance along an approach.
 
-    At the same instants approach_collides queries, so an approach is judged
-    on one sampling. The boolean test flickers on a grazing pair; this
-    reports how close the approach actually comes, which is what the floor
-    is stated against.
+    On its own, finer sampling: the collision stride may step over the
+    closest pass, which decides nothing for a boolean test but is the whole
+    answer for a margin. step_bounds, when given, overrides it.
     """
     position = np.asarray(position, dtype=float)
+    if step_bounds is None:
+        step_bounds = self_clearance_step_bounds()
     indices = (np.array([0]) if len(position) < 2
                else collision_check_indices(position, step_bounds))
     worst, links, at = np.inf, None, None
@@ -646,7 +663,8 @@ def approach_self_clearance(validator, position, step_bounds=None):
         if result['distance_m'] < worst:
             worst, links, at = result['distance_m'], result['links'], int(index)
     return {'min_distance_m': float(worst), 'links': links, 'at_sample': at,
-            'samples': int(len(indices))}
+            'samples': int(len(indices)),
+            'achieved_step': achieved_step(position, indices, step_bounds)}
 
 
 # Largest arm step between consecutive prefix layers that can be a genuine
@@ -863,7 +881,9 @@ def evaluate_approach(validator, ready, target, entry_velocity,
                                'approach may still exist around the obstacle',
                      'duration_s': duration}, **stats)
 
-    self_clearance = approach_self_clearance(validator, position, step_bounds)
+    # Deliberately not the collision step_bounds: the margin needs the finer
+    # stride, and it is only paid on approaches that already passed collision.
+    self_clearance = approach_self_clearance(validator, position)
     if self_clearance['min_distance_m'] < min_self_clearance_m:
         return dict({'feasible': False, 'reason_code': REASON_SELF_CLEARANCE,
                      'reason': 'approach passes within the self-clearance '

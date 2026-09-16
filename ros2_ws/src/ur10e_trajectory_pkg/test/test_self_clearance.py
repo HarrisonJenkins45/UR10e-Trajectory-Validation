@@ -144,3 +144,39 @@ def test_graph_candidates_are_filtered_by_condition_and_self_clearance(tmp_path,
     kept, stats = graph_planner.filter_self_clearance(validator, layers, 0.010)
     assert [len(l) for l in kept] == [1, 1]
     assert stats['removed_total'] == 1 and stats['queries'] == 3
+
+
+def test_the_clearance_query_samples_finer_than_the_collision_check(validator, compact):
+    """The worst feasible approaches sit at the floor, so the stride that
+    decides the margin must be finer than the one that decides contact."""
+    assert np.all(sweep.self_clearance_step_bounds() < sweep.collision_step_bounds())
+
+    approach = np.stack([compact + np.concatenate(([0.004 * i], np.full(6, 0.004 * i)))
+                         for i in range(200)])
+    coarse = sweep.collision_check_indices(approach, sweep.collision_step_bounds())
+    fine = sweep.approach_self_clearance(validator, approach)
+    assert fine['samples'] > len(coarse)
+    assert np.all(fine['achieved_step'] <= 1.0 + 1e-9)
+
+
+def test_a_close_pass_between_collision_samples_is_still_seen(validator, compact,
+                                                              monkeypatch):
+    """A dip the collision stride steps over is what the finer stride exists
+    to catch. Rail steps of 0.02 m put the coarse 0.05 m bound on every
+    second sample, so a dip on an odd one is invisible to it."""
+    approach = np.stack([compact + np.concatenate(([0.02 * i], np.zeros(6)))
+                         for i in range(40)])
+
+    def clearance(q, max_distance=0.05):
+        near = bool(np.allclose(q, approach[7], atol=1e-12))
+        return {'distance_m': 0.004 if near else 0.05,
+                'links': ('forearm_link', 'wrist_2_link')}
+
+    monkeypatch.setattr(validator, 'self_clearance', clearance)
+    coarse = sweep.approach_self_clearance(validator, approach,
+                                           step_bounds=sweep.collision_step_bounds())
+    fine = sweep.approach_self_clearance(validator, approach)
+    assert 7 not in sweep.collision_check_indices(approach, sweep.collision_step_bounds())
+    assert coarse['min_distance_m'] == 0.05
+    assert fine['min_distance_m'] == 0.004
+    assert fine['at_sample'] == 7
