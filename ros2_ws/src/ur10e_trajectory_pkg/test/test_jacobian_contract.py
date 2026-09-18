@@ -1,41 +1,50 @@
 #!/usr/bin/env python3
-"""Contract tests for the Jacobian used by the singularity check.
+"""Stage 1 gate: the Jacobians are correct, and say which is which.
 
-Two defects are recorded here as strict expected failures rather than fixed.
-Repairing either changes which trajectories validate, so both belong with the
-verification work rather than in a cleanup branch:
+Two functions with separate jobs, both taking the complete seven-joint
+configuration and returning twists in the world frame:
 
-1. compute_jacobian passes six arm angles to a seven-joint robot.
-   roboticstoolbox pads the short vector with a trailing zero instead of
-   raising, so every joint shifts one position -- the rail receives the
-   shoulder pan value, and wrist_3 is pinned to zero. The condition number
-   the validator reports therefore describes a configuration the robot is
-   not in. Measured on one pose: rank 5 and 2.5e16 as computed, against
-   rank 6 and 66.0 for the same pose with the full joint vector.
+  compute_system_jacobian  6x7  can the rail and arm together produce a
+                                commanded Cartesian motion?
+  compute_arm_jacobian     6x6  is the UR arm itself near a kinematic
+                                singularity, which the rail cannot rescue?
 
-2. The home seed sits on a wrist singularity. HOME_Q has wrist_2 = 0, the
-   classic UR degeneracy where the wrist_1 and wrist_3 axes align. Its true
-   condition number is infinite. Defect 1 hides this, because the shifted
-   metric reports an unremarkable number instead.
+These replace a single function that took six arm angles. roboticstoolbox
+padded that short vector with a trailing zero rather than raising, so every
+joint shifted one position and wrist_3 was pinned to zero. The reported
+condition number described a configuration the robot was not in: rank 5 and
+2.5e16 on a pose whose true values are rank 6 and 66.0.
 
-Fixing 1 without also moving the seed off the singularity would make every
-trajectory seeded from home fail its own singularity check.
+Correctness is established against central finite differences of forward
+kinematics, so these tests do not simply restate the same library call.
 """
 import numpy as np
 import pytest
 from ament_index_python.packages import get_package_share_directory
 
-from ur10e_trajectory_pkg.Validate_trajServer import HOME_Q
+from ur10e_trajectory_pkg.configurations import (
+    ARM_SLICE,
+    JOINT_NAMES,
+    LEGACY_MATLAB_START_Q,
+    NUM_JOINTS,
+)
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
 from test_geometry_invariants import _urdf_path
 
 EE_LINK = 'tool0'
-ARM_BASE = 'base_link'
 
-# A pose away from the home wrist singularity, used where the test needs a
-# well-conditioned configuration to compare against.
-GENERIC_ARM_DEG = (0.0, -135.0, 90.0, -90.0, 45.0, 0.0)
+# Step for central differences: large enough that the pose change clears
+# numerical noise, small enough that second-order terms stay negligible.
+FD_STEP = 1e-6
+FD_TOL = 1e-6
+
+# Postures clear of the wrist degeneracy, spanning different arm shapes.
+NONSINGULAR_ARMS_DEG = (
+    (0.0, -135.0, 90.0, -90.0, 45.0, 0.0),
+    (30.0, -100.0, 60.0, -70.0, 80.0, 25.0),
+    (-45.0, -120.0, 110.0, -60.0, -50.0, 90.0),
+)
 
 
 @pytest.fixture(scope='module')
@@ -47,7 +56,7 @@ def validator():
     )
 
 
-def _q(rail_m, *arm_deg):
+def _q(rail_m, arm_deg):
     return np.concatenate(([rail_m], np.deg2rad(arm_deg)))
 
 
@@ -56,90 +65,167 @@ def _condition(jacobian):
     return sv[0] / sv[-1] if sv[-1] > 1e-12 else np.inf
 
 
-def test_short_joint_vector_is_padded_rather_than_rejected(validator):
-    """Document the library behaviour that causes the mis-indexing.
+def _log_so3(rotation):
+    """Rotation-vector form of a rotation matrix.
 
-    roboticstoolbox accepts a six-element vector for a seven-joint robot and
-    pads it with a trailing zero. Nothing warns. This test describes the
-    toolbox, not our code, so it keeps passing after the defect is fixed and
-    explains why it happened.
+    Angular error comes from the relative rotation's logarithm rather than
+    from subtracting quaternion or Euler components, which are not
+    differences in any useful sense and break across sign flips and wrap.
     """
-    arm = np.deg2rad(GENERIC_ARM_DEG)
-    short = validator.robot.jacobe(arm, end=EE_LINK, start=ARM_BASE)
-    padded = validator.robot.jacobe(
-        np.concatenate((arm, [0.0])), end=EE_LINK, start=ARM_BASE
+    angle = np.arccos(np.clip((np.trace(rotation) - 1.0) / 2.0, -1.0, 1.0))
+    if angle < 1e-12:
+        return np.zeros(3)
+    axis = np.array([
+        rotation[2, 1] - rotation[1, 2],
+        rotation[0, 2] - rotation[2, 0],
+        rotation[1, 0] - rotation[0, 1],
+    ]) / (2.0 * np.sin(angle))
+    return axis * angle
+
+
+def _finite_difference_column(validator, q_full, joint_index, step=FD_STEP):
+    """Central-difference twist for one joint, in the world frame."""
+    forward, backward = np.array(q_full, float), np.array(q_full, float)
+    forward[joint_index] += step
+    backward[joint_index] -= step
+
+    pose_forward = validator.robot.fkine(forward, end=EE_LINK)
+    pose_backward = validator.robot.fkine(backward, end=EE_LINK)
+
+    linear = (pose_forward.t - pose_backward.t) / (2.0 * step)
+    angular = _log_so3(pose_forward.R @ pose_backward.R.T) / (2.0 * step)
+    return np.concatenate((linear, angular))
+
+
+# --------------------------------------------------------------------------
+# Shapes, ordering and input validation
+# --------------------------------------------------------------------------
+
+def test_system_jacobian_has_one_column_per_joint(validator):
+    jacobian = validator.compute_system_jacobian(_q(1.5, NONSINGULAR_ARMS_DEG[0]))
+    assert jacobian.shape == (6, NUM_JOINTS)
+    assert len(JOINT_NAMES) == NUM_JOINTS
+
+
+def test_arm_jacobian_is_six_by_six(validator):
+    jacobian = validator.compute_arm_jacobian(_q(1.5, NONSINGULAR_ARMS_DEG[0]))
+    assert jacobian.shape == (6, 6)
+
+
+def test_arm_jacobian_is_the_arm_columns_of_the_system_jacobian(validator):
+    """Same configuration, same frame, so the two are directly comparable."""
+    q_full = _q(1.2, NONSINGULAR_ARMS_DEG[1])
+    np.testing.assert_allclose(
+        validator.compute_arm_jacobian(q_full),
+        validator.compute_system_jacobian(q_full)[:, ARM_SLICE],
+        atol=1e-12,
     )
-    np.testing.assert_allclose(short, padded)
 
 
-def test_rail_column_has_no_angular_component(validator):
-    """The rail is prismatic, so it can supply no angular velocity.
+@pytest.mark.parametrize('bad_length', [1, 6, 8, 14])
+def test_wrong_sized_configurations_are_rejected(validator, bad_length):
+    """The six-value call is the defect this API exists to prevent.
 
-    It restages posture and so changes the arm's available angular authority,
-    but contributes nothing to end-effector rotation directly. Worth pinning
-    because the near-term goal is orientation-only tumbling motion, where
-    this is the difference between the rail helping and the rail mattering.
+    Six is the plausible mistake, being the arm without the rail, and it is
+    exactly the shape roboticstoolbox silently padded.
     """
-    for rail_m in (0.5, 1.5, 2.5):
-        jacobian = validator.robot.jacob0(_q(rail_m, *GENERIC_ARM_DEG), end=EE_LINK)
-        np.testing.assert_allclose(jacobian[3:, 0], np.zeros(3), atol=1e-12)
+    for method in (validator.compute_system_jacobian, validator.compute_arm_jacobian):
+        with pytest.raises(ValueError, match=str(NUM_JOINTS)):
+            method(np.zeros(bad_length))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='Known defect: compute_jacobian passes 6 angles to a 7-joint '
-           'robot, which pads with a trailing zero and shifts every joint '
-           'one position. Pass the full q vector, then delete this marker.',
-)
-def test_arm_jacobian_matches_the_full_joint_vector(validator):
-    """The singularity metric must describe the configuration actually solved.
+@pytest.mark.parametrize('bad_value', [np.nan, np.inf, -np.inf])
+def test_non_finite_configurations_are_rejected(validator, bad_value):
+    q_full = _q(1.5, NONSINGULAR_ARMS_DEG[0])
+    q_full[3] = bad_value
+    with pytest.raises(ValueError, match='finite'):
+        validator.compute_system_jacobian(q_full)
 
-    Whether the metric should cover the arm subchain or all seven joints is a
-    separate design decision. Either way it has to be evaluated at the real
-    configuration, which is what this asserts.
+
+# --------------------------------------------------------------------------
+# Correctness against finite differences of forward kinematics
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize('arm_deg', NONSINGULAR_ARMS_DEG)
+def test_every_column_matches_central_differences(validator, arm_deg):
+    """Independent check: differentiate FK rather than trust the same call.
+
+    Angular rows use the relative-rotation logarithm, so this catches a
+    Jacobian that is right in translation and wrong in rotation.
     """
-    q_full = _q(1.5, *GENERIC_ARM_DEG)
-    as_called = validator.compute_jacobian(q_full[1:])
-    at_true_configuration = validator.robot.jacobe(
-        q_full, end=EE_LINK, start=ARM_BASE
-    )
-    np.testing.assert_allclose(as_called, at_true_configuration, atol=1e-9)
+    q_full = _q(1.4, arm_deg)
+    analytic = validator.compute_system_jacobian(q_full)
+    for joint_index in range(NUM_JOINTS):
+        numeric = _finite_difference_column(validator, q_full, joint_index)
+        np.testing.assert_allclose(
+            analytic[:, joint_index], numeric, atol=FD_TOL,
+            err_msg=f'column {joint_index} ({JOINT_NAMES[joint_index]}) '
+                    'disagrees with finite differences',
+        )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='Known defect: HOME_Q has wrist_2 = 0, a UR wrist singularity, so '
-           'its true condition number is infinite. Move the seed off the '
-           'degeneracy, then delete this marker.',
-)
-def test_home_seed_is_not_singular(validator):
-    """The default start pose must not sit on a singularity.
+def test_rail_column_is_pure_translation_along_the_modelled_axis(validator):
+    """The rail is prismatic along world X.
 
-    Every retry is a small perturbation of this seed, so a singular home keeps
-    the search inside a degenerate basin and makes rejection the default
-    outcome rather than a finding about the trajectory.
+    The zero angular part is what makes it unable to supply angular velocity,
+    which matters for the orientation-only tumbling case. Unit linear
+    magnitude is what makes a metre of rail a metre of tool travel.
     """
-    q_full = np.concatenate(([1.5], HOME_Q[1:]))
-    jacobian = validator.robot.jacobe(q_full, end=EE_LINK, start=ARM_BASE)
+    for rail_m in (0.0, 1.5, 3.0):
+        column = validator.compute_system_jacobian(
+            _q(rail_m, NONSINGULAR_ARMS_DEG[0])
+        )[:, 0]
+        np.testing.assert_allclose(column[3:], np.zeros(3), atol=1e-12)
+        np.testing.assert_allclose(column[:3], np.array([1.0, 0.0, 0.0]), atol=1e-9)
+
+
+# --------------------------------------------------------------------------
+# Singularity classification
+# --------------------------------------------------------------------------
+
+def test_legacy_start_posture_is_classified_rank_deficient(validator):
+    """The legacy MATLAB posture is singular, and must be seen to be.
+
+    wrist_2 = 0 aligns the wrist_1 and wrist_3 axes. The previous metric
+    reported an unremarkable number for it, which is how a singular posture
+    survived as the default seed.
+    """
+    q_full = np.concatenate(([1.5], LEGACY_MATLAB_START_Q[ARM_SLICE]))
+    jacobian = validator.compute_arm_jacobian(q_full)
+    assert np.linalg.matrix_rank(jacobian) == 5
+    assert not np.isfinite(_condition(jacobian))
+
+
+@pytest.mark.parametrize('arm_deg', NONSINGULAR_ARMS_DEG)
+def test_nonsingular_postures_recover_full_rank(validator, arm_deg):
+    jacobian = validator.compute_arm_jacobian(_q(1.5, arm_deg))
     assert np.linalg.matrix_rank(jacobian) == 6
-    assert _condition(jacobian) < 50.0
+    assert np.isfinite(_condition(jacobian))
 
 
-def test_wrist_singularity_is_at_wrist_2_zero(validator):
-    """Pin the cause, so the home fix is aimed at the right joint.
-
-    Rank recovers as wrist_2 moves off zero; conditioning improves
-    monotonically with it over this range.
-    """
-    q_singular = _q(1.5, 0.0, -135.0, 90.0, -90.0, 0.0, 0.0)
-    singular = validator.robot.jacobe(q_singular, end=EE_LINK, start=ARM_BASE)
-    assert np.linalg.matrix_rank(singular) == 5
-
+def test_conditioning_improves_as_wrist_2_leaves_zero(validator):
+    """Pin the cause, so a seed sweep is aimed at the right joint."""
     previous = np.inf
     for wrist_2_deg in (5.0, 20.0, 45.0):
-        q_off = _q(1.5, 0.0, -135.0, 90.0, -90.0, wrist_2_deg, 0.0)
-        jacobian = validator.robot.jacobe(q_off, end=EE_LINK, start=ARM_BASE)
+        jacobian = validator.compute_arm_jacobian(
+            _q(1.5, (0.0, -135.0, 90.0, -90.0, wrist_2_deg, 0.0))
+        )
         assert np.linalg.matrix_rank(jacobian) == 6
         current = _condition(jacobian)
         assert current < previous
         previous = current
+
+
+def test_rail_position_does_not_change_arm_conditioning(validator):
+    """Sliding the base translates the arm without reorienting it.
+
+    Arm conditioning is therefore a property of the arm's posture alone.
+    Worth pinning: it is why the rail cannot rescue a wrist singularity, and
+    why the two Jacobians answer different questions.
+    """
+    conditions = [
+        _condition(validator.compute_arm_jacobian(_q(rail_m, NONSINGULAR_ARMS_DEG[2])))
+        for rail_m in (0.0, 1.5, 3.0)
+    ]
+    for value in conditions[1:]:
+        assert value == pytest.approx(conditions[0], rel=1e-9)

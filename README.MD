@@ -1,291 +1,111 @@
-# ROS Trajectory Simulator for UR10e
+# UR10e rail-and-arm trajectory planning
 
-## Table of Contents
-**1. Current Features**                     <-- Current capability of the repo
+This ROS 2 Humble workspace plans a continuous motion for a UR10e on a linear
+rail (seven joints) to reproduce a section of a SISIFOS target's triaxial
+tumble. It searches an unseen recording for a planner-certified section of at
+least 60 seconds. The fast search aims to return a first certificate within a
+five-minute wall-clock budget; it does **not** guarantee finding one, proving
+infeasibility, or finding the longest possible section.
 
-**2. Features In Progress/Current goals**   <-- Features that still need to be implmented
+## Current scope and safety boundary
 
-**3. Set Up and Running Guide**             <-- How to set up and run the code
+- Input motion is `q_I_G` only: the attitude of target body frame G in the
+  inertial frame I. Required CSV columns are `timestamp`, `q_I_G_x`,
+  `q_I_G_y`, `q_I_G_z`, and `q_I_G_w`. SISIFOS translation is ignored. The
+  target is placed at a fixed, legacy arena position; placement optimization
+  and camera-relative motion are not part of this branch.
+- The mount transform `T_EG` (target body G in robot tool frame E) is a
+  **provisional identity**. Every exported plan records it. It must be
+  established for the real mock-up before hardware use.
+- A passing plan includes a home-to-start warmup, spin-up from rest, a lifted
+  seven-joint task path, refinement, and continuous command validation for
+  tracking, joint limits, velocity, collision and self-clearance. The rail
+  velocity planning cap is **0.5 m/s**.
+- Arm acceleration is provisional; arm jerk and rail acceleration and jerk
+  are assumed. The validator gates acceleration and jerk against those
+  provisional values, which are planning policy, **not validated hardware
+  capability**. A passing plan is **planner-certified, not hardware-certified**.
+  The RViz preview is visualization, not a hardware command.
 
-**4. File Structure and notes to user**     <-- Important notes about assumptions in a few files for the user to note
+## Run a section search
 
-**5. Key notation and Frame definitions**
-
-
-## Current Features
-**<u>ROS Communication</u>**
-
-* ROS Server: `Validate_trajServer.py`
-* ROS Client: `ClientNode.py`
-
-**<u>Works directly from SISIFOS </u>**
-
-* Reads in a .csv of spacecraft coordinates relative to a target (ASTROS) and transforms them into end effector coordinates relative to the base of the UR10e robot arm
-
-**<u>Finds safe segments</u>**
-
-* Checks each waypoint for:
-    - Large joint accelerations (default 2.0 rad/s)
-        - Threshold can be set in validation_core's find_feasible_segments() function
-    - Singularities
-        - Uses numerical condition number to verify controlabillity (default threshold is 50.0)
-            - Threshold can be set in validation_core's find_feasible_segments() function
-    - Collisions
-        - Uses pybullet to check for self-instersections and collisions with the wall and/or floor
-* If the full trajectory is not safe, `validation_core.py` finds all the safe segments
-    * `Validate_trajServer.py` includes a hyperparameter for the number of safe way points in a row before a segment is reported.
-
-
-**<u>RViz Simulation </u>**
-
-* Displays the UR10e arm and rail with the lab's wall (in gold) and wall (in dark grey) as a validated trajectory is performed
-    * `VisualizeTraj_RvizPlayback.py`
-    * `obstacle_markers.py`
-
-**<u> SISIFOS relative rail read-in</u>**
-* Need to make sure the rail is properly situated relative to the home position in the arena
-
-**<u>Base translation </u>**
-* Includes the rail as a 7th degree of freedom in all IK optimizations
-
-
-**<u>Orientation only simulation </u>**
-* Update ClientNode.py to clearly define each frame (with the A frame equal to the G frame for ow)
-* As an immediate goal want hold the translation of the A/G frame constant and simulate pure tumbling motion based on the quaterions
-
-
-## Features In progress
-
-**<u>Get accurate features for URDF </u>**
-* Need to update the rail with accurate specs based
-* Validation_core should get the rail velocity limit from the URDF
-* How is the rail joint perpendicular to the direction of travel in the URDF, but it looks fine in Sim
-* Get the proper distance for the rail join origin
-currently: linear_rail_joint has origin xyz="0 0 0.025"
-
-
-**<u>Joint velocity checking on the rail </u>**
-* Current code lacks a way to limit rail velocities that would produce non-feasible/unsafe rail commands
-    * Documentation suggests that the max speed is 5m/s?? and max accel is 60 m/s^2??
-
-
-**<u>Connecting to Hardware </u>**
-* Reading in true relative locations from VICON
-* Setup external driver to run the UR10e after a trajectory is validated
-
-
-
-## Set Up and Running Guide 
-
-### Cloning: read this first
-
-`ros2_ws/src/Universal_Robots_ROS2_Description` is a **git submodule**, pinned to
-release 2.13.0 of the official Universal Robots description package. It supplies
-every mesh and all the collision geometry the validator loads, so the workspace
-will not build if it is missing. A plain `git clone` leaves that directory empty.
-
-Clone with the submodule included:
+Clone with the pinned UR description submodule:
 
 ```bash
-git clone --recurse-submodules \
-  git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
+git clone --recurse-submodules git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
 ```
 
-Already cloned without it? Populate it after the fact:
+For an existing checkout, run `git submodule update --init --recursive`.
+Build the container from `ros2_ws/Dockerfile`. The planner commands below run
+**inside** a container (or a host) where the ROS workspace has been built and
+sourced; building the image alone does not install the package on the host.
+Provide the recording and a pinned `home_choice.json`:
+
+The home file is robot setup, reused across recordings—not a trajectory-specific
+search result. Its required shape is
+`{"chosen": {"configuration": [rail_m, six_arm_joint_radians]}}`.
+The planner rechecks this pose and will not substitute another one. No home
+pose is certified for physical hardware by this repository.
 
 ```bash
-git submodule update --init --recursive
+docker build -t ur10e_sim ros2_ws
+python3 -m ur10e_trajectory_pkg.fast_section \
+    --csv camera_traj.csv --home-json home_choice.json \
+    --work-dir runs/sections --workers 12
 ```
 
-Check it is present and sitting on the pinned commit:
+`--via-poses screened_poses.json` optionally supplies vetted intermediate
+warmup poses. `fast_section` publishes `best_plan.json` immediately when it
+certifies at least 60 seconds, and writes `fast_section.json` and a probe
+journal. If it returns `inconclusive_under_this_budget` or
+`none_found_under_this_search`, it has **not** shown that the recording lacks a
+feasible section: its on-demand beam search is incomplete.
+
+Use the same work directory to spend a separate budget extending a found
+section. The journal allows the longer search to replay the existing
+certificate rather than rediscover it:
 
 ```bash
-git submodule status
-#  18e6f603b3eb... ros2_ws/src/Universal_Robots_ROS2_Description (2.13.0)
+python3 -m ur10e_trajectory_pkg.section_planner \
+    --csv camera_traj.csv --home-json home_choice.json \
+    --work-dir runs/sections --workers 12 --budget-probes 8
 ```
 
-The first character matters. A space means the checkout matches the pin. A `-`
-means the submodule is not initialised, so the directory is empty. A `+` means
-the checkout has drifted off the pinned commit.
+That command writes `sections.json` and `best_plan.json`. Its reported length
+is the longest **certified by that finite search**, not a global maximum. The
+exhaustive candidate-graph mode (`--engine pipeline`) can bound a particular
+start when its graph disconnects, but is much slower and still does not prove
+that every section of a recording is infeasible.
 
-Note that `git pull` does **not** update submodule contents. After pulling a
-commit that changes the pin, run `git submodule update --init --recursive`
-again, or the meshes will silently stay at the old version.
+## Inspect a certified plan in RViz
 
-### Updating the pinned version
-
-The pin is a specific commit recorded in this repo, not a moving reference, so
-it changes only when someone deliberately changes it and commits the result:
+In a built and sourced ROS workspace:
 
 ```bash
-cd ros2_ws/src/Universal_Robots_ROS2_Description
-git fetch origin
-git checkout <tag or commit>     # e.g. 2.13.0
-cd -
-git add ros2_ws/src/Universal_Robots_ROS2_Description
-git commit -m "Bump UR description to <version>"
+ros2 launch ur10e_trajectory_pkg PreviewPlan_Rviz.py \
+    plan:=/path/to/best_plan.json csv:=/path/to/the/same/camera_traj.csv
 ```
 
-`git submodule update --remote` does the same thing but jumps to the tip of the
-`humble` branch rather than a tag you chose. Either way the `git add` and commit
-are what actually record the new pin; without them nothing is saved.
+The preview verifies the recording digest and shows the arm, rail and target
+body frame. It can loop home, warmup and task; the reverse return is for
+display only and is **not certified**. Older plans may have their displayed
+warmup slowed to the current 0.5 m/s rail cap; that retimed warmup needs new
+validation before it is used as a command.
 
-Because the meshes drive both the rendered model and the collision geometry,
-re-run the test suite after any bump:
+## Test and reproduce
 
 ```bash
-colcon test --packages-select ur10e_trajectory_pkg
+cd ros2_ws
+./run_tests.sh
+./run_tests.sh -k slice_targets
 ```
 
-#### In terminal #1
-1) Clone the workspace as described above, making sure the submodule is populated
-2) Build the docker image from the DockerFile
+`run_tests.sh` builds out of tree and runs tests inside the pinned container.
+The Dockerfile pins its base image and Python dependencies. The reproducibility
+unit is the **built image**, because the apt repository state is not frozen by
+the base-image digest. Reports include the recording, model and code
+provenance so results from different inputs or revisions are not conflated.
 
-    - `cd ~/ros2_ws`
-
-    - `docker build -t ur10e_sim .`
-
-3) Mount the workspace to the docker image (ur10e_sim)
-
-    - Enable Rviz to run properly: `xhost +local:docker`
-    - Mount: `docker run -it --rm \
-    --name ur10e_sim \
-    -v ~/ros2_ws:/root/ros2_ws \
-    -v /tmp/.X11-unix:/tmp/.X11-unix
-    -e DISPLAY=$DISPLAY
-ur10e_sim bash`
-
-`
-4) Build and source the packages
-
-- Clear old cache: `rm -rf build install log` 
-- Build: `colcon build`
-- Source: `source install/setup.bash`
-
-
-5) Run the validation service
-
-    - `ros2 run ur10e_trajectory_pkg validation_server`
-
-
-#### In terminal #2
-1) Enter the docker container from Terminal #1
-    - `docker exec -it ur10e_sim bash`
-2) Create a node to publish visualize the obstacles
-    - `ros2 run ur10e_trajectory_pkg obstacle_markers`
-
-
-#### In terminal #3
-
-1) Enter the docker container from Terminal #1
-    - `docker exec -it ur10e_sim bash`
-2) Launch Rviz and connect to the /obstacle_markers and /joint_states topics
-    - `ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py`
-
-
-#### In terminal #4
-
-1) Enter the docker container from Terminal #1
-    - `docker exec -it ur10e_sim bash`
-2) Run the trajectory creation client to convert from SISIFOS to Arena coords and send a request to the server
-    - `ros2 run ur10e_trajectory_pkg trajectory_client`
-
-
-
-## File Structure and notes to user
-### Project root
-    ros2_ws
-        ├── ur10e.urdf
-        ├── test_validation_local.py      <-- Rviz doesn't work from ssh, this file can be used to test 
-                                            code locally (Replaces ClientNode.py and Validate_trajServer.py)
-        ├── validation_core.py            <-- Called by test_validation_local.py to validate the trajectory
-        ├── smoke_test.py                 <-- Use this to examine collisions reported from test_validation_local.py
-        ├── VisualizeContact.py           <-- Use this to examine a configuration and contact point from smoke_test.py
-        ├── contact_scene.png             <-- Example output of VisualizeContact.py
-        ├── src                           <-- Directory which contains the ROS architecture
-        └── Dockerfile                    <-- Builds a docker image with all the needed dependancies to 
-                                                mount the Ros2 workspace on. Is also compatible with Gazebo (for future controls work)
-    ros2_ws/src
-        ├── Universal_Robots_ROS2_Description <--Official Universal Robots package 
-                                                (for meshes and collision geometry)
-        ├── ur10e_interfaces  <--Interfaces Package
-        └── ur10e_trajectory_pkg<--Main Package
-
-### Interfaces Package
-    ros2_ws/src/ur10e_interfaces/srv
-        └── ValidateTrajectory.srv
-
-### Main Package
-
-    ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg
-        ├── ClientNode.py                   <-- Note that there is dummy code with a known 
-                                            feasible trajectory (not from SISIFOS) for testing purposes. 
-                                            Also the scale factor and the values of p_B_I and q_I_B are placeholders. 
-                                            The real values will come from VICON.
-
-        ├── Validate_trajServer.py          <-- Explaination of parameters below:
-            SKIP_COLLISION=True turns off collision checking for debugging purposes. 
-            USE_SEGMENT_FINDER=True turns on the ability to find feasible segments in a larger trajectory.
-            MIN_SEGMENT_LENGTH is the minimum number of safe waypoints before a segment is reported
-            DEFAULT_T_TRAJ, the timestep for the validation is computed as DEFAULT_T_TRAJ / (num_waypts-1)
-
-        ├── VisualizeTraj_RvizPlayback.py   
-        ├── __init__.py
-        ├── build
-        ├── camera_traj.csv                 <--Must ensure that you replace this with any new trajectories
-                                            you wish to check
-        ├── install
-        ├── log
-        ├── obstacle_markers.py              
-        ├── old.zip                          <-- Old code for reference/debugging
-        └── validation_core.py               
-
-## Key Notation and Frame Definitions
-
-For two points $X,Y\in\mathbb{E}^3$, we define the translation vector
-$$\vec r_{YX} \;\triangleq\; Y - X \in \mathbb{R}^3,$$
-which is the vector from $X$ to $Y$. A superscript indicates the expressing frame, e.g., $\vec r_{YX}^{\mathcal O}$.
-
-Rotations are indexed as $R_{XY}\in\mathrm{SO}(3)$ and map coordinates from frame $\mathcal Y$ to frame $\mathcal X$, expressed as
-$$v^{\mathcal X} = R_{XY}\,v^{\mathcal Y}.$$
-The inverse is $R_{YX}=R_{XY}^\top$. Rotation composition follows
-$$R_{XZ} = R_{XY}\,R_{YZ},$$
-which corresponds to applying $R_{YZ}$ first, then $R_{XY}$.
-
-A pose is denoted as $T_{XY} = (R_{XY},\,\vec r_{YX}^{\mathcal X}) \in \mathrm{SE}(3)$. Under pose composition $T_{XZ}=T_{XY}\circ T_{YZ}$, translations compose as
-$$\vec r_{ZX}^{\mathcal X} = \vec r_{YX}^{\mathcal X} + R_{XY}\,\vec r_{ZY}^{\mathcal Y}.$$
-
-We define a right-trivialized retraction (“$\boxplus$”) on $\mathrm{SO}(3)$ and $\mathrm{SE}(3)$ by
-$$R \boxplus \delta\theta \triangleq R\,\exp\!\big((\delta\theta)^\wedge\big),$$
-$$T \boxplus \delta\xi \triangleq T\,\exp\!\big((\delta\xi)^\wedge\big),$$
-where $\delta\theta\in\mathbb{R}^3$, $\delta\xi\in\mathbb{R}^6$, $(\cdot)^\wedge$ maps vector coordinates to the corresponding Lie algebra element, and $\exp(\cdot)$ denotes the matrix exponential.
-
-For $a=\begin{bmatrix}a_1 & a_2 & a_3\end{bmatrix}^\top\in\mathbb{R}^3$, the $\mathfrak{so}(3)$ wedge is
-$$a^\wedge \triangleq
-\begin{bmatrix}
-0 & -a_3 & a_2\\
-a_3 & 0 & -a_1\\
--a_2 & a_1 & 0
-\end{bmatrix},$$
-so that $a^\wedge b = a\times b$ for all $b\in\mathbb{R}^3$. Furthermore, for $\delta\xi=\begin{bmatrix}\delta\rho\\ \delta\phi\end{bmatrix}\in\mathbb{R}^6$, the $\mathfrak{se}(3)$ wedge is
-$$(\delta\xi)^\wedge \triangleq
-\begin{bmatrix}
-(\delta\phi)^\wedge & \delta\rho\\
-0^\top & 0
-\end{bmatrix}.$$
-Unless stated otherwise, Jacobians are with respect to these right-perturbation coordinates.
-
-Angular velocities follow the same indexing, such that $\vec\omega_{YX}^{\mathcal Y}$ is the angular velocity of frame $\mathcal Y$ relative to frame $\mathcal X$, expressed in frame $\mathcal Y$. With the rotation convention above,
-$$\dot R_{XY} = R_{XY}\,\big(\vec\omega_{YX}^{\mathcal Y}\big)^\wedge.$$
-
-We use the following reference frames:
-* $\mathcal{I}$: Earth-centered inertial (ECI) frame with origin $O$ at Earth's center of mass.
-* $\mathcal{S}$: Inspector spacecraft body-fixed frame with origin $S$ at the inspector's center of mass.
-* $\mathcal{G}$: Target body-fixed frame with origin $G$ at a geometric centroid of the initial SLAM-observed point cloud.
-* $\mathcal{A}$: Target COM frame with origin $A$ at the target's center of mass. $\mathcal{A}$ is aligned with $\mathcal{G}$ and offset from it by the constant but unknown vector $\vec r_{AG}^{\mathcal G}$.
-
-These frames are mapped to the arena as:
-* $\mathcal{I}$: Arena world
-* $\mathcal{S}$: ASTROS camera
-* $\mathcal{G}$: SLAM-Observed body frame
-* $\mathcal{A}$: End Effector/Enforced center of rotation
+The prior frame conventions and translation experiments remain in Git history
+and on their own branches; they are not implemented by the current
+orientation-only planner.

@@ -12,16 +12,39 @@ import numpy as np
 import pytest
 
 from ur10e_trajectory_pkg.Validate_trajServer import (
-    HOME_Q,
     NUM_JOINTS,
     resolve_start_pose,
 )
+from ur10e_trajectory_pkg.configurations import (
+    JOINT_NAMES,
+    LEGACY_MATLAB_START_Q,
+)
 
 
-def test_empty_field_falls_back_to_home():
-    q_start, description = resolve_start_pose([])
-    np.testing.assert_allclose(q_start, HOME_Q)
-    assert 'home' in description.lower()
+def test_omitted_field_is_rejected():
+    """No default start pose.
+
+    It used to fall back to the legacy MATLAB posture, so a caller that simply
+    forgot got a confident answer computed from a configuration the robot was
+    not in. That posture is singular as well, so the default also seeded the
+    solver on a degeneracy.
+    """
+    with pytest.raises(ValueError, match='required'):
+        resolve_start_pose([])
+
+
+def test_the_legacy_posture_is_still_accepted_explicitly():
+    """Simulation and the 370/500 regression still need it, stated outright."""
+    q_start, description = resolve_start_pose(LEGACY_MATLAB_START_Q.tolist())
+    np.testing.assert_allclose(q_start, LEGACY_MATLAB_START_Q)
+    assert 'client' in description.lower()
+
+
+def test_joint_names_and_length_agree_across_the_package():
+    """One definition of the ordering, not one per module."""
+    assert len(JOINT_NAMES) == NUM_JOINTS
+    assert JOINT_NAMES[0] == 'linear_rail_joint'
+    assert LEGACY_MATLAB_START_Q.shape == (NUM_JOINTS,)
 
 
 def test_supplied_pose_is_used_verbatim():
@@ -49,11 +72,11 @@ def test_wrong_length_is_rejected(bad_length):
 
 
 def test_result_does_not_alias_the_home_constant():
-    """Mutating a returned pose must not corrupt HOME_Q for later requests."""
-    before = HOME_Q.copy()
-    q_start, _ = resolve_start_pose([])
+    """A returned pose must not alias the shared legacy constant."""
+    before = LEGACY_MATLAB_START_Q.copy()
+    q_start, _ = resolve_start_pose(LEGACY_MATLAB_START_Q.tolist())
     q_start[0] = 99.0
-    np.testing.assert_allclose(HOME_Q, before)
+    np.testing.assert_allclose(LEGACY_MATLAB_START_Q, before)
 
 
 def test_resolution_depends_only_on_its_argument():
@@ -67,6 +90,6 @@ def test_resolution_depends_only_on_its_argument():
     np.testing.assert_allclose(first, second)
 
 
-def test_home_has_one_entry_per_actuated_joint():
-    assert HOME_Q.shape == (NUM_JOINTS,)
-    assert HOME_Q[0] == 0.0, 'rail should start at its zero (origin) end'
+def test_legacy_posture_has_one_entry_per_actuated_joint():
+    assert LEGACY_MATLAB_START_Q.shape == (NUM_JOINTS,)
+    assert LEGACY_MATLAB_START_Q[0] == 0.0, 'rail starts at its zero end'

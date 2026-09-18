@@ -12,8 +12,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
 
         ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj.py']),
-        ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py']),
-        # ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisTraj_Rviz.py']),
+        ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/PreviewPlan_Rviz.py']),
+        ('share/' + package_name + '/rviz', ['rviz/target_preview.rviz']),
 
     ],
 
@@ -31,6 +31,10 @@ setup(
 	    'obstacle_markers=ur10e_trajectory_pkg.obstacle_markers:main',
 
             'trajectory_client = ur10e_trajectory_pkg.ClientNode:main',
+            'trajectory_pipeline = ur10e_trajectory_pkg.pipeline:main',
+            'trajectory_sections = ur10e_trajectory_pkg.section_planner:main',
+            'trajectory_fast_section = ur10e_trajectory_pkg.fast_section:main',
+            'preview_certified_plan_rviz = ur10e_trajectory_pkg.preview_certified_plan_rviz:main',
             'joint_state_node = ur10e_trajectory_pkg.joint_state_node:main',
             'joint_state_to_gazebo_bridge = ur10e_trajectory_pkg.joint_state_to_gazebo_bridge:main',
         ],

@@ -1,0 +1,52 @@
+# ExecuteWarmup.srv -- command 1
+
+# Move the arm from where it is to where the task starts, rest to rest, before
+# command 2 (ValidateTrajectory) plays the task from that configuration.
+#
+# The service does not trust the caller's motion: it plans the rest-to-rest
+# move itself, validates it (velocity, acceleration and jerk limits, joint
+# limits, collision at every sample, rest at both ends), and plays it only if
+# that passes. A blocked straight move is refused as no_direct_warmup rather
+# than detoured.
+
+# Measured configuration now, [rail_m, 6x arm_rad] in q_full order. REQUIRED.
+float64[] q_start
+
+# Configuration the task starts from: the first configuration of command 2's
+# q_path, in its chosen winding. REQUIRED.
+float64[] q_target
+
+# The route's resting points, flattened [N x 7] in q_full order: where the
+# arm starts, any poses it stands still at on the way, and the task start.
+# OPTIONAL; empty means the straight move [q_start, q_target], which is the
+# common case.
+#
+# A start whose straight move collides is not unreachable, only blocked, so
+# the route may stand still at an intermediate pose and go around. The server
+# plans every leg itself from these points and refuses the whole route if any
+# leg fails, so a route arriving over the wire is still the server's own
+# motion rather than samples it was handed.
+float64[] rest_points
+
+# Which leg of the route to play, counting from 0. OPTIONAL, default 0.
+#
+# One leg per call, because the arm's position between legs has to be
+# MEASURED. This node deliberately does not subscribe to /joint_states -- it
+# publishes playback frames there, so subscribing would feed its own output
+# back -- and q_start is the only measurement it gets. Calling once per leg
+# is what makes the dwell check real: the caller sends what the encoders read
+# at the dwell, and the server checks it against the rest point that leg is
+# planned to start from, catching a leg that did not arrive where it planned.
+int32 segment_index
+
+---
+bool success
+string message
+float64 duration_s
+# Where the arm will be when this leg finishes: the next resting point, or
+# command 2's q_start on the last leg.
+float64[] end_configuration
+# Which leg was played, and how many the route has, so a caller knows
+# whether another call is due.
+int32 segment_index
+int32 segment_count

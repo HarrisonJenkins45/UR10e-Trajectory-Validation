@@ -19,9 +19,34 @@ float64[] sim_time
 # change which waypoints are reachable. Sending it explicitly is what makes
 # a validation result reproducible.
 #
-# Leave empty to start from the documented home pose. Any other length is
-# rejected rather than guessed at.
+# REQUIRED. An omitted or wrong-length field is rejected rather than
+# defaulted: a caller that forgets would otherwise get a confident answer
+# computed from a configuration the robot is not in. Simulation and
+# regression callers pass configurations.LEGACY_MATLAB_START_Q explicitly.
 float64[] q_start
+
+# Frame the ee_positions_* and ee_quat targets are expressed in. REQUIRED, and
+# validated rather than assumed: the only accepted value is "rail_base_link".
+#
+# This is a field rather than a comment because getting it wrong is silent.
+# The rail base is FIXED; the UR base_link rides the carriage and moves with
+# the rail, so targets expressed relative to it disagree with the solver by
+# the rail position plus the 25 mm carriage mount height. That is the
+# discrepancy the solver docstring carried as a known issue, and a frame-free
+# array of numbers gives nobody a way to notice it.
+string target_frame
+
+# The joint path to play, flattened [N x 7] in q_full order, one configuration
+# per target, in the same order: the path the planner produced and offline
+# validation checked, in its chosen winding. REQUIRED.
+#
+# The service used to re-solve the trajectory itself, greedily from q_start.
+# A re-solve can follow a different solution branch from the one that was
+# validated, so the robot could run a path nobody checked. The service now
+# verifies THIS path against the targets, joint limits, velocity limits and
+# collision, checks the measured start against its first configuration, and
+# plays exactly it.
+float64[] q_path
 
 ---
 # 2. RESPONSE (Output sent back to the main script)
