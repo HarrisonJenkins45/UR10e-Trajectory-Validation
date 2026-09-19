@@ -222,7 +222,7 @@ def test_collision_is_invariant_under_a_legal_lift(validator):
 @pytest.fixture(scope='module')
 def tracked(validator):
     pytest.importorskip('pandas')
-    from ur10e_trajectory_pkg.failure_census import load_trajectory, run_tracking
+    from ur10e_trajectory_pkg.planning_runtime import load_trajectory, run_tracking
     try:
         targets, quaternions, dt = load_trajectory(None, 500)
     except FileNotFoundError:

@@ -2,7 +2,7 @@
 """One command per trajectory: the stages, their order, and the backstop.
 
 The stages themselves are tested where they live. What matters here is that
-the pipeline runs them in order with flags that agree about placement,
+the pipeline runs them in order with flags that agree about recording,
 waypoints and spin-up, stops at the first failure, and rebuilds the graph
 with a stricter filter exactly when the whole path turns out to have no
 valid winding.
@@ -16,7 +16,7 @@ from ur10e_trajectory_pkg import pipeline
 
 
 def _args(tmp_path, **overrides):
-    values = {'placement': 'nominal', 'csv': None, 'waypoints': 500, 'spin_up_s': 2.0,
+    values = {'csv': None, 'waypoints': 500, 'spin_up_s': 2.0,
               'home_json': str(tmp_path / 'home.json'), 'via_poses': None,
               'strict_home_windings': False, 'urdf': '/root/ros2_ws/ur10e.urdf',
               'work_dir': str(tmp_path / 'run'), 'summary': None}
@@ -58,8 +58,7 @@ PASSING = {'both_commands_pass': True, 'status': 'ok', 'start_winding': [0] * 6,
 
 
 def test_the_stages_run_in_order_and_agree_about_the_trajectory(tmp_path, monkeypatch):
-    """A graph built at one placement against targets built at another still
-    produces a path, just not one anyone checked."""
+    """Each stage gets the same slice and spin-up policy."""
     seen = _stub_stages(monkeypatch, tmp_path, PASSING)
     code, summary = pipeline.run(_args(tmp_path, via_poses=str(tmp_path / 'vias.json')))
 
@@ -67,7 +66,7 @@ def test_the_stages_run_in_order_and_agree_about_the_trajectory(tmp_path, monkey
     assert [name for name, _ in seen] == ['candidates', 'graph', 'commands']
     for name, argv in seen:
         if name != 'commands':
-            assert '--placement' in argv and argv[argv.index('--placement') + 1] == 'nominal'
+            assert '--placement' not in argv
             assert '--spin-up-s' in argv and argv[argv.index('--spin-up-s') + 1] == '2.0'
     graph_argv = dict(seen)['graph']
     assert graph_argv[graph_argv.index('--layers') + 1] == '500'
@@ -174,12 +173,12 @@ def test_a_stage_that_raises_is_a_recorded_stage_failure(tmp_path, monkeypatch):
 
 
 def test_the_summary_is_written_even_when_the_run_itself_raises(tmp_path, monkeypatch):
-    from ur10e_trajectory_pkg import ClientNode
+    from ur10e_trajectory_pkg import target_builder
 
     def broken(csv_path=None, num_waypoints=500, start_index=0):
         raise ValueError('the recording is not uniformly sampled')
 
-    monkeypatch.setattr(ClientNode, 'recorded_start_rate', broken)
+    monkeypatch.setattr(target_builder, 'recorded_start_rate', broken)
     work = tmp_path / 'run'
     code = pipeline.main(['--home-json', str(tmp_path / 'home.json'),
                           '--work-dir', str(work)])
@@ -252,9 +251,9 @@ def test_a_given_duration_runs_once_and_keeps_the_flat_layout(tmp_path, monkeypa
 
 def test_a_derived_spin_up_stops_at_the_first_rung_that_works(tmp_path, monkeypatch):
     """Each rung is a whole cycle, so the search stops as soon as one passes."""
-    from ur10e_trajectory_pkg import ClientNode
+    from ur10e_trajectory_pkg import target_builder
 
-    monkeypatch.setattr(ClientNode, 'recorded_start_rate',
+    monkeypatch.setattr(target_builder, 'recorded_start_rate',
                         lambda csv_path=None, num_waypoints=500, start_index=0: {'rate_rad_s': 0.08,
                                                                   'step_s': 0.1})
     seen = _stub_stages(monkeypatch, tmp_path, PASSING)
@@ -270,9 +269,9 @@ def test_a_derived_spin_up_stops_at_the_first_rung_that_works(tmp_path, monkeypa
 
 
 def test_a_failing_rung_moves_to_the_next_and_both_are_recorded(tmp_path, monkeypatch):
-    from ur10e_trajectory_pkg import ClientNode
+    from ur10e_trajectory_pkg import target_builder
 
-    monkeypatch.setattr(ClientNode, 'recorded_start_rate',
+    monkeypatch.setattr(target_builder, 'recorded_start_rate',
                         lambda csv_path=None, num_waypoints=500, start_index=0: {'rate_rad_s': 0.08,
                                                                   'step_s': 0.1})
     calls = {'graph': 0}
@@ -303,7 +302,7 @@ def test_a_failing_rung_moves_to_the_next_and_both_are_recorded(tmp_path, monkey
 def test_the_recording_reaches_every_stage_and_the_start_rate(tmp_path, monkeypatch):
     """A stage left on the packaged default would plan a different motion
     from the others; the spin-up would be derived from the wrong rate."""
-    from ur10e_trajectory_pkg import ClientNode
+    from ur10e_trajectory_pkg import target_builder
 
     asked = []
 
@@ -311,7 +310,7 @@ def test_the_recording_reaches_every_stage_and_the_start_rate(tmp_path, monkeypa
         asked.append(csv_path)
         return {'rate_rad_s': 0.06, 'step_s': 0.1}
 
-    monkeypatch.setattr(ClientNode, 'recorded_start_rate', rate)
+    monkeypatch.setattr(target_builder, 'recorded_start_rate', rate)
     seen = _stub_stages(monkeypatch, tmp_path, PASSING)
     code, summary = pipeline.run(_args(tmp_path, spin_up_s=None, csv='/data/juice.csv'))
 
@@ -326,7 +325,7 @@ def test_a_slice_reaches_candidates_graph_and_the_start_rate_but_not_commands(
         tmp_path, monkeypatch):
     """Commands reads the slice back from the graph; its parser takes no
     --start-index, and a spin-up must be derived at the slice's own start."""
-    from ur10e_trajectory_pkg import ClientNode
+    from ur10e_trajectory_pkg import target_builder
 
     asked = []
 
@@ -334,7 +333,7 @@ def test_a_slice_reaches_candidates_graph_and_the_start_rate_but_not_commands(
         asked.append((num_waypoints, start_index))
         return {'rate_rad_s': 0.06, 'step_s': 0.1}
 
-    monkeypatch.setattr(ClientNode, 'recorded_start_rate', rate)
+    monkeypatch.setattr(target_builder, 'recorded_start_rate', rate)
     seen = _stub_stages(monkeypatch, tmp_path, PASSING)
     code, summary = pipeline.run(_args(tmp_path, spin_up_s=None, start_index=1200,
                                        waypoints=601))

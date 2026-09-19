@@ -136,16 +136,6 @@ RAIL_VELOCITY = Limit(RAIL_VEL_SAFETY_CAP, 'm/s', PROVISIONAL,
 RAIL_ACCELERATION = Limit(5.0, 'm/s^2', ASSUMED, _RAIL_UNKNOWN)
 RAIL_JERK = Limit(100.0, 'm/s^3', ASSUMED, _RAIL_UNKNOWN)
 
-# Retired. A literal 2.0 rad/s, about 115 deg/s, was applied uniformly to
-# every arm joint and came from no document at all. It held the wrists to
-# roughly two thirds of their rated 180 deg/s, and the wrists are what
-# performs a tumble, so it was the largest artificial limit on how fast one
-# could be reproduced. Kept only so historical results stay interpretable.
-RETIRED_UNIFORM_CAP = Limit(2.0, 'rad/s', ASSUMED,
-                            'former uniform application cap; sourced from '
-                            'nothing, replaced by the URDF per-joint values')
-
-
 def velocity_vector(validator):
     """Per-joint velocity ceilings, READ from the URDF via the validator.
 
@@ -292,7 +282,6 @@ def manifest(validator=None):
     document = {
         'arm_velocity_reference': {name: ARM_VELOCITY[name].as_dict()
                                    for name in JOINT_NAMES[1:]},
-        'retired_uniform_cap': RETIRED_UNIFORM_CAP.as_dict(),
         'arm_acceleration': ARM_ACCELERATION.as_dict(),
         'arm_jerk': ARM_JERK.as_dict(),
         'rail_velocity': RAIL_VELOCITY.as_dict(),

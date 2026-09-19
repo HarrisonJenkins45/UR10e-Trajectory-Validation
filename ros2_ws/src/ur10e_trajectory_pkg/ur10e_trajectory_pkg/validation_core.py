@@ -16,6 +16,7 @@ from ur10e_trajectory_pkg.configurations import (
     NUM_JOINTS,
     PERIODIC_JOINTS,
 )
+from ur10e_trajectory_pkg import joint_motion
 # The cap lives with the other limits; re-exported here for existing callers.
 from ur10e_trajectory_pkg.motion_limits import (  # noqa: F401
     RAIL_VEL_SAFETY_CAP,
@@ -498,13 +499,9 @@ class TrajectoryValidator:
         rides the carriage, so it is not a fixed frame and cannot be the frame
         targets are expressed in. The rail base is the only static frame.
 
-        KNOWN DISCREPANCY: ClientNode.get_end_effector_in_base_frame names its
-        output frame 'B' after the UR base and builds targets relative to it.
-        That frame and this one disagree by linear_rail_joint's <origin> (the
-        mount height, 25 mm in Z and still a placeholder) plus the full rail
-        position once the carriage moves. Reconcile once the mount height is
-        measured -- p_B_I on the client side should mean the rail base in the
-        arena, not the arm base.
+        target_builder expresses every target in rail_base_link. The carriage
+        mount height and rail position appear only in forward kinematics, not
+        in the target conversion.
 
         end=EE_LINK is required, not decorative. This URDF has three leaf
         links (ft_frame, base, tool0) and roboticstoolbox falls back to
@@ -1239,15 +1236,11 @@ class TrajectoryValidator:
                 f"a task without a transition must start at waypoint 0; this "
                 f"segment starts at {segment['start_idx']}")
         q_full = np.asarray(segment['q_full'], dtype=float)
-        times = np.arange(len(q_full)) * float(dt_waypoint)
-        count = max(2, int(round(times[-1] * self.framerate)) + 1)
-        t_sim = np.linspace(0.0, times[-1], count)
-        interpolator = PchipInterpolator(times, q_full, axis=0)
-        q_interp = interpolator(t_sim)
-        q_dot = interpolator.derivative(1)(t_sim)
+        t_sim, q_interp, q_dot = joint_motion.task_playback(
+            q_full, dt_waypoint, self.framerate)
         if verbose:
-            print(f'[task] {len(q_full)} waypoints -> {count} frames over '
-                  f'{times[-1]:.2f} s, no transition')
+            print(f'[task] {len(q_full)} waypoints -> {len(t_sim)} frames over '
+                  f'{t_sim[-1]:.2f} s, no transition')
         return q_dot, q_interp, t_sim
 
     def process_matlab_validation(self, ee_x, ee_y, ee_z, ee_quat, q_start,

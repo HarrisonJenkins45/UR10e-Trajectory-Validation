@@ -1,32 +1,10 @@
 #!/usr/bin/env python3
-"""Candidate configurations per waypoint, and a controlled seed experiment.
+"""Generate distinct rail-and-arm IK candidates for each target waypoint.
 
-Corrected tracking already reaches every waypoint, so this is not a
-reachability test. It measures candidate DIVERSITY and the robustness of
-discovery, and produces the node set a layered graph will consume.
-
-Three arms, run as a factorial rather than as another fresh-versus-wide
-headline. Every arm uses the rail seed tracking actually used at that
-waypoint, so the rail is held fixed where it is not the variable:
-
-  arm_isolation    every arm seed, at the tracking-derived rail seed
-  rail_isolation   a declared coarse rail grid, at one fixed arm seed, run
-                   once from the preceding tracking arm configuration and
-                   once from the upstream default posture
-  interaction      the Cartesian product, which is the real generator
-
-Reading a difference:
-
-  same rail seed, different arm result        arm-seed discovery effect
-  same arm seed, different rail result        rail-initialisation effect
-  found only by one combination               interaction effect
-  same canonical values, different winding    coordinate representation,
-                                              NOT a new kinematic branch
-  different canonical values                  genuine configuration diversity
-
-That last distinction is why both forms are recorded. Two lifts of one
-solution are one branch wearing two coordinates, and counting them as two
-would inflate every diversity measure.
+Seed coverage combines tracking-derived rail positions, independent arm
+postures, a coarse rail grid, arm-by-rail combinations and continuation from
+preceding candidates. Canonical joint values identify kinematic alternatives;
+full-turn lifts are expanded later from each predecessor during graph search.
 
 Velocity is deliberately not checked here. It is a property of a transition
 between nodes, so it belongs to graph edges; enforcing it during node
@@ -34,7 +12,8 @@ generation would discard candidates that are perfectly good successors of
 some other predecessor.
 
 Usage:
-    python3 -m ur10e_trajectory_pkg.candidate_generator --out candidates.json
+    python3 -m ur10e_trajectory_pkg.candidate_generator --csv recording.csv \\
+        --out candidates.json
 """
 import argparse
 import json
@@ -48,11 +27,11 @@ from ur10e_trajectory_pkg.configurations import (
     LEGACY_MATLAB_START_Q,
     RAIL_INDEX,
 )
-from ur10e_trajectory_pkg.failure_census import (
+from ur10e_trajectory_pkg.planning_runtime import (
     WIDE_SEED_BANK_DEG,
-    _validator,
+    make_validator as _validator,
     load_trajectory,
-    manifest,
+    candidate_manifest as manifest,
     run_tracking,
 )
 
@@ -408,48 +387,28 @@ def main(argv=None):
                         help='first recorded sample of the slice')
     parser.add_argument('--spin-up-s', type=float, default=None,
                         help='prepend a spin-up so the task starts from rest')
-    parser.add_argument('--placement', default='nominal',
-                        help='envelope placement to generate candidates at')
-    parser.add_argument('--no-continuation', action='store_true',
-                        help='skip seeding each waypoint from the previous '
-                             "waypoint's candidates (for comparison only)")
     parser.add_argument('--out', default='candidates.json')
-    parser.add_argument('--modes',
-                        default='arm_isolation,rail_isolation,interaction')
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
     mesh_path = get_package_share_directory('ur_description')
-    from ur10e_trajectory_pkg.failure_census import placement_RG_for
-    # The placement too: it is taken relative to the recording's first pose.
-    placement_RG = (None if args.placement == 'nominal'
-                    else placement_RG_for(args.placement, args.csv, args.start_index))
     targets, quaternions, dt, trajectory_metadata = load_trajectory(
         args.csv, args.waypoints, with_metadata=True, spin_up_s=args.spin_up_s,
-        placement_RG=placement_RG, start_index=args.start_index)
-    trajectory_metadata['placement'] = args.placement
-    modes = [m.strip() for m in args.modes.split(',') if m.strip()]
+        start_index=args.start_index)
+    trajectory_metadata['placement'] = 'nominal'
+    modes = ['arm_isolation', 'rail_isolation', 'interaction', CONTINUATION_MODE]
 
     validator = _validator(args.urdf, mesh_path)
     rail_seeds, arm_configs = tracking_reference_path(
         validator, targets, quaternions, dt, LEGACY_MATLAB_START_Q)
     arm_seeds = [np.deg2rad(seed) for seed in WIDE_SEED_BANK_DEG]
 
-    records = []
-    if 'arm_isolation' in modes:
-        records += run_arm_isolation(validator, targets, quaternions,
-                                     rail_seeds, arm_seeds)
-    if 'rail_isolation' in modes:
-        records += run_rail_isolation(validator, targets, quaternions,
-                                      arm_configs)
-    if 'interaction' in modes:
-        records += run_interaction(validator, targets, quaternions, arm_seeds)
-
-    merged = []
-    if not args.no_continuation:
-        kept, merged = run_continuation(validator, targets, quaternions, records)
-        records += kept
-        modes = modes + [CONTINUATION_MODE]
+    records = run_arm_isolation(validator, targets, quaternions,
+                                rail_seeds, arm_seeds)
+    records += run_rail_isolation(validator, targets, quaternions, arm_configs)
+    records += run_interaction(validator, targets, quaternions, arm_seeds)
+    kept, merged = run_continuation(validator, targets, quaternions, records)
+    records += kept
     candidates = attach_merged_provenance(collect_candidates(records), merged)
     document = {
         'schema_version': SCHEMA_VERSION,
@@ -459,8 +418,7 @@ def main(argv=None):
             rail_grid_m=list(RAIL_GRID_M),
             upstream_arm_seed_deg=list(UPSTREAM_ARM_SEED_DEG),
             dedup_decimals=DEDUP_DECIMALS,
-            continuation_merge_tolerance=(None if args.no_continuation
-                                          else CONTINUATION_MERGE_TOLERANCE),
+            continuation_merge_tolerance=CONTINUATION_MERGE_TOLERANCE,
             continuation_merged_results=len(merged),
             rail_seed_source='corrected tracking path, per waypoint',
         ),

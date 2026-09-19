@@ -129,6 +129,18 @@ Visualization Manager:
       Visual Enabled: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
+      Name: Obstacles
+      Namespaces:
+        obstacles: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obstacle_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Target frame
       Namespaces:
         {}
@@ -145,7 +157,8 @@ Visualization Manager:
     Fixed Frame: world
     Frame Rate: 30
   Name: root
-  Tools: ~
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
   Transformation:
     Current:
       Class: rviz_default_plugins/TF

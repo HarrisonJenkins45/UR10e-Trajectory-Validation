@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Stage 2 gate: the frame contract holds, end to end.
+"""The orientation-only frame contract holds end to end.
 
 Four frames and only four: the arena I, the FIXED rail base R where every
 target lives, the carriage C which moves with the rail, and the end effector
-G. Targets convert once, T_RG = inv(T_IR) @ T_IG, and the rail coordinate
-appears only inside forward kinematics, T_RG(q) = T_RC(q_rail) @ T_CG(q_arm).
+G. Targets are fixed-position poses in R, and the rail coordinate appears
+only inside forward kinematics, T_RG(q) = T_RC(q_rail) @ T_CG(q_arm).
 
 The failure this prevents is silent. A target expressed against the moving
 carriage frame disagrees with the solver by the rail position plus the 25 mm
@@ -42,41 +42,17 @@ def _pose(roll_deg, pitch_deg, yaw_deg, translation):
     return frames.make_transform(rotation=rotation, translation=translation)
 
 
-def _angle_between(rotation_a, rotation_b):
-    return Rotation.from_matrix(np.asarray(rotation_a).T @ np.asarray(rotation_b)
-                                ).magnitude()
-
-
 # --------------------------------------------------------------------------
 # Transform algebra
 # --------------------------------------------------------------------------
 
-def test_identity_calibration_leaves_poses_unchanged():
-    poses = np.stack([_pose(10, 20, 30, [1.0, 2.0, 3.0]),
-                      _pose(-5, 45, 90, [0.1, -0.2, 0.3])])
-    np.testing.assert_allclose(
-        frames.arena_to_rail_base(poses, np.eye(4)), poses, atol=TOL)
-
-
-def test_translation_and_quarter_turn_give_the_hand_calculated_result():
-    """A 90 degree yaw about Z with a known offset, worked out by hand.
-
-    The arena point (2, 0, 0) with the rail base at (1, 0, 0) rotated +90
-    degrees about Z sits 1 m in front of the rail base along arena X. Yawing
-    the frame by +90 maps that onto the rail base's -Y axis.
-    """
-    calibration = _pose(0, 0, 90, [1.0, 0.0, 0.0])
-    target = frames.make_transform(translation=[2.0, 0.0, 0.0])
-    result = frames.arena_to_rail_base(np.stack([target]), calibration)[0]
-    np.testing.assert_allclose(result[:3, 3], [0.0, -1.0, 0.0], atol=1e-12)
-
-
 def test_transform_and_inverse_round_trip():
-    calibration = _pose(15, -35, 120, [0.4, -1.2, 2.5])
+    placement = _pose(15, -35, 120, [0.4, -1.2, 2.5])
     poses = np.stack([_pose(5, 10, 15, [1.0, 1.0, 1.0]),
                       _pose(-60, 0, 200, [-0.5, 0.25, 3.0])])
-    in_rail = frames.arena_to_rail_base(poses, calibration)
-    recovered = np.stack([calibration @ pose for pose in in_rail])
+    relative = np.stack([frames.compose(frames.invert(placement), pose)
+                         for pose in poses])
+    recovered = np.stack([frames.compose(placement, pose) for pose in relative])
     np.testing.assert_allclose(recovered, poses, atol=1e-12)
 
 
@@ -103,18 +79,6 @@ def test_quaternion_sign_reversal_gives_the_same_target():
     np.testing.assert_allclose(positive, negative, atol=1e-14)
 
 
-def test_calibration_must_be_a_single_static_transform():
-    """An N x 4 array must be refused, not quietly reduced to row zero.
-
-    The previous conversion accepted a per-waypoint quaternion array and used
-    only its first row, so a caller could pass a time-varying calibration and
-    see no sign that the rest was discarded. The rail base does not move.
-    """
-    poses = np.stack([np.eye(4)])
-    with pytest.raises(ValueError, match='static'):
-        frames.arena_to_rail_base(poses, np.tile(np.eye(4), (5, 1, 1)))
-
-
 # --------------------------------------------------------------------------
 # Relative motion and placement
 # --------------------------------------------------------------------------
@@ -131,31 +95,11 @@ def test_relative_motion_starts_at_identity_and_ignores_placement():
     np.testing.assert_allclose(frames.relative_motion(shifted), motion, atol=1e-12)
 
 
-def test_scaling_touches_translation_only():
-    """Scaling rotation would reproduce a different tumble."""
-    motion = np.stack([_pose(0, 0, 45, [0.2, 0.0, 0.0])])
-    scaled = frames.scale_translation(motion, 0.5)
-    np.testing.assert_allclose(scaled[0, :3, 3], [0.1, 0.0, 0.0], atol=TOL)
-    np.testing.assert_allclose(scaled[0, :3, :3], motion[0, :3, :3], atol=TOL)
-
-
-def test_a_pure_tumble_is_not_magnified():
-    """Zero displacement must be left alone rather than scaled up.
-
-    The current trajectory holds position constant, so the scale factor has
-    to come out 1.0 rather than dividing by zero.
-    """
-    motion = np.stack([np.eye(4), _pose(0, 0, 90, [0.0, 0.0, 0.0])])
-    scaled, factor = frames.scale_to_bound(motion, 1.0)
-    assert factor == 1.0
-    np.testing.assert_allclose(scaled, motion, atol=TOL)
-
-
 def test_placement_sets_the_first_pose_exactly():
     placement = _pose(10, 20, 30, [1.0, 0.5, 0.5])
     motion = frames.relative_motion(
         np.stack([_pose(0, 0, 0, [0, 0, 0]), _pose(0, 0, 45, [0, 0, 0])]))
-    placed, _ = frames.place_relative_motion(motion, placement)
+    placed = frames.place_relative_motion(motion, placement)
     np.testing.assert_allclose(placed[0], placement, atol=1e-12)
 
 
@@ -187,7 +131,7 @@ def test_changing_the_rail_seed_does_not_move_client_targets():
     them. If it did, the client would be expressing targets against the
     moving carriage."""
     pytest.importorskip('pandas')
-    from ur10e_trajectory_pkg.ClientNode import build_trajectory_targets
+    from ur10e_trajectory_pkg.target_builder import build_trajectory_targets
     try:
         first = build_trajectory_targets(num_waypoints=8)
     except FileNotFoundError:
@@ -200,25 +144,6 @@ def test_changing_the_rail_seed_does_not_move_client_targets():
 # --------------------------------------------------------------------------
 # Golden end-to-end round trip
 # --------------------------------------------------------------------------
-
-def test_golden_round_trip_through_a_rotated_arena(validator):
-    """Configuration -> FK -> arena -> client conversion -> back to T_RG.
-
-    Catches a frame error anywhere in the chain, including one that happens
-    to cancel under an identity calibration, which is why the arena pose here
-    is both rotated and translated.
-    """
-    q_full = np.concatenate(([1.2], np.deg2rad([20.0, -110.0, 80.0, -70.0, 55.0, 30.0])))
-    original_RG = validator.robot.fkine(q_full, end=frames.END_EFFECTOR_FRAME).A
-
-    calibration_IR = _pose(12.0, -34.0, 56.0, [7.0, -3.0, 1.5])
-    in_arena = calibration_IR @ original_RG
-
-    recovered = frames.arena_to_rail_base(np.stack([in_arena]), calibration_IR)[0]
-
-    np.testing.assert_allclose(recovered[:3, 3], original_RG[:3, 3], atol=1e-9)
-    assert _angle_between(recovered[:3, :3], original_RG[:3, :3]) < 1e-9
-
 
 def test_golden_round_trip_survives_relative_motion_and_placement(validator):
     """The placement formulation must not perturb the motion it places.
@@ -237,9 +162,7 @@ def test_golden_round_trip_survives_relative_motion_and_placement(validator):
     ])
 
     motion = frames.relative_motion(poses_RG)
-    replaced, factor = frames.place_relative_motion(motion, poses_RG[0])
-
-    assert factor == pytest.approx(1.0)
+    replaced = frames.place_relative_motion(motion, poses_RG[0])
     np.testing.assert_allclose(replaced, poses_RG, atol=1e-9)
 
 

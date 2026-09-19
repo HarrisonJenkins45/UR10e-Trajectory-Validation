@@ -10,7 +10,7 @@ import pytest
 from scipy.spatial.transform import Rotation
 
 from ur10e_trajectory_pkg import frames
-from ur10e_trajectory_pkg.ClientNode import (
+from ur10e_trajectory_pkg.target_builder import (
     SPIN_UP_PROFILE,
     apply_spin_up,
     build_trajectory_targets,

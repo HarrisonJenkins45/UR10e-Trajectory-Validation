@@ -57,11 +57,10 @@ unsolved LPs, and an alpha* of exactly 0 at the singular start, where the
 commanded task twist is unachievable at any rate.
 """
 import numpy as np
-from scipy.interpolate import PchipInterpolator
 from scipy.optimize import linprog
 from scipy.spatial.transform import Rotation, Slerp
 
-from ur10e_trajectory_pkg import motion_limits
+from ur10e_trajectory_pkg import joint_motion, motion_limits
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES
 from ur10e_trajectory_pkg.pose_metrics import (
     IK_ORIENTATION_TOL_RAD,
@@ -74,7 +73,7 @@ EE_LINK = 'tool0'
 # Controller rate. Checking at the waypoint rate would re-ask the question the
 # graph already answered; the interpolant only differs from the secant
 # BETWEEN waypoints, so the check has to look there.
-CONTROLLER_HZ = 500.0
+CONTROLLER_HZ = joint_motion.CONTROLLER_HZ
 
 # Acceleration and jerk limits come from motion_limits, with their provenance.
 # A second table here once said 15 rad/s^2 while motion_limits said 800 deg/s^2
@@ -92,11 +91,7 @@ def interpolate(path, times, rate_hz=CONTROLLER_HZ):
     PCHIP because that is what the service plays back. A different
     interpolant would validate a trajectory nobody runs.
     """
-    path = np.asarray(path, dtype=float)
-    times = np.asarray(times, dtype=float)
-    interpolator = PchipInterpolator(times, path, axis=0)
-    dense_times = np.arange(times[0], times[-1], 1.0 / rate_hz)
-    return dense_times, interpolator, interpolator(dense_times)
+    return joint_motion.task_validation_samples(path, times, rate_hz)
 
 
 def derivative_extremes(interpolator, dense_times):
@@ -461,7 +456,6 @@ def conditioning_and_twist(validator, interpolator, dense_times,
                                 else None)
     return report
 
-
 def command_stream_derivatives(dense_times, dense_path):
     """Acceleration and jerk by finite difference of the COMMAND STREAM.
 
@@ -573,7 +567,7 @@ def validate_task_command(validator, path, positions, quaternions, dt,
     report = validate(validator, path, times, positions, quaternions,
                       velocity_limits=velocity_limits, rate_hz=rate_hz,
                       condition_threshold=condition_threshold)
-    interpolator = PchipInterpolator(times, path, axis=0)
+    interpolator = joint_motion.task_curve(path, times)
     entry_velocity = np.abs(interpolator.derivative(1)(0.0))
     entry_acceleration = np.abs(interpolator.derivative(2)(0.0))
     report.update(
@@ -685,143 +679,3 @@ def validate_warmup(validator, warmup_result, velocity_limits=None):
                             and not report['collision_found']
                             and report['self_clearance']['passed'])
     return report
-
-
-# --------------------------------------------------------------------------
-# Committed measurement, so recorded figures can be reproduced
-# --------------------------------------------------------------------------
-
-def graph_path_twist_margins(validator, path, waypoint_times, positions,
-                             quaternions, velocity_limits, rate_hz, stride,
-                             boundary_s):
-    """alpha* and conditioning on each side of the approach boundary.
-
-    The approach is [0, boundary) and the trajectory [boundary, end), with the
-    boundary knot itself belonging to the trajectory: segment_index assigns it
-    to the interval it starts.
-    """
-    dense_times, interpolator, _ = interpolate(path, waypoint_times, rate_hz)
-    twists = [task_twist(waypoint_times, positions, quaternions, i,
-                         waypoint_times[i + 1] - waypoint_times[i])
-              for i in range(len(waypoint_times) - 1)]
-    out = {}
-    for label, selected in (
-            ('approach', dense_times[dense_times < boundary_s]),
-            ('trajectory', dense_times[dense_times >= boundary_s])):
-        out[label] = conditioning_and_twist(
-            validator, interpolator, selected[::stride], velocity_limits,
-            task_twists=twists, waypoint_times=waypoint_times)
-    return out
-
-
-def _json_default(value):
-    """NumPy scalars and arrays as their JSON equivalents, booleans kept."""
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    raise TypeError(f'unserialisable {type(value).__name__}')
-
-
-def main(argv=None):
-    import argparse
-    import json
-
-    from ament_index_python.packages import get_package_share_directory
-
-    from ur10e_trajectory_pkg.failure_census import _validator, load_trajectory
-    from ur10e_trajectory_pkg.graph_planner import TRANSITION_SECONDS
-
-    parser = argparse.ArgumentParser(
-        description='Twist margin and conditioning along a graph path, split '
-                    'at the approach boundary.')
-    parser.add_argument('--graph', required=True,
-                        help='graph_planner output containing a path')
-    parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
-    parser.add_argument('--rate', type=float, default=200.0)
-    parser.add_argument('--stride', type=int, default=5)
-    parser.add_argument('--limits', choices=['urdf', 'retired_uniform_cap'],
-                        default='urdf')
-    parser.add_argument('--out', default=None)
-    parser.add_argument('--command', choices=['graph_margins', 'task'],
-                        default='graph_margins',
-                        help='task: validate command 2 on a free-start graph '
-                             'path, from its first waypoint with no transition')
-    args = parser.parse_args(argv)
-
-    validator = _validator(args.urdf, get_package_share_directory('ur_description'))
-    with open(args.graph, encoding='utf-8') as handle:
-        graph = json.load(handle)
-    path = np.asarray(graph['path'], dtype=float)
-
-    if args.command == 'task':
-        if graph.get('start_mode') != 'free':
-            parser.error('--command task needs a free-start graph artifact')
-        spin_up = graph.get('spin_up')
-        targets, task_quaternions, dt, _ = load_trajectory(
-            None, graph['recorded_waypoints'], with_metadata=True,
-            spin_up_s=None if spin_up is None else spin_up['requested_duration_s'])
-        if len(targets) != len(path):
-            parser.error(f'path has {len(path)} states but the trajectory has '
-                         f'{len(targets)} samples')
-        report = validate_task_command(validator, path, targets,
-                                       task_quaternions, dt, rate_hz=args.rate)
-        document = {'command': 'task', 'graph': args.graph, 'rate_hz': args.rate,
-                    'spin_up': spin_up, 'report': report}
-        conditioning = report['conditioning']
-        print(f"task passed={report['passed']} limit_violations="
-              f"{list(report['limit_violations'])} collision="
-              f"{report['collision']['collision_found']} tracking="
-              f"{report['tracking']['within_tolerance']} max_cond="
-              f"{conditioning['max_condition_number']:.1f} twist="
-              f"{conditioning['twist_status']} min_alpha*="
-              f"{conditioning['min_alpha_star']} entry_velocity_ratio="
-              f"{report['entry_velocity_ratio']:.4f} entry_acceleration_ratio="
-              f"{report['entry_acceleration_ratio']:.4f}")
-        if args.out:
-            with open(args.out, 'w', encoding='utf-8') as handle:
-                json.dump(document, handle, indent=1, default=_json_default)
-        return 0 if report['passed'] else 1
-    layers = len(path) - 1
-    targets, quaternions, dt, _ = load_trajectory(None, layers, with_metadata=True)
-
-    start = validator.robot.fkine(path[0], end=EE_LINK)
-    positions = np.vstack([start.t, targets])
-    quaternions = np.vstack([np.roll(np.array(start.UnitQuaternion().A), -1),
-                             quaternions])
-    times = np.concatenate(([0.0], TRANSITION_SECONDS + np.arange(layers) * dt))
-
-    if args.limits == 'urdf':
-        limits = validator.velocity_limits
-    else:
-        limits = np.concatenate((
-            [validator.velocity_limits[0]],
-            [motion_limits.RETIRED_UNIFORM_CAP.value] * 6))
-
-    report = graph_path_twist_margins(validator, path, times, positions,
-                                      quaternions, limits, args.rate,
-                                      args.stride, TRANSITION_SECONDS)
-    document = {'limits': args.limits, 'velocity_limits': limits.tolist(),
-                'rate_hz': args.rate, 'stride': args.stride,
-                'intervals': report}
-    for label, entry in report.items():
-        print(f"{label:10s} twist={entry['twist_status']:13s} "
-              f"min_alpha*={entry['min_alpha_star']} "
-              f"at t={entry.get('min_alpha_star_at_time_s')} "
-              f"segment={entry.get('min_alpha_star_segment')} "
-              f"unsolved={entry['twist_unsolved_samples']} "
-              f"max_cond={entry['max_condition_number']:.1f} "
-              f"at t={entry['max_condition_at_time_s']:.2f}")
-    if args.out:
-        with open(args.out, 'w', encoding='utf-8') as handle:
-            json.dump(document, handle, indent=1)
-    return 0
-
-
-if __name__ == '__main__':
-    import sys
-    sys.exit(main())

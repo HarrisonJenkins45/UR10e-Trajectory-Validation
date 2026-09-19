@@ -4,8 +4,7 @@
 The graph decides the branch, the winding and the rough rail motion. It does
 not produce a smooth joint path: its cost counts step size only, so it can hop
 between neighbouring solutions along the rail's redundancy at a single
-waypoint. At coupled_14 such hops put 1,108 rad/s^3 of jerk on the elbow; 8 of
-28 placements already had them before continuation seeding existed.
+waypoint. Refinement smooths that motion and validates the resulting command.
 
 Refinement, in the per-trajectory pipeline for good:
 
@@ -48,26 +47,13 @@ REFINEMENT_RMS_LEVELS_M = (0.005, 0.002, 0.001)
 PINNED_START_SAMPLES = 3
 REFINEMENT_RATE_HZ = 200.0
 
-# Acceptance, the same at every placement: full continuous validation (limits
-# including jerk, collision, self-clearance, tracking, condition <= 50,
-# alpha*) and start motion within the declared at-rest tolerance. The 1e-3
-# figures were stand-ins for kinks in the coupled_14 prototype; the jerk gate
-# catches kinks directly, so they are reported diagnostics, not gates.
+# The jerk gate catches kinks directly; these figures are reported diagnostics,
+# not separate acceptance gates.
 DIAGNOSTIC_SECOND_DIFFERENCE = 1e-3
 DIAGNOSTIC_START_MOTION = 1e-3
 
-# Tried only when every declared level fails, never as the smoothest rung.
-# Putting 10 mm at the top of the ladder would hand it to every placement
-# under the smoothest-passing rule, and more smoothing means more deviation
-# from the branch the graph chose: smoothing has already pushed conditioning
-# past 50 at nominal. As a fallback it leaves the other placements untouched.
-#
-# coupled_14 is the case that introduced it: at 5 mm it fails on rail jerk
-# alone, 111.5 against an assumed 100, and passes everything at 10 mm. The
-# gate was not relaxed, because an alternative passes outright -- but a
-# refinement that reaches this level records what the declared levels failed
-# and whether those limits are assumed, so the precedent is visible if some
-# placement ever has no passing rung at all.
+# Tried only when every declared level fails. More smoothing can move the
+# command away from the graph's chosen branch, so this is never the first rung.
 FALLBACK_RMS_LEVEL_M = 0.010
 
 
@@ -322,10 +308,9 @@ def main(argv=None):
 
     from ament_index_python.packages import get_package_share_directory
 
-    from ur10e_trajectory_pkg.failure_census import (
-        _validator,
+    from ur10e_trajectory_pkg.planning_runtime import (
+        make_validator as _validator,
         load_trajectory,
-        placement_RG_for,
     )
 
     with open(args.graph, encoding='utf-8') as handle:
@@ -336,10 +321,11 @@ def main(argv=None):
     validator = _validator(args.urdf, get_package_share_directory('ur_description'))
     spin_up = graph.get('spin_up')
     placement = graph.get('placement', 'nominal')
+    if placement != 'nominal':
+        raise ValueError('only the fixed nominal target placement is supported')
     positions, quaternions, dt, _ = load_trajectory(
         None, graph['recorded_waypoints'], with_metadata=True,
-        spin_up_s=None if spin_up is None else spin_up['requested_duration_s'],
-        placement_RG=None if placement == 'nominal' else placement_RG_for(placement))
+        spin_up_s=None if spin_up is None else spin_up['requested_duration_s'])
     result = refine_path(validator, graph['path'], positions, quaternions, dt)
 
     def plain(value):

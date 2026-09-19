@@ -9,56 +9,45 @@ it publishes /joint_states, TF and markers, not robot commands.
 """
 
 import argparse
-import csv
-import hashlib
-import json
+import sys
 import time
-from pathlib import Path
 
 import numpy as np
-from scipy.interpolate import PchipInterpolator
 from scipy.spatial.transform import Rotation, Slerp
 
-from ur10e_trajectory_pkg import motion_limits
+from ur10e_trajectory_pkg import (
+    joint_motion, motion_limits, plan_artifact, trajectory_input,
+)
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES
-from ur10e_trajectory_pkg.warmup import sample_rest_to_rest
 
 
-def recording_step(csv_path, plan):
-    digest = hashlib.sha256(Path(csv_path).read_bytes()).hexdigest()
-    expected = (plan.get("recording") or {}).get("csv_sha256")
-    if not expected or digest != expected:
+def recording_step(csv_path, plan, trajectory=None):
+    trajectory = trajectory or trajectory_input.load(csv_path)
+    if trajectory.path != str(csv_path):
+        raise ValueError("trajectory object and csv_path name different inputs")
+    expected = plan["recording"]["csv_sha256"]
+    if trajectory.sha256 != expected:
         raise ValueError("recording SHA-256 does not match the certified plan")
-    with open(csv_path, newline="", encoding="utf-8") as handle:
-        times = np.asarray(
-            [float(row["timestamp"]) for row in csv.DictReader(handle)]
-        )
     start = int(plan["start_index"])
     count = int(plan["recorded_waypoints"])
-    selected = times[start:start + count]
-    if len(selected) != count or count < 2:
-        raise ValueError("recording does not contain the plan section")
-    steps = np.diff(selected)
-    if not np.all(np.isfinite(steps)) or np.any(steps <= 0.0):
-        raise ValueError("recording timestamps are not strictly increasing")
-    if not np.allclose(steps, steps[0], atol=1e-9):
-        raise ValueError("recording section is not uniformly sampled")
-    return float(steps[0])
+    try:
+        return trajectory.slice(start, count).step_s
+    except ValueError as exc:
+        raise ValueError("recording does not contain the plan section") from exc
 
 
-def current_warmup_durations(rests, stored_durations):
-    """Do not replay an older plan above today's rail speed cap.
+def check_warmup_durations(rests, stored_durations):
+    """Refuse a stored warmup that violates the current rail cap.
 
-    The service replans each warmup leg under its current validator limits.
-    An exported plan only records the older durations, so the preview must
-    lengthen any leg that would exceed the current rail cap. Other limits
-    remain satisfied by lengthening the same rest-to-rest path.
+    Playback must use the certified durations, not silently retime the plan.
     """
     rail_distance = np.abs(np.diff(rests[:, 0]))
     rail_minimum = (
         15.0 * rail_distance / (8.0 * motion_limits.RAIL_VEL_SAFETY_CAP)
     )
-    return np.maximum(stored_durations, rail_minimum)
+    if np.any(stored_durations + 1e-9 < rail_minimum):
+        raise ValueError('stored warmup exceeds the current rail speed cap; '
+                         'replan and recertify before playback')
 
 
 def playback_frames(plan, dt, rate_hz):
@@ -75,9 +64,7 @@ def playback_frames(plan, dt, rate_hz):
         raise ValueError(
             "plan has an invalid home or non-finite joint coordinates"
         )
-    route = plan.get("warmup_route")
-    if route is None:
-        raise ValueError("plan has no certified warmup route")
+    route = plan["warmup_route"]
     rests = np.asarray(route["rest_points"], dtype=float)
     durations = np.asarray(route["segment_durations_s"], dtype=float)
     if (
@@ -104,39 +91,29 @@ def playback_frames(plan, dt, rate_hz):
             "plan path length disagrees with recording and spin-up"
         )
 
-    durations = current_warmup_durations(rests, durations)
+    check_warmup_durations(rests, durations)
     warmup = [
-        sample_rest_to_rest(rests[i], rests[i + 1], durations[i], rate_hz)[1]
+        joint_motion.sample_rest_to_rest(rests[i], rests[i + 1], durations[i], rate_hz)[1]
         for i in range(len(durations))
     ]
-    times = np.arange(len(path)) * dt
-    count = max(2, int(round(times[-1] * rate_hz)) + 1)
-    sampled_times = np.linspace(0.0, times[-1], count)
-    task = PchipInterpolator(times, path, axis=0)(sampled_times)
+    sampled_times, task, _ = joint_motion.task_playback(path, dt, rate_hz)
     return warmup, task, sampled_times, durations
 
 
-def target_poses(plan, csv_path, sampled_times):
+def target_poses(plan, csv_path, sampled_times, trajectory=None):
     """Planned body-frame G poses at task playback times, in rail_base_link.
 
     Use the same target builder as the IK and service, then apply the mount
     transform recorded in the plan: T_RG = T_RE @ T_EG. Interpolate rotation
     by SLERP, as continuous validation does, not by quaternion components.
     """
-    from ur10e_trajectory_pkg.ClientNode import mount_record, plan_targets
-    from ur10e_trajectory_pkg.frames import validate_transform
+    mount = plan_artifact.mount_transform(plan)
 
-    recorded_mount = plan.get("mount") or {}
-    current_mount = mount_record()
-    if recorded_mount.get("name") != current_mount["name"]:
-        raise ValueError(
-            "plan mount name differs from the current target builder"
-        )
-    mount = validate_transform(recorded_mount.get("transform"), "plan T_EG")
-    if not np.allclose(mount, current_mount["transform"], atol=1e-12):
-        raise ValueError("plan T_EG differs from the current target builder")
-
-    x, y, z, quaternions, times = plan_targets(plan, csv_path=csv_path)
+    if trajectory is None:
+        x, y, z, quaternions, times = plan_artifact.plan_targets(plan, csv_path=csv_path)
+    else:
+        x, y, z, quaternions, times = plan_artifact.plan_targets(
+            plan, csv_path=csv_path, trajectory=trajectory)
     positions_e = np.column_stack((x, y, z))
     rotations_e = Rotation.from_quat(quaternions)
     positions_g = positions_e + rotations_e.apply(mount[:3, 3])
@@ -204,6 +181,12 @@ def full_cycle_passes(home, warmup, task, positions, orientations,
             yield "via dwell", dwell, *held(dwell)
 
 
+def _non_ros_args(argv):
+    """Keep argparse strict while accepting ROS launch's trailing --ros-args."""
+    from rclpy.utilities import remove_ros_args
+    return remove_ros_args(argv)[1:]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -229,29 +212,17 @@ def main():
         action="store_true",
         help="repeat home, warmup and task with a display-only reverse return",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(_non_ros_args(sys.argv))
     if not np.isfinite(args.rate_hz) or args.rate_hz <= 0.0:
         parser.error("--rate-hz must be positive and finite")
-    with open(args.plan, encoding="utf-8") as handle:
-        plan = json.load(handle)
-    if plan.get("target_frame") != "rail_base_link":
-        raise ValueError("plan target frame is not rail_base_link")
-    dt = recording_step(args.csv, plan)
-    warmup, task, task_times, warmup_durations = playback_frames(
+    plan = plan_artifact.load_plan(args.plan)
+    trajectory = trajectory_input.load(args.csv)
+    dt = recording_step(args.csv, plan, trajectory=trajectory)
+    warmup, task, task_times, _ = playback_frames(
         plan, dt, args.rate_hz
     )
-    recorded_durations = np.asarray(
-        plan["warmup_route"]["segment_durations_s"], dtype=float
-    )
-    if np.any(warmup_durations > recorded_durations + 1e-9):
-        print(
-            "Preview retimed the archived warmup to the current "
-            f"{motion_limits.RAIL_VEL_SAFETY_CAP:.2f} m/s rail cap: "
-            f"{warmup_durations.tolist()} s. Revalidate before commanding.",
-            flush=True,
-        )
     target_positions, target_orientations = target_poses(
-        plan, args.csv, task_times
+        plan, args.csv, task_times, trajectory=trajectory
     )
 
     import rclpy
@@ -366,7 +337,7 @@ def main():
         ):
             raise RuntimeError(
                 "robot or Target marker subscriber missing; start RViz with "
-                "PreviewPlan_Rviz.py first"
+                "VisualizeTraj_RvizPlayback.py first"
             )
         first_position, first_orientation = (
             target_positions[0],

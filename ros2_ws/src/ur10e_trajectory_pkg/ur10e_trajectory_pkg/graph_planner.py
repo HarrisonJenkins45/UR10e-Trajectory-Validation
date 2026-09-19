@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Layered graph over per-waypoint candidates, and its first gate.
-
-One binary question before any cost tuning: does a complete path exist from
-the actual q_start through all 500 layers?
+"""Layered graph over per-waypoint candidates and legal lifted coordinates.
 
 State is the full LIFTED configuration, equivalently
 (layer, canonical candidate, winding vector). The winding has to persist in
@@ -17,50 +14,10 @@ Edges are built cheapest-check-first, because collision queries dominate:
   3. swept collision              a handful of PyBullet queries
   4. cost
 
-Two builds, because a single one cannot separate a graph defect from an
-incomplete candidate set:
-
-  validation  the corrected greedy configuration is injected at every layer
-              with provenance tracking_oracle. A complete path MUST exist,
-              every reference edge must survive lifting, and the optimal cost
-              must not exceed the injected path's
-  generator   injected nodes excluded, testing whether independent candidate
-              generation suffices, and naming the first disconnected layer
-              when it does not
-
-Acceleration, jerk and continuous singularity margin are deliberately absent.
-They belong to the trajectory optimisation that follows, not in first-order
-graph state.
-
-Historical full run, 500 layers, both builds, under the limits in force at
-the time (URDF per-joint arm values, rail capped at 1.0 m/s). The current rail
-cap is in motion_limits.py, so these historical costs are not a new baseline:
-
-    build        complete  cost     pairs      rail-pruned  edges
-    validation   yes       1.0055   4,830,414  3,683,412    957,698
-    generator    yes       1.0055   4,591,681  3,472,076    938,059
-
-    greedy tracker, same cost function            1.1082
-
-Two results worth keeping. The generator-only build reaches the SAME optimum
-as the build with the greedy path injected, so independent candidate
-generation is sufficient on this trajectory and the oracle added nothing it
-did not already contain. And the graph path costs 9.3% less than the greedy
-tracker's, which is global branch choice buying something a greedy tracker
-cannot, on a trajectory where both succeed.
-
-Swept collision rejected 74 edges of 957,698. Cheap kinematic pruning removed
-76% of pairs before any physics query, which is what makes a dense build
-affordable at this size.
-
-Costs are only comparable under the same velocity limits, since the limits
-ARE the normalisation. An earlier run used a uniform 2.0 rad/s arm cap and
-recorded 2.1761 against a greedy 2.3310; the path it chose is identical in all
-501 states to the one above, but those figures cannot be set beside these.
-
-The frontier stays bounded rather than growing with depth: 4.8M pairs over
-500 layers is under 10,000 per layer against roughly 68 candidates. No beam or
-dominance rule is needed at this scale.
+The graph selects a continuous path from independently generated candidates.
+Warmup reachability filters layer-0 lifted starts. Acceleration, jerk and
+between-waypoint tracking are checked by command certification after the path
+is chosen, not treated as first-order graph edges.
 """
 import argparse
 import json
@@ -71,7 +28,6 @@ import numpy as np
 from ur10e_trajectory_pkg import environment, motion_limits
 from ur10e_trajectory_pkg.configurations import (
     ARM_SLICE,
-    LEGACY_MATLAB_START_Q,
     PERIODIC_JOINTS,
     RAIL_INDEX,
 )
@@ -427,8 +383,8 @@ def best_partial_path(history):
 GRAPH_CANDIDATE_CONDITION_LIMIT = 25.0
 
 
-def load_candidates(path, num_layers, include_oracle, max_condition=None):
-    """Canonical configurations per layer, optionally with injected nodes.
+def load_candidates(path, num_layers, max_condition=None):
+    """Canonical generated configurations per layer.
 
     max_condition drops candidates whose recorded arm condition number
     exceeds it. The count removed per layer is returned in
@@ -441,8 +397,6 @@ def load_candidates(path, num_layers, include_oracle, max_condition=None):
         entries = document['candidates'].get(str(index), [])
         rows, dropped, seen = [], 0, 0
         for entry in entries:
-            if not include_oracle and entry.get('provenance_tag') == 'tracking_oracle':
-                continue
             seen += 1
             if (max_condition is not None
                     and entry.get('arm_condition_number', 0.0) > max_condition):
@@ -565,7 +519,7 @@ _START_WORKER = {}
 def _init_start_worker(urdf):
     from ament_index_python.packages import get_package_share_directory
 
-    from ur10e_trajectory_pkg.failure_census import _validator
+    from ur10e_trajectory_pkg.planning_runtime import make_validator as _validator
     _START_WORKER['validator'] = _validator(urdf, get_package_share_directory('ur_description'))
 
 
@@ -683,38 +637,15 @@ def filter_self_clearance(validator, layers, floor):
                   'ms_per_query': 1000.0 * seconds / max(queries, 1)}
 
 
-def inject_oracle(layers, oracle_path):
-    """Add the corrected greedy configuration to every layer.
-
-    Without this a failure to reproduce the greedy path is ambiguous: it could
-    be a graph defect or an incomplete candidate set. With it, the graph is
-    known to contain a valid path, so any failure is the graph's.
-    """
-    for index, configuration in enumerate(oracle_path):
-        layers[index] = list(layers[index]) + [np.asarray(configuration, float)]
-    return layers
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidates', required=True)
     parser.add_argument('--urdf', default='/root/ros2_ws/ur10e.urdf')
     parser.add_argument('--layers', type=int, default=500,
                         help='RECORDED waypoints; a spin-up adds samples')
-    parser.add_argument('--build', choices=['validation', 'generator'],
-                        default='validation')
     parser.add_argument('--out', default='graph.json')
-    parser.add_argument('--start', choices=['legacy', 'free'], default='legacy',
-                        help='legacy: from LEGACY_MATLAB_START_Q through a '
-                             'transition edge; free: the planner chooses the '
-                             'first-waypoint candidate')
-    parser.add_argument('--start-lifts', action='store_true',
-                        help='free start in every legal winding, not only '
-                             'canonical')
     parser.add_argument('--spin-up-s', type=float, default=None,
                         help='spin-up the candidates were generated with')
-    parser.add_argument('--placement', default='nominal',
-                        help='envelope placement the candidates were generated at')
     parser.add_argument('--max-candidate-condition', type=float,
                         default=GRAPH_CANDIDATE_CONDITION_LIMIT,
                         help='drop candidates above this arm condition number')
@@ -746,26 +677,22 @@ def main(argv=None):
 
     from ament_index_python.packages import get_package_share_directory
 
-    from ur10e_trajectory_pkg.failure_census import (
-        _validator,
+    from ur10e_trajectory_pkg.planning_runtime import (
+        make_validator as _validator,
         load_trajectory,
         recording_mismatch,
         recording_record,
-        run_tracking,
     )
 
     mesh_path = get_package_share_directory('ur_description')
     validator = _validator(args.urdf, mesh_path)
-    from ur10e_trajectory_pkg.failure_census import placement_RG_for
-    placement_RG = (None if args.placement == 'nominal'
-                    else placement_RG_for(args.placement, args.csv, args.start_index))
-    targets, quaternions, dt, trajectory_metadata = load_trajectory(
+    targets, _, dt, trajectory_metadata = load_trajectory(
         args.csv, args.layers, with_metadata=True, spin_up_s=args.spin_up_s,
-        placement_RG=placement_RG, start_index=args.start_index)
+        start_index=args.start_index)
     recording = recording_record(args.csv)
     num_layers = len(targets)
     layers, candidates_document = load_candidates(
-        args.candidates, num_layers, include_oracle=False,
+        args.candidates, num_layers,
         max_condition=args.max_candidate_condition)
     self_clearance_floor = (motion_limits.SELF_CLEARANCE_FLOOR_M
                             if args.min_self_clearance is None
@@ -788,7 +715,7 @@ def main(argv=None):
     if generated_RG is None or not np.allclose(generated_RG,
                                                trajectory_metadata['placement_RG'],
                                                atol=1e-9):
-        print(f'candidates were not generated at placement {args.placement!r}')
+        print('candidates were not generated at the fixed nominal placement')
         return 1
     mismatch = recording_mismatch(
         candidates_document.get('manifest', {}).get('inputs'), recording)
@@ -808,27 +735,8 @@ def main(argv=None):
         print(f'candidates were generated for the slice starting at sample '
               f'{generated_start}, not {args.start_index}')
         return 1
-    q_start = LEGACY_MATLAB_START_Q if args.start == 'legacy' else None
-
-    reference_cost = None
-    if args.build == 'validation':
-        records, _ = run_tracking(validator, targets, quaternions, dt,
-                                  LEGACY_MATLAB_START_Q)
-        committed = {}
-        for record in records:
-            if record['accepted']:
-                committed.setdefault(record['waypoint_index'], record['q_full'])
-        oracle = [committed.get(index) for index in range(num_layers)]
-        if any(step is None for step in oracle):
-            print('greedy tracking does not cover every layer; '
-                  'the validation build needs a complete reference')
-            return 1
-        layers = inject_oracle(layers, oracle)
-
     graph = LayeredGraph(validator, layers, num_layers, dt=dt)
-    if args.build == 'validation':
-        reference_cost = path_cost(q_start, oracle, graph.velocity_limits, dt)
-    if home is not None and q_start is None:
+    if home is not None:
         # The free start begins only where the home reaches: lifted states,
         # validated, directly first and through via poses only if needed.
         def run(start_states):
@@ -841,13 +749,12 @@ def main(argv=None):
             strict_windings=args.strict_home_windings, workers=args.workers,
             urdf=args.urdf)
     else:
-        result, first_empty, _ = graph.shortest_path(q_start,
-                                                     start_lifts=args.start_lifts)
+        result, first_empty, _ = graph.shortest_path(None)
 
     document = {
         'schema_version': SCHEMA_VERSION,
         'environment': environment.describe(),
-        'build': args.build,
+        'build': 'generator',
         'layers': num_layers,
         'recorded_waypoints': args.layers,
         'start_index': args.start_index,
@@ -855,14 +762,13 @@ def main(argv=None):
         'recorded_start_time_s': trajectory_metadata['recorded_start_time_s'],
         'mount': trajectory_metadata['mount'],
         'spin_up': trajectory_metadata.get('spin_up'),
-        'start_mode': args.start,
-        'start_lifts': args.start_lifts,
+        'start_mode': 'free',
         'start_policy': (home_filter or {}).get('policy'),
         'swept_collision_cache': dict(graph.swept_cache_stats),
-        'q_start': None if q_start is None else np.asarray(q_start).tolist(),
+        'q_start': None,
         'chosen_start': (None if result is None
                          else np.asarray(result[0][0]).tolist()),
-        'placement': args.placement,
+        'placement': 'nominal',
         'recording': recording,
         'candidate_filters': {
             'condition': candidates_document['condition_filter'],
@@ -881,9 +787,7 @@ def main(argv=None):
         'counters': graph.counters,
         'velocity_limits': motion_limits.effective_limits(validator),
         'edge_velocity_limits': graph.velocity_limits.tolist(),
-        'transition_seconds': (graph.transition_seconds if q_start is not None
-                               else None),
-        'greedy_reference_cost': reference_cost,
+        'transition_seconds': None,
         'complete_path': result is not None,
         'first_disconnected_layer': first_empty,
         'path_cost': None if result is None else result[1],
@@ -901,7 +805,7 @@ def main(argv=None):
     with open(args.out, 'w', encoding='utf-8') as handle:
         json.dump(document, handle, indent=1, sort_keys=True)
 
-    print(f"build={args.build}  complete_path={document['complete_path']}")
+    print(f"complete_path={document['complete_path']}")
     print(f"candidates removed: condition > {args.max_candidate_condition} "
           f"{candidates_document['condition_filter']['removed_total']}, "
           f"self-clearance < {self_clearance_floor} "
@@ -931,14 +835,12 @@ def main(argv=None):
         print(f'first disconnected layer: {first_empty}')
     else:
         print(f'path cost: {result[1]:.4f} over {len(result[0])} states')
-        print(f'start ({args.start}): {np.round(result[0][0], 4).tolist()}')
+        print(f'start: {np.round(result[0][0], 4).tolist()}')
         entry = document['entry_state']
         print(f"entry state: at_rest={entry['at_rest']} max velocity ratio "
               f"{entry['max_velocity_ratio']:.5f} max acceleration ratio "
               f"{entry['max_acceleration_ratio']:.5f} dominant "
               f"{entry['dominant_joint']} ({entry['dominant_kind']})")
-    if reference_cost is not None:
-        print(f'greedy tracker cost, same function: {reference_cost:.4f}')
     for name, value in graph.counters.items():
         print(f'  {name:26s} {value}')
     # No complete path is a result, and a failing one: returning 0 here let

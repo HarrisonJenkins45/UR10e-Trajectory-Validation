@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from ament_index_python.packages import get_package_share_directory
 
-from ur10e_trajectory_pkg import home_pose, motion_limits
+from ur10e_trajectory_pkg import home_pose, motion_limits, plan_artifact, target_builder
 from ur10e_trajectory_pkg import robot_checks as sweep
 from ur10e_trajectory_pkg.joint_coordinates import TWO_PI
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
@@ -164,8 +164,14 @@ def test_no_winding_whose_route_validates_is_no_winding(monkeypatch):
 def test_the_task_plan_carries_what_both_commands_need(compact):
     path = np.stack([compact + np.concatenate(([0.0], np.full(6, 0.01 * i))) for i in range(4)])
     graph = {'recorded_waypoints': 500, 'placement': 'nominal',
-             'spin_up': {'requested_duration_s': 2.0, 'duration_s': 2.0}}
-    plan = home_pose.task_plan(compact, path, graph, 'graph.json', [0, 0, 0, -1, 0, 0])
+             'spin_up': {'requested_duration_s': 2.0, 'duration_s': 2.0},
+             'mount': target_builder.mount_record()}
+    route = {'route_kind': 'direct', 'rest_points': [compact, path[0]],
+             'segments': [{'duration_s': 2.0}], 'dwell_s': 0.0,
+             'total_duration_s': 2.0}
+    recording = {'csv_path': 'recording.csv', 'csv_sha256': 'a' * 64}
+    plan = plan_artifact.task_plan(compact, path, graph, 'graph.json',
+                                   [0, 0, 0, -1, 0, 0], route, recording)
     assert plan['task_start'] == plan['q_path'][0]
     assert len(plan['q_path']) == 4 and len(plan['q_path'][0]) == 7
     assert plan['spin_up_s'] == 2.0 and plan['recorded_waypoints'] == 500
@@ -321,11 +327,16 @@ def test_the_task_plan_names_the_recording_it_was_validated_against(compact):
                      for i in range(4)])
     graph = {'recorded_waypoints': 500, 'placement': 'nominal',
              'spin_up': {'requested_duration_s': 2.0},
-             'recording': {'csv_path': '/graph/side.csv', 'csv_sha256': 'aa' * 32}}
+             'recording': {'csv_path': '/graph/side.csv', 'csv_sha256': 'aa' * 32},
+             'mount': target_builder.mount_record()}
     loaded = {'csv_path': '/commands/side.csv', 'csv_sha256': 'aa' * 32}
+    route = {'route_kind': 'direct', 'rest_points': [compact, path[0]],
+             'segments': [{'duration_s': 2.0}], 'dwell_s': 0.0,
+             'total_duration_s': 2.0}
 
-    plan = home_pose.task_plan(compact, path, graph, 'graph.json', [0] * 6,
-                               recording=loaded)
+    plan = plan_artifact.task_plan(compact, path, graph, 'graph.json', [0] * 6,
+                                   route=route, recording=loaded)
     assert plan['recording'] == loaded       # what the validating stage loaded
-    fallback = home_pose.task_plan(compact, path, graph, 'graph.json', [0] * 6)
-    assert fallback['recording'] == graph['recording']
+    with pytest.raises(ValueError, match='recording digest'):
+        plan_artifact.task_plan(compact, path, graph, 'graph.json', [0] * 6,
+                                route=route, recording={})

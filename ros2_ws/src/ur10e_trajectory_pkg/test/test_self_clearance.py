@@ -106,7 +106,7 @@ def test_graph_candidates_are_filtered_by_condition_and_self_clearance(tmp_path,
     ]}}
     path = tmp_path / 'candidates.json'
     path.write_text(json.dumps(document))
-    layers, loaded = graph_planner.load_candidates(path, 2, include_oracle=False,
+    layers, loaded = graph_planner.load_candidates(path, 2,
                                                    max_condition=25.0)
     assert [len(l) for l in layers] == [2, 1]
     assert loaded['condition_filter']['removed_per_layer'] == [1, 1]

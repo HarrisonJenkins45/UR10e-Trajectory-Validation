@@ -14,7 +14,7 @@ import sys
 
 import numpy as np
 
-from ur10e_trajectory_pkg import motion_limits, robot_checks as checks
+from ur10e_trajectory_pkg import motion_limits, plan_artifact, robot_checks as checks
 from ur10e_trajectory_pkg.configurations import ARM_SLICE, PERIODIC_JOINTS
 from ur10e_trajectory_pkg.joint_coordinates import TWO_PI, feasible_lifts
 
@@ -204,7 +204,7 @@ def recheck_home(validator, choice, workspace=None):
     recorded. No placements and no planning: this is what catches a stale or
     hand-edited home_choice.json, and it costs a second.
     """
-    from ur10e_trajectory_pkg.failure_census import repository_revision
+    from ur10e_trajectory_pkg.planning_runtime import repository_revision
 
     record = choice.get('chosen') or {}
     configuration = np.asarray(record['configuration'], dtype=float)
@@ -290,51 +290,6 @@ def home_gate(validator, choice, graph, workspace=None):
     return record
 
 
-def route_record(route):
-    """The route as a plan carries it: where it stands still, and for how long.
-
-    Samples are left out. The server plans every leg itself from these
-    resting points, so shipping its samples would invite a caller to send
-    motion nobody checked.
-    """
-    return {'route_kind': route.get('route_kind'),
-            'rest_points': route['rest_points'],
-            'dwell_s': route['dwell_s'],
-            'segment_durations_s': [leg['duration_s'] for leg in route['segments']],
-            'total_duration_s': route['total_duration_s']}
-
-
-def task_plan(home, lifted_path, graph, graph_path, winding, route=None,
-              recording=None):
-    """What the client needs to run both commands, exactly as validated.
-
-    The home, the warmup route from it (one leg when the straight move
-    plans, more when it must go around), the task's joint path in its chosen
-    winding (command 2's q_path, whose first configuration is command 1's
-    target), and what rebuilds the same targets: the recording (path and
-    digest), recorded waypoints, spin-up and placement.
-    Written only for a plan whose warmup and task both passed validation.
-    """
-    spin_up = graph.get('spin_up')
-    lifted_path = np.asarray(lifted_path, dtype=float)
-    return {
-        'schema_version': SCHEMA_VERSION,
-        'home': np.asarray(home, dtype=float).tolist(),
-        'warmup_route': None if route is None else route_record(route),
-        'q_path': lifted_path.tolist(),
-        'task_start': lifted_path[0].tolist(),
-        'start_winding': list(winding),
-        'recorded_waypoints': graph['recorded_waypoints'],
-        'start_index': int(graph.get('start_index', 0)),
-        'spin_up_s': None if spin_up is None else spin_up['requested_duration_s'],
-        'placement': graph.get('placement', 'nominal'),
-        'mount': graph.get('mount'),
-        'target_frame': 'rail_base_link',
-        'source_graph': graph_path,
-        'recording': recording or graph.get('recording'),
-    }
-
-
 def _load(path):
     with open(path, encoding='utf-8') as handle:
         return json.load(handle)
@@ -373,13 +328,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     from ament_index_python.packages import get_package_share_directory
-    from ur10e_trajectory_pkg.failure_census import _validator
+    from ur10e_trajectory_pkg.planning_runtime import make_validator as _validator
 
     validator = _validator(args.urdf, get_package_share_directory('ur_description'))
 
     # commands: winding, warmup, and both validations for the chosen home
     from ur10e_trajectory_pkg import continuous_validator
-    from ur10e_trajectory_pkg.failure_census import load_trajectory, placement_RG_for
+    from ur10e_trajectory_pkg.planning_runtime import load_trajectory
 
     choice = _load(args.choice)
     graph = _load(args.graph)
@@ -395,7 +350,7 @@ def main(argv=None):
         print(status)
         return 1
 
-    from ur10e_trajectory_pkg.failure_census import (
+    from ur10e_trajectory_pkg.planning_runtime import (
         recording_mismatch,
         recording_record,
     )
@@ -432,12 +387,12 @@ def main(argv=None):
     # Targets first, since refinement solves the arm against them.
     spin_up = graph.get('spin_up')
     placement = graph.get('placement', 'nominal')
+    if placement != 'nominal':
+        raise ValueError('only the fixed nominal target placement is supported')
     start_index = int(graph.get('start_index', 0))
     targets, quaternions, dt, metadata = load_trajectory(
         args.csv, graph['recorded_waypoints'], with_metadata=True,
         spin_up_s=None if spin_up is None else spin_up['requested_duration_s'],
-        placement_RG=(None if placement == 'nominal'
-                      else placement_RG_for(placement, args.csv, start_index)),
         start_index=start_index)
     refinement = path_refinement.refine_path(validator, graph['path'], targets,
                                              quaternions, dt, rate_hz=args.rate)
@@ -458,8 +413,7 @@ def main(argv=None):
         _dump(document, args.out)
         print(document['status'])
         return 1
-    # Targets were built at the placement the graph was planned for, so a
-    # non-nominal placement is validated against its own targets.
+    # Reject a graph whose saved placement transform differs from the targets.
     if 'placement_RG' in graph and not np.allclose(
             graph['placement_RG'], metadata['placement_RG'], atol=1e-9):
         document['status'] = f'targets do not match the graph placement {placement!r}'
@@ -475,12 +429,12 @@ def main(argv=None):
     document.update(
         status='ok', start_winding=best['winding'],
         command_2_start=best['path'][0].tolist(),
-        warmup=route_record(best['warmup']),
+        warmup=plan_artifact.route_record(best['warmup']),
         warmup_validation=warmup_report, task_validation=task_report,
         both_commands_pass=bool(warmup_report['passed'] and task_report['passed']))
     _dump(document, args.out)
     if args.plan_out and document['both_commands_pass']:
-        _dump(task_plan(home, best['path'], graph, args.graph, best['winding'],
+        _dump(plan_artifact.task_plan(home, best['path'], graph, args.graph, best['winding'],
                         route=best['warmup'], recording=recording),
               args.plan_out)
     print('start winding', best['winding'], '| warmup',

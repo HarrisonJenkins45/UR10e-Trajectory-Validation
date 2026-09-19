@@ -61,6 +61,8 @@ import sys
 import time
 
 from ur10e_trajectory_pkg import section_search as search
+from ur10e_trajectory_pkg import section_contract as contract
+from ur10e_trajectory_pkg.fast_beam import LEVELS
 
 SCHEMA_VERSION = 1
 DEFAULT_TIME_BUDGET_S = 300.0
@@ -170,24 +172,22 @@ def _write(path, document):
 
 def journal_pass(args, inputs, timeline, start, samples, summary, work_dir, seconds):
     """Record a certificate where section_planner's length mode will replay it."""
-    from ur10e_trajectory_pkg import section_planner
-
     planner_args = argparse.Namespace(urdf=args.urdf, spin_up_policy='first-rung',
-                                      max_probe_memory_gb=section_planner.DEFAULT_MAX_PROBE_MEMORY_GB,
+                                      max_probe_memory_gb=contract.DEFAULT_MAX_PROBE_MEMORY_GB,
                                       engine='fast')
-    key = section_planner.config_key(planner_args, inputs)
-    evidence, _, graph, _, plan_path = section_planner.probe_evidence(
+    key = contract.config_key(planner_args, inputs)
+    evidence, _, graph, _, plan_path = contract.probe_evidence(
         work_dir, samples, timeline.times[start + 1] - timeline.times[start],
         inputs['via_poses'] is not None, {'resource_limited': False})
     entry = search.outcome(
         start, samples, evidence['passed'], evidence['classification'], None, None, False,
-        seconds, journal_schema_version=section_planner.JOURNAL_SCHEMA_VERSION,
+        seconds, journal_schema_version=contract.JOURNAL_SCHEMA_VERSION,
         config_key=key, phase='fast', reason='fast_section certificate', work_dir=work_dir,
         argv=None, returncode=0, peak_memory_gb=None, located_failure_time_s=None,
         recorded_duration_s=timeline.duration(start, samples),
         spin_up_s=summary.get('spin_up_s'), failed_stage=None,
         stage_seconds={s['stage']: s['seconds'] for s in summary.get('stages', [])},
-        start_routes=section_planner._route_record(graph), plan_path=plan_path,
+        start_routes=contract.route_record(graph), plan_path=plan_path,
         engine='fast', finished_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'))
     with open(os.path.join(args.work_dir, 'probes.jsonl'), 'a', encoding='utf-8') as handle:
         handle.write(json.dumps(entry, default=float) + '\n')
@@ -196,7 +196,7 @@ def journal_pass(args, inputs, timeline, start, samples, summary, work_dir, seco
 
 def main(argv=None, certify=None, context_factory=None):
     """certify and context_factory replace fast_certify's for tests."""
-    from ur10e_trajectory_pkg import fast_certify, section_planner
+    from ur10e_trajectory_pkg import fast_certify
 
     age_at_entry = process_age_s()
     entered = time.perf_counter()
@@ -212,8 +212,8 @@ def main(argv=None, certify=None, context_factory=None):
     def elapsed():
         return age_at_entry + time.perf_counter() - entered
 
-    inputs, timeline = section_planner.read_inputs(args)
-    limits, lower, upper = section_planner._limits_record(args.urdf)
+    inputs, timeline = contract.read_inputs(args)
+    limits, lower, upper = contract.limits_record(args.urdf)
     document = {
         'schema_version': SCHEMA_VERSION, 'command': ['fast_section', *args.argv],
         'started_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -230,12 +230,12 @@ def main(argv=None, certify=None, context_factory=None):
             'longer_sections': 'not this mode: section_planner reads this run\'s journal and '
                                'extends the certificate'},
         'inputs': inputs, 'limits': limits,
-        'limitations': list(section_planner.LIMITATIONS) + [
+        'limitations': list(contract.LIMITATIONS) + [
             'The fast search is a beam over on-demand candidates, not the exhaustive graph: '
             'an attempt that finds no certificate is evidence of nothing.'],
-        'provenance': {'code_revision': section_planner.git_revision(),
+        'provenance': {'code_revision': contract.git_revision(),
                        'image_id': os.environ.get('UR10E_IMAGE_ID'),
-                       'workers': args.workers, 'levels': [dict(l) for l in fast_certify.LEVELS]},
+                       'workers': args.workers, 'levels': [dict(l) for l in LEVELS]},
     }
     if timeline is None:
         document.update(status=STATUS_INPUT, elapsed_s=elapsed(), result=None)
@@ -243,13 +243,13 @@ def main(argv=None, certify=None, context_factory=None):
         print(f"input refused: {inputs['recording']['problems']}", flush=True)
         return EXIT_INPUT
 
-    from ur10e_trajectory_pkg.ClientNode import mount_record
+    from ur10e_trajectory_pkg.target_builder import mount_record
     document['mount'] = mount_record()
     last = timeline.last_start(args.target_s)
     stride = max(1, int(round(args.start_stride_s / timeline.step_s)))
     order, levels = ([], []) if last is None else search.start_order(
-        last, stride, section_planner.load_hints(args.start_hints))
-    plan = schedule(order, levels, len(fast_certify.LEVELS))
+        last, stride, contract.load_hints(args.start_hints))
+    plan = schedule(order, levels, len(LEVELS))
     document['schedule'] = {'rounds': (plan[-1][0] + 1) if plan else 0, 'attempts_planned': len(plan),
                             'grid_starts': len(order), 'stride_samples': stride}
     attempts = []
@@ -272,15 +272,15 @@ def main(argv=None, certify=None, context_factory=None):
                 status = STATUS_INCONCLUSIVE
                 break
             samples = timeline.samples_for(start, args.target_s)
-            spin_up = section_planner.first_rung_for(args.csv, samples, start)
+            spin_up = contract.first_rung_for(args.csv, samples, start)
             work_dir = os.path.join(args.work_dir, 'attempts',
-                                    f'{section_planner.probe_name(start, samples)}_level_{cap}')
+                                    f'{contract.probe_name(start, samples)}_level_{cap}')
             if os.path.isdir(work_dir):
                 shutil.rmtree(work_dir)
             began = time.perf_counter()
             summary = certify(
                 context, choice, args.csv, start, samples, spin_up, work_dir,
-                deadline=deadline, levels=fast_certify.LEVELS[:cap + 1])
+                deadline=deadline, levels=LEVELS[:cap + 1])
             seconds = time.perf_counter() - began
             record = {'round': round_number, 'start': start, 'samples': samples,
                       'max_search_level': cap, 'status': summary.get('status'),
@@ -316,20 +316,20 @@ def main(argv=None, certify=None, context_factory=None):
             'classification': {'class': 'pass', 'detail': None},
             'spin_up_s': summary.get('spin_up_s'), 'seconds': seconds, 'peak_memory_gb': None,
             'start_routes': None}
-        problems = section_planner.plan_problems(plan_document, probe, inputs)
+        problems = contract.plan_problems(plan_document, probe, inputs)
         if problems:
             raise RuntimeError(f'the certified plan does not match its section: {problems}')
         # Published first, before anything else is written.
         _write(plan_path, plan_document)
-        section, _ = section_planner.section_record(
+        section, _ = contract.section_record(
             timeline, probe, {'kind': 'not_examined', 'next_sample_fails': None,
                               'statement': 'the fast mode stops at the first certificate; '
                                            'section_planner extends it'},
             lower, upper)
-        section['start_route'] = (section_planner._load(
+        section['start_route'] = (contract.load_json(
             os.path.join(work_dir, 'graph.json')) or {}).get(
             'candidate_filters', {}).get('home_reachable', {}).get('chosen_start')
-        section['plan'] = {'path': plan_path, 'sha256': section_planner.sha256_of(plan_path),
+        section['plan'] = {'path': plan_path, 'sha256': contract.sha256_of(plan_path),
                            'q_path_states': len(plan_document['q_path']),
                            'published_at_elapsed_s': elapsed()}
         document['result'] = {'best_section': section, 'target_met': True}

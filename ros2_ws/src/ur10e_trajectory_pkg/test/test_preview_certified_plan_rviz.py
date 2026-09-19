@@ -9,10 +9,18 @@ import pytest
 from scipy.spatial.transform import Rotation
 
 from ur10e_trajectory_pkg import (
-    ClientNode,
     motion_limits,
     preview_certified_plan_rviz as preview,
+    plan_artifact,
+    target_builder,
 )
+
+
+def test_ros_launch_arguments_are_removed_without_discarding_player_flags():
+    assert preview._non_ros_args([
+        'preview_certified_plan_rviz', '--plan', 'plan.json', '--csv', 'recording.csv',
+        '--loop-full', '--ros-args', '-r', '__node:=preview',
+    ]) == ['--plan', 'plan.json', '--csv', 'recording.csv', '--loop-full']
 
 
 def test_target_frame_composes_mount_and_slerps_from_nonidentity_start(
@@ -27,12 +35,12 @@ def test_target_frame_composes_mount_and_slerps_from_nonidentity_start(
     mount[:3, 3] = [0.1, 0.0, 0.0]
 
     monkeypatch.setattr(
-        ClientNode,
+        target_builder,
         "mount_record",
         lambda: {"name": "T_EG", "transform": mount.tolist()},
     )
     monkeypatch.setattr(
-        ClientNode,
+        plan_artifact,
         "plan_targets",
         lambda plan, csv_path: (
             [1.0, 1.0],
@@ -79,7 +87,7 @@ def test_target_frame_composes_mount_and_slerps_from_nonidentity_start(
 
 def test_target_frame_rejects_mount_changed_since_plan(monkeypatch):
     monkeypatch.setattr(
-        ClientNode,
+        target_builder,
         "mount_record",
         lambda: {"name": "T_EG", "transform": np.eye(4).tolist()},
     )
@@ -97,8 +105,9 @@ def test_recording_digest_and_slice_timing_are_checked(tmp_path):
     recording = tmp_path / "camera_traj.csv"
     with recording.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["timestamp"])
-        writer.writerows(([value] for value in (0.0, 0.1, 0.2, 0.3)))
+        writer.writerow(["timestamp", "q_I_G_x", "q_I_G_y", "q_I_G_z", "q_I_G_w"])
+        writer.writerows(([value, 0.0, 0.0, 0.0, 1.0]
+                         for value in (0.0, 0.1, 0.2, 0.3)))
     digest = hashlib.sha256(recording.read_bytes()).hexdigest()
     plan = {
         "recording": {"csv_sha256": digest},
@@ -173,18 +182,15 @@ def test_full_display_cycle_returns_home_without_a_pose_jump():
     np.testing.assert_allclose(passes[5][3], orientations[::-1])
 
 
-def test_archived_warmup_is_retimed_to_the_current_rail_cap():
+def test_archived_warmup_over_the_current_rail_cap_is_refused():
     rests = np.zeros((3, 7))
     rests[:, 0] = [1.5, 0.6314602052823286, 0.60]
     stored = np.asarray([1.6285121150956339, 2.0])
 
-    actual = preview.current_warmup_durations(rests, stored)
+    with pytest.raises(ValueError, match='replan and recertify'):
+        preview.check_warmup_durations(rests, stored)
 
-    expected = 15.0 * abs(rests[1, 0] - rests[0, 0]) / (
+    stored[0] = 15.0 * abs(rests[1, 0] - rests[0, 0]) / (
         8.0 * motion_limits.RAIL_VEL_SAFETY_CAP
     )
-    assert actual[0] == pytest.approx(expected)
-    assert actual[0] == pytest.approx(3.2570242301912677)
-    assert actual[1] == pytest.approx(stored[1])
-    peak_rail_speed = 15.0 * abs(rests[1, 0] - rests[0, 0]) / (8.0 * actual[0])
-    assert peak_rail_speed <= 0.5 + 1e-12
+    preview.check_warmup_durations(rests, stored)

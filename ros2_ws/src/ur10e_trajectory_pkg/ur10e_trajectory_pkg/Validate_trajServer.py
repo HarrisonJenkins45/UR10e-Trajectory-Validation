@@ -4,7 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState  # Standard ROS msg for joint encoders
 from ur10e_interfaces.srv import ExecuteWarmup, ValidateTrajectory
 
-from ur10e_trajectory_pkg import frames
+from ur10e_trajectory_pkg import frames, joint_motion
 from ur10e_trajectory_pkg.configurations import JOINT_NAMES, NUM_JOINTS
 from ur10e_trajectory_pkg import warmup
 from ur10e_trajectory_pkg.motion_limits import limit_statuses
@@ -186,7 +186,7 @@ def plan_and_validate_route(validator, rest_points, segment_index, q_measured,
     if not ok:
         return (False, f'Arm is not at {label}: ' + '; '.join(details['failures']),
                 None, route)
-    _, frames, _, _ = warmup.sample_rest_to_rest(
+    _, frames, _, _ = joint_motion.sample_rest_to_rest(
         np.asarray(segment['begins_at'], dtype=float),
         np.asarray(segment['ends_at'], dtype=float),
         segment['duration_s'], playback_hz)

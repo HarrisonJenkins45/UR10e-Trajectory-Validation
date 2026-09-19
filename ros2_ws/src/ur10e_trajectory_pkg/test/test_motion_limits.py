@@ -26,7 +26,7 @@ def validator():
 
 def test_every_limit_names_its_source_and_status():
     manifest = ml.manifest()
-    for name in ('retired_uniform_cap', 'arm_acceleration', 'arm_jerk',
+    for name in ('arm_acceleration', 'arm_jerk',
                  'rail_velocity', 'rail_acceleration', 'rail_jerk'):
         entry = manifest[name]
         assert entry['source'], f'{name} has no provenance'
@@ -54,15 +54,6 @@ def test_the_urdf_agrees_with_the_published_limits(validator):
     for index, name in enumerate(JOINT_NAMES[1:], start=1):
         assert from_urdf[index] == pytest.approx(ml.ARM_VELOCITY[name].value,
                                                  rel=1e-9)
-
-
-def test_the_retired_cap_was_below_the_wrist_rating():
-    """It held the wrists to roughly two thirds of their rated speed, and the
-    wrists are what performs a tumble."""
-    assert ml.RETIRED_UNIFORM_CAP.status == ml.ASSUMED
-    assert ml.RETIRED_UNIFORM_CAP.value < ml.ARM_VELOCITY['wrist_1_joint'].value
-    ratio = ml.RETIRED_UNIFORM_CAP.value / ml.ARM_VELOCITY['wrist_1_joint'].value
-    assert 0.6 < ratio < 0.7
 
 
 def test_acceleration_is_provisional_and_jerk_is_merely_assumed():

@@ -33,6 +33,7 @@ import numpy as np
 
 from ur10e_trajectory_pkg import motion_limits
 from ur10e_trajectory_pkg import robot_checks
+from ur10e_trajectory_pkg.joint_motion import CONTROLLER_HZ, sample_rest_to_rest
 
 OK = 'ok'
 NO_DIRECT_WARMUP = 'no_direct_warmup'
@@ -47,7 +48,6 @@ WARMUP_VIA_DWELL_S = 0.5
 OUTSIDE_JOINT_LIMITS = 'endpoint_outside_joint_limits'
 WARMUP_PROFILE = ('rest-to-rest quintic in joint space, minimum duration from '
                   'the closed-form peak velocity and acceleration')
-CONTROLLER_HZ = 500.0
 MINIMUM_DURATION_S = 0.2
 
 
@@ -73,20 +73,6 @@ def rest_to_rest_duration(home, start, velocity_limits, acceleration_limits,
     kind = ('minimum_duration' if duration > candidates[joint]
             else ('velocity', 'acceleration', 'jerk')[int(np.argmax(stacked[:, joint]))])
     return duration, joint, kind
-
-
-def sample_rest_to_rest(home, start, duration, rate_hz=CONTROLLER_HZ):
-    """Positions, velocities, accelerations at controller rate, ends included."""
-    home, start = np.asarray(home, float), np.asarray(start, float)
-    count = max(2, int(np.ceil(duration * rate_hz)) + 1)
-    times = np.linspace(0.0, duration, count)
-    s = times / duration
-    shape = 10 * s**3 - 15 * s**4 + 6 * s**5
-    rate = (30 * s**2 - 60 * s**3 + 30 * s**4) / duration
-    curvature = (60 * s - 180 * s**2 + 120 * s**3) / duration**2
-    delta = start - home
-    return (times, home + np.outer(shape, delta), np.outer(rate, delta),
-            np.outer(curvature, delta))
 
 
 def plan_warmup(validator, home, start, velocity_limits=None,
@@ -330,7 +316,7 @@ def main(argv=None):
 
     from ament_index_python.packages import get_package_share_directory
 
-    from ur10e_trajectory_pkg.failure_census import _validator
+    from ur10e_trajectory_pkg.planning_runtime import make_validator as _validator
 
     try:
         home = json.loads(args.home)

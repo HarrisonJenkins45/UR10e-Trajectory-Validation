@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The frame contract, and the transforms between the frames it names.
+"""Frame contract and rigid-transform operations for the orientation task.
 
 Four frames, and only four:
 
@@ -10,35 +10,27 @@ Four frames, and only four:
       frame a target is expressed in
   G   end effector, tool0
 
-Targets convert into R once, from a calibrated arena-to-rail pose:
-
-    T_RG(t) = inv(T_IR) @ T_IG(t)
-
 The rail coordinate appears only inside forward kinematics:
 
     T_RG(q) = T_RC(q_rail) @ T_CG(q_arm)
 
-That split is the contract. A client must never subtract the rail position or
-express a target relative to the moving arm base; doing so made the client and
-solver disagree by the rail position plus the carriage mount height, which is
-the discrepancy the solver docstring has carried as a known issue.
+The target builder holds position fixed and expresses every target in R. A
+client must never subtract the rail position or express a target relative to
+the moving arm base.
 
 The URDF's `world` is an identity anchor for rail_base_link, not the arena.
 The 25 mm carriage origin is internal to forward kinematics and must never be
 added to a client target.
 
-Relative motion and placement
------------------------------
-The task reproduces RELATIVE motion between two spacecraft, so where that
-motion sits in the arena is a free choice rather than a measurement. Writing
-it that way keeps the six placement degrees of freedom and the scale factor
-visible as inputs, instead of hiding them inside a stand-in arm-base pose:
+Orientation-only placement
+--------------------------
+The target builder preserves the recording's absolute q_I_G orientations and
+sets one fixed target position. Its relative-pose formulation is:
 
     dT(t)   = inv(T_IG(0)) @ T_IG(t)      motion relative to its own start
     T_RG(t) = T_RG(0) @ dT(t)             placed at a chosen start pose
 
-Scaling applies to the translation of dT only. Scaling its rotation would
-change the tumble being reproduced, which is the part that must stay exact.
+SISIFOS translation, scaling and arena calibration are outside this task.
 """
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -134,71 +126,16 @@ def relative_motion(poses):
     return np.stack([first_inverse @ pose for pose in poses])
 
 
-def scale_translation(transforms, scale):
-    """Scale the translation of each transform, leaving rotation untouched.
-
-    Rotation must not be scaled: the tumble is the quantity being reproduced,
-    and scaling it would reproduce a different one.
-    """
-    transforms = np.asarray(transforms, dtype=float).copy()
-    transforms[..., :3, 3] *= float(scale)
-    return transforms
-
-
-def scale_to_bound(transforms, bound_m):
-    """Uniform translation scale fitting the motion inside a radius.
-
-    Returns (scaled, factor). A motion already inside the bound, or with no
-    translation at all, is left alone rather than magnified: a pure tumble
-    has zero displacement, and scaling it up is meaningless.
-    """
-    transforms = np.asarray(transforms, dtype=float)
-    extent = float(np.max(np.linalg.norm(transforms[..., :3, 3], axis=-1)))
-    if extent <= 1e-9:
-        return transforms.copy(), 1.0
-    factor = bound_m / extent
-    return scale_translation(transforms, factor), factor
-
-
-def place_relative_motion(motion, start_pose_RG, bound_m=None):
+def place_relative_motion(motion, start_pose_RG):
     """Put a relative motion into the rail-base frame at a chosen start pose.
 
     T_RG(t) = T_RG(0) @ dT(t)
 
-    start_pose_RG is the placement: six degrees of freedom that are genuinely
-    free, and the thing a later placement optimisation varies. bound_m, if
-    given, scales the motion's translation to fit that radius first.
-
-    Returns (poses_RG, scale_factor).
+    The current target builder supplies a fixed position and the recording's
+    first absolute orientation. No translation scale is applied.
     """
     motion = np.asarray(motion, dtype=float)
-    factor = 1.0
-    if bound_m is not None:
-        motion, factor = scale_to_bound(motion, bound_m)
-    return np.stack([start_pose_RG @ step for step in motion]), factor
-
-
-def arena_to_rail_base(poses_IG, calibration_IR):
-    """Express arena poses in the rail-base frame.
-
-    T_RG(t) = inv(T_IR) @ T_IG(t)
-
-    calibration_IR is the pose of the rail base in the arena, a single static
-    transform from VICON. It is deliberately not accepted per-waypoint: the
-    rail base does not move, and an array here would let a caller pass N
-    values of which only the first was ever used, which is how the previous
-    conversion behaved.
-    """
-    calibration_IR = np.asarray(calibration_IR, dtype=float)
-    if calibration_IR.shape != (4, 4):
-        raise ValueError(
-            'calibration must be one static 4x4 arena-to-rail-base transform, '
-            f'got shape {calibration_IR.shape}; the rail base does not move'
-        )
-    validate_transform(calibration_IR, 'calibration')
-    rail_from_arena = invert(calibration_IR)
-    return np.stack([rail_from_arena @ pose
-                     for pose in np.asarray(poses_IG, dtype=float)])
+    return np.stack([start_pose_RG @ step for step in motion])
 
 
 def poses_from_positions_quaternions(positions, quaternions):

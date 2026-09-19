@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Stage 5 gate: the layered graph, and the oracle that makes it testable.
+"""The layered graph and a known feasible path that makes it testable.
 
 One binary question before any cost tuning: does a complete path exist from
 the actual q_start through every layer?
 
-The oracle needs two builds. Injecting the corrected greedy configuration at
-every layer guarantees a valid path exists, so a failure there is the graph's
-fault. Excluding it tests whether independent candidate generation suffices.
-Without that separation a failure is ambiguous between a graph defect and an
-incomplete candidate set.
+Tests put a known feasible path in the layers directly. Production candidates
+come only from the generator; historical oracle-injection mode is gone.
 """
 import numpy as np
 import pytest
@@ -26,6 +23,10 @@ from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 from test_geometry_invariants import _urdf_path
 
 LAYERS = 8
+
+
+def _oracle_layers(path):
+    return [[np.asarray(configuration, dtype=float)] for configuration in path]
 
 
 @pytest.fixture(scope='module')
@@ -54,7 +55,7 @@ def oracle(validator):
 
 @pytest.fixture(scope='module')
 def graph(validator, oracle):
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     return graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
 
 
@@ -94,7 +95,7 @@ def test_a_successor_keeps_the_winding_it_was_reached_by(validator, oracle):
     wrist_1 = JOINT_NAMES.index('wrist_1_joint')
     shifted = np.asarray(oracle[0]).copy()
     shifted[wrist_1] += TWO_PI
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
 
     successors = graph.successors(shifted, 1, dt=0.1)
@@ -230,7 +231,7 @@ def test_the_optimal_cost_does_not_exceed_the_injected_path(graph, oracle):
 
 def test_an_empty_layer_reports_where_it_disconnected(validator, oracle):
     """A generator-only build that fails must say which layer, not just no."""
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     layers[4] = []
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
 
@@ -278,7 +279,7 @@ def test_a_free_start_chooses_among_first_waypoint_candidates(validator, oracle)
     edge exists."""
     decoy = np.asarray(oracle[0]).copy()
     decoy[2] += 0.3
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     layers[0] = [decoy] + list(layers[0])
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
 
@@ -296,7 +297,7 @@ def test_a_free_start_chooses_among_first_waypoint_candidates(validator, oracle)
 
 
 def test_a_free_start_is_deterministic(validator, oracle):
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
     first, _, _ = graph.shortest_path()
     again, _, _ = graph.shortest_path()
@@ -304,7 +305,7 @@ def test_a_free_start_is_deterministic(validator, oracle):
 
 
 def test_an_empty_first_layer_disconnects_a_free_start_at_layer_zero(validator, oracle):
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     layers[0] = []
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
     result, first_empty, _ = graph.shortest_path()
@@ -312,7 +313,7 @@ def test_an_empty_first_layer_disconnects_a_free_start_at_layer_zero(validator, 
 
 
 def test_start_lifts_add_every_legal_winding(validator, oracle):
-    layers = graph_planner.inject_oracle([[] for _ in range(LAYERS)], oracle)
+    layers = _oracle_layers(oracle)
     graph = graph_planner.LayeredGraph(validator, layers, LAYERS, dt=0.1)
     canonical = graph.start_states()
     lifted = graph.start_states(lifts=True)

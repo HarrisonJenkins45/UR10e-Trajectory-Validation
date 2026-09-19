@@ -2,7 +2,7 @@
 """Which recording each stage planned, and refusing to mix recordings.
 
 Every stage loads the recording itself, so the only thing tying candidates,
-graph, commands and the client's rebuilt targets to one motion is the digest
+graph, commands and rebuilt targets to one motion is the digest
 each records and the next one checks.
 """
 import shutil
@@ -11,8 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ur10e_trajectory_pkg import ClientNode as client
-from ur10e_trajectory_pkg.failure_census import (
+from ur10e_trajectory_pkg import target_builder as targets
+from ur10e_trajectory_pkg import plan_artifact, trajectory_input
+from ur10e_trajectory_pkg.planning_runtime import (
     file_digest,
     recording_mismatch,
     recording_record,
@@ -21,9 +22,9 @@ from ur10e_trajectory_pkg.failure_census import (
 
 @pytest.fixture
 def packaged():
-    if file_digest(client.DEFAULT_CSV_PATH) is None:
+    if file_digest(targets.DEFAULT_CSV_PATH) is None:
         pytest.skip('packaged trajectory CSV not present')
-    return client.DEFAULT_CSV_PATH
+    return targets.DEFAULT_CSV_PATH
 
 
 def _other(tmp_path, packaged, rows=20):
@@ -50,11 +51,10 @@ def test_other_bytes_are_refused_and_both_sides_named(tmp_path, packaged):
     assert str(other) in reason and packaged in reason
 
 
-def test_a_record_without_a_digest_is_the_packaged_recording(tmp_path, packaged):
-    """Artifacts from before --csv carry no digest. Every stage then loaded
-    the packaged recording, so those are the only bytes they agree with."""
-    assert recording_mismatch(None, recording_record(None)) is None
-    assert recording_mismatch({}, recording_record(_other(tmp_path, packaged))) is not None
+def test_a_record_without_a_digest_is_refused(tmp_path, packaged):
+    """An unnamed source is refused even when the packaged bytes match."""
+    assert 'missing' in recording_mismatch(None, recording_record(packaged))
+    assert 'missing' in recording_mismatch({}, recording_record(_other(tmp_path, packaged)))
 
 
 def test_an_unreadable_recording_is_refused(tmp_path):
@@ -68,10 +68,10 @@ def test_asking_for_more_samples_than_recorded_is_refused(tmp_path, packaged):
     shorter recording used to yield mismatched arrays rather than an error."""
     short = _other(tmp_path, packaged, rows=20)
     with pytest.raises(ValueError, match='fewer than'):
-        client.build_trajectory_targets(short, 21)
+        targets.build_trajectory_targets(short, 21)
     with pytest.raises(ValueError, match='fewer than'):
-        client.recorded_start_rate(short, 21)
-    x, *_ = client.build_trajectory_targets(short, 20)
+        targets.recorded_start_rate(short, 21)
+    x, *_ = targets.build_trajectory_targets(short, 20)
     assert len(x) == 20
 
 
@@ -96,9 +96,9 @@ def test_targets_use_only_q_I_G_and_hold_position_fixed(tmp_path, packaged):
     altered['q_I_C_w'] = 1.0
     altered.to_csv(changed, index=False)
 
-    first, metadata = client.build_trajectory_targets(
+    first, metadata = targets.build_trajectory_targets(
         original, 20, return_metadata=True)
-    second = client.build_trajectory_targets(changed, 20)
+    second = targets.build_trajectory_targets(changed, 20)
     for actual, expected in zip(second, first):
         np.testing.assert_allclose(actual, expected, atol=1e-12)
 
@@ -113,15 +113,35 @@ def _plan(**overrides):
     """recorded_waypoints 2 with a 2 s spin-up rebuilds 12 targets."""
     q_path = [[0.53, 0.68, -1.27, 2.05, -3.86, -2.35, -1.27 + 0.001 * i]
               for i in range(12)]
-    plan = {'q_path': q_path, 'recorded_waypoints': 2, 'spin_up_s': 2.0,
-            'placement': 'nominal'}
+    plan = {'schema_version': plan_artifact.SCHEMA_VERSION,
+            'home': q_path[0], 'q_path': q_path, 'task_start': q_path[0],
+            'warmup_route': {'route_kind': 'direct',
+                             'rest_points': [q_path[0], q_path[0]],
+                             'segment_durations_s': [1.0], 'dwell_s': 0.0},
+            'recorded_waypoints': 2, 'start_index': 0, 'spin_up_s': 2.0,
+            'placement': 'nominal', 'mount': targets.mount_record(),
+            'target_frame': 'rail_base_link'}
     plan.update(overrides)
     return plan
 
 
 def test_a_plan_is_rebuilt_from_the_recording_it_names(tmp_path, packaged):
     other = _other(tmp_path, packaged)
-    x, *_ = client.plan_targets(_plan(recording=recording_record(other)))
+    x, *_ = plan_artifact.plan_targets(_plan(recording=recording_record(other)))
+    assert len(x) == 12
+
+
+def test_plan_targets_use_the_bytes_whose_digest_was_checked(
+        tmp_path, packaged, monkeypatch):
+    other = _other(tmp_path, packaged)
+    source = trajectory_input.load(other)
+    plan = _plan(recording=recording_record(other))
+
+    def no_second_read(_path):
+        raise AssertionError('the target builder reopened the trajectory')
+
+    monkeypatch.setattr(trajectory_input, 'load', no_second_read)
+    x, *_ = plan_artifact.plan_targets(plan, trajectory=source)
     assert len(x) == 12
 
 
@@ -130,9 +150,9 @@ def test_a_plan_is_refused_against_other_bytes(tmp_path, packaged):
     label, even when the caller points at the file explicitly."""
     plan = _plan(recording=recording_record(packaged))
     with pytest.raises(ValueError, match='the plan was built from'):
-        client.plan_targets(plan, csv_path=_other(tmp_path, packaged))
+        plan_artifact.plan_targets(plan, csv_path=_other(tmp_path, packaged))
 
 
-def test_a_plan_from_before_recordings_were_named_uses_the_packaged_one(packaged):
-    x, *_ = client.plan_targets(_plan())
-    assert len(x) == 12
+def test_a_plan_without_a_named_recording_is_refused(packaged):
+    with pytest.raises(ValueError, match='missing'):
+        plan_artifact.plan_targets(_plan())

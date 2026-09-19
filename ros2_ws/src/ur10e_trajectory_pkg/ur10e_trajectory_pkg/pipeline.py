@@ -24,7 +24,7 @@ keeps the WHOLE path inside the limits. When commands reports that, the
 graph is rebuilt with --strict-home-windings and commands runs again.
 
 Usage:
-    python3 -m ur10e_trajectory_pkg.pipeline --placement nominal \\
+    python3 -m ur10e_trajectory_pkg.pipeline \\
         --home-json home_choice.json --via-poses screened_poses.json \\
         --work-dir runs/nominal
 """
@@ -153,7 +153,8 @@ def run(args):
 
     Returns (exit code, summary document).
     """
-    from ur10e_trajectory_pkg.ClientNode import DEFAULT_CSV_PATH, recorded_start_rate
+    from ur10e_trajectory_pkg.target_builder import recorded_start_rate
+    from ur10e_trajectory_pkg.trajectory_input import DEFAULT_CSV_PATH
 
     os.makedirs(args.work_dir, exist_ok=True)
     ladder = {'derived': args.spin_up_s is None}
@@ -197,7 +198,7 @@ def _run_at(args, spin_up_s, work_dir):
     paths = {name: os.path.join(work_dir, f'{name}.json')
              for name in ('candidates', 'graph', 'commands', 'task_plan')}
     stages = []
-    summary = {'schema_version': SCHEMA_VERSION, 'placement': args.placement,
+    summary = {'schema_version': SCHEMA_VERSION, 'placement': 'nominal',
                'csv': args.csv, 'start_index': getattr(args, 'start_index', 0),
                'waypoints': args.waypoints, 'spin_up_s': spin_up_s,
                'home_json': args.home_json, 'via_poses': args.via_poses,
@@ -212,7 +213,7 @@ def _run_at(args, spin_up_s, work_dir):
     slice_args = ([] if not getattr(args, 'start_index', 0)
                   else ['--start-index', str(args.start_index)])
     code = _run(STAGE_CANDIDATES, candidate_generator.main, [
-        '--waypoints', str(args.waypoints), '--placement', args.placement,
+        '--waypoints', str(args.waypoints),
         '--urdf', args.urdf, '--out', paths['candidates'], *spin_up, *recording,
         *slice_args],
         stages)
@@ -222,8 +223,7 @@ def _run_at(args, spin_up_s, work_dir):
 
     def graph_and_commands(strict):
         graph_argv = ['--candidates', paths['candidates'],
-                      '--layers', str(args.waypoints), '--start', 'free',
-                      '--build', 'generator', '--placement', args.placement,
+                      '--layers', str(args.waypoints),
                       '--urdf', args.urdf, '--out', paths['graph'], *spin_up,
                       *recording, *slice_args]
         # Validating every lifted start from the home is the graph stage's
@@ -288,7 +288,6 @@ def _run_at(args, spin_up_s, work_dir):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--placement', default='nominal')
     parser.add_argument('--csv', default=None,
                         help='recording to plan (default: the packaged '
                              'camera_traj.csv); every stage loads it and checks '

@@ -12,7 +12,7 @@ import pytest
 
 from test_section_planner import LOWER, UPPER, write_probe, write_recording
 
-from ur10e_trajectory_pkg import fast_section, section_planner
+from ur10e_trajectory_pkg import fast_section, section_contract, section_planner
 from ur10e_trajectory_pkg import section_search as search
 
 
@@ -40,7 +40,7 @@ class StandInCertifier:
     """certify_slice's signature; the rule decides each slice's outcome."""
 
     def __init__(self, rule, csv_path):
-        from ur10e_trajectory_pkg.failure_census import file_digest
+        from ur10e_trajectory_pkg.planning_runtime import file_digest
 
         self.rule = rule
         self.digest = file_digest(csv_path)
@@ -70,7 +70,7 @@ def inputs(tmp_path, monkeypatch):
     with open(home, 'w', encoding='utf-8') as handle:
         json.dump({'chosen': {'configuration': [1.5, 0.0, -1.31, 1.75, -2.0, -1.4, 0.0]}},
                   handle)
-    monkeypatch.setattr(section_planner, '_limits_record', lambda urdf: (
+    monkeypatch.setattr(section_contract, 'limits_record', lambda urdf: (
         {'may_certify_for_hardware': False}, LOWER, UPPER))
     return {'csv': csv, 'home': home, 'times': times, 'work': str(tmp_path / 'fast')}
 
@@ -93,13 +93,13 @@ def test_a_section_found_only_at_a_later_start_is_certified_and_published(inputs
         lambda start, samples, cap: 'pass' if start == 179 and cap >= 1
         else ('graph', 10, ('direct', 'direct+via')), inputs['csv'])
     published = []
-    real_record = section_planner.section_record
+    real_record = section_contract.section_record
 
     def record(*args, **kwargs):
         published.append(os.path.exists(os.path.join(inputs['work'], 'best_plan.json')))
         return real_record(*args, **kwargs)
 
-    monkeypatch.setattr(section_planner, 'section_record', record)
+    monkeypatch.setattr(section_contract, 'section_record', record)
     code = fast_section.main(_argv(inputs), certify=certifier, context_factory=FakeContext)
     assert code == fast_section.EXIT_FOUND
     report = _report(inputs)

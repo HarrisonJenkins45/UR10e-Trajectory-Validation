@@ -14,6 +14,20 @@ infeasibility, or finding the longest possible section.
   `q_I_G_y`, `q_I_G_z`, and `q_I_G_w`. SISIFOS translation is ignored. The
   target is placed at a fixed, legacy arena position; placement optimization
   and camera-relative motion are not part of this branch.
+- `trajectory_input.py` is the single CSV reader and input validator. Search,
+  target construction and RViz use its timestamps, orientations,
+  slices and source digest. Separate planning processes may reopen the file
+  through that module; they do not maintain separate CSV parsers.
+- `target_builder.py` converts validated orientation samples into fixed-position,
+  time-stamped tool targets, including placement, mount and optional spin-up.
+  Its core interface accepts the loaded trajectory object, with a path-based
+  adapter for separate planning stages. It has no ROS client dependency.
+- `plan_artifact.py` owns the exported joint-plan format, structural checks and
+  source-matched target reconstruction. The ROS client and RViz consume that
+  same plan contract; neither parses trajectory inputs or invents targets.
+- `joint_motion.py` owns the rest-to-rest quintic warmup and PCHIP task curve.
+  The validator, service playback and RViz sample those same joint motions;
+  ROS publishes the resulting coordinates rather than defining the motion.
 - The mount transform `T_EG` (target body G in robot tool frame E) is a
   **provisional identity**. Every exported plan records it. It must be
   established for the real mock-up before hardware use.
@@ -61,6 +75,16 @@ journal. If it returns `inconclusive_under_this_budget` or
 `none_found_under_this_search`, it has **not** shown that the recording lacks a
 feasible section: its on-demand beam search is incomplete.
 
+The two search commands share `section_contract.py` for input identity,
+spin-up selection, probe evidence, certificate checks and journal identity.
+`fast_section.py` chooses a first-certificate schedule; `section_planner.py`
+chooses starts and lengths for the resumable search. Neither search command
+imports the other. `section_search.py` contains the ROS-free length-search
+policy; `fast_beam.py` contains the oracle-based beam policy; and
+`fast_certify.py` supplies robot-specific candidates, edges and certification.
+The old corpus benchmark, failure census, placement sweep and MAT-file player
+are not part of this package's execution path.
+
 Use the same work directory to spend a separate budget extending a found
 section. The journal allows the longer search to replay the existing
 certificate rather than rediscover it:
@@ -82,15 +106,22 @@ that every section of a recording is infeasible.
 In a built and sourced ROS workspace:
 
 ```bash
-ros2 launch ur10e_trajectory_pkg PreviewPlan_Rviz.py \
+ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py \
     plan:=/path/to/best_plan.json csv:=/path/to/the/same/camera_traj.csv
 ```
 
-The preview verifies the recording digest and shows the arm, rail and target
+The same launch without `plan` and `csv` opens a passive RViz display for a
+separately started joint-state source; it does not start the validation service
+or client. Supply both for certified-plan playback. Do not run service playback
+at the same time as plan playback: both publish `/joint_states`. Both modes
+show the collision-model floor and wall.
+
+The plan player verifies the recording digest and shows the arm, rail and target
 body frame. It can loop home, warmup and task; the reverse return is for
-display only and is **not certified**. Older plans may have their displayed
-warmup slowed to the current 0.5 m/s rail cap; that retimed warmup needs new
-validation before it is used as a command.
+display only and is **not certified**. Plans lacking a certified warmup, mount,
+recording digest or slice identity are refused. A stored warmup that exceeds
+the current 0.5 m/s rail cap must be replanned and recertified, not silently
+retimed for display.
 
 ## Test and reproduce
 

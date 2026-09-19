@@ -7,11 +7,12 @@ import numpy as np
 import pytest
 
 from ur10e_trajectory_pkg import fast_certify as fast
-from ur10e_trajectory_pkg import section_planner
+from ur10e_trajectory_pkg import fast_beam as beam
+from ur10e_trajectory_pkg import section_contract
 
 LOWER = np.array([0.0] + [-2 * np.pi] * 6)
 UPPER = np.array([3.0] + [2 * np.pi] * 6)
-WIDE = tuple(dict(spec, beam=None) for spec in fast.LEVELS)
+WIDE = tuple(dict(spec, beam=None) for spec in beam.LEVELS)
 
 
 def state(*values):
@@ -47,15 +48,15 @@ class GridOracle:
 
 
 def exhaustive_cost(starts, rows, allowed, cost, layers):
-    best = {fast.state_key(s): 0.0 for s in starts}
-    states = {fast.state_key(s): s for s in starts}
+    best = {beam.state_key(s): 0.0 for s in starts}
+    states = {beam.state_key(s): s for s in starts}
     for layer in range(1, layers):
         nxt, nxt_states = {}, {}
         for key, value in best.items():
             for row in rows(layer, 0):
                 if allowed(states[key], row, layer):
                     total = value + cost(states[key], row)
-                    k = fast.state_key(row)
+                    k = beam.state_key(row)
                     if k not in nxt or total < nxt[k]:
                         nxt[k], nxt_states[k] = total, row
         best, states = nxt, nxt_states
@@ -73,7 +74,7 @@ def test_a_beam_without_a_width_finds_the_exhaustive_optimum():
         return float(np.sum((r - p) ** 2))
 
     oracle = GridOracle(lambda level: table[0], lambda layer, level: table[layer], allowed)
-    result = fast.BeamSearch(oracle, 8, levels=WIDE).run()
+    result = beam.BeamSearch(oracle, 8, levels=WIDE).run()
     assert result['complete']
     assert result['cost'] == pytest.approx(exhaustive_cost(
         table[0], lambda layer, level: table[layer], allowed, cost, 8))
@@ -91,7 +92,7 @@ def test_a_disconnect_broadens_the_layers_before_it_and_resumes():
 
     oracle = GridOracle(lambda level: [near], rows,
                         lambda p, r, layer: abs(p[0] - r[0]) < 1.0)
-    search = fast.BeamSearch(oracle, 9)
+    search = beam.BeamSearch(oracle, 9)
     result = search.run()
     assert result['complete']
     assert search.escalations[0]['failed_layer'] == 5
@@ -103,7 +104,7 @@ def test_a_disconnect_broadens_the_layers_before_it_and_resumes():
 def test_a_disconnect_no_level_repairs_is_reported_where_it_happened():
     oracle = GridOracle(lambda level: [state(0.0)], lambda layer, level: [state(float(layer))],
                         lambda p, r, layer: layer < 4)
-    result = fast.BeamSearch(oracle, 7).run()
+    result = beam.BeamSearch(oracle, 7).run()
     assert result['complete'] is False
     assert result['first_disconnected_layer'] == 4
     assert result['last_connected_layer'] == 3 and len(result['partial_path']) == 4
@@ -113,7 +114,7 @@ def test_the_beam_keeps_the_cheapest_and_then_the_states_with_room():
     cheap = (0.0, (0,), state(1.5, 6.2), None)          # 0.08 rad from its limit
     cramped = (0.1, (1,), state(1.5, 6.25), None)
     roomy = (0.5, (2,), state(1.5, 0.0), None)
-    kept = fast.select_beam([cramped, roomy, cheap], 2, LOWER, UPPER)
+    kept = beam.select_beam([cramped, roomy, cheap], 2, LOWER, UPPER)
     assert [entry[1] for entry in kept] == [(0,), (2,)]
 
 
@@ -121,7 +122,7 @@ def test_a_path_that_fails_validation_is_banned_and_another_is_found():
     a, b = state(0.0), state(0.5)
     oracle = GridOracle(lambda level: [a], lambda layer, level: [a, b],
                         lambda p, r, layer: True)
-    search = fast.BeamSearch(oracle, 6)
+    search = beam.BeamSearch(oracle, 6)
     first = search.run()
     assert all(np.allclose(q, a) for q in first['path'])
     assert search.reject_path(first['path'], located_layer=3)
@@ -134,8 +135,8 @@ def test_the_deadline_stops_the_search_without_a_verdict():
     ticks = itertools.count()
     oracle = GridOracle(lambda level: [state(0.0)], lambda layer, level: [state(0.0)],
                         lambda p, r, layer: True)
-    search = fast.BeamSearch(oracle, 50, deadline=10, clock=lambda: next(ticks))
-    with pytest.raises(fast.DeadlineExpired):
+    search = beam.BeamSearch(oracle, 50, deadline=10, clock=lambda: next(ticks))
+    with pytest.raises(beam.DeadlineExpired):
         search.run()
 
 
@@ -262,7 +263,7 @@ def test_a_fast_disconnect_never_bounds_a_start():
              'candidate_filters': {'home_reachable': {
                  'winding_aware': True, 'attempts': [{'seeds': 'direct'},
                                                      {'seeds': 'direct+via'}]}}}
-    assert section_planner.graph_bound_samples(graph, via_offered=True) is None
+    assert section_contract.graph_bound_samples(graph, via_offered=True) is None
 
 
 def test_a_probe_stopped_by_its_deadline_is_a_resource_limit(tmp_path):
@@ -271,8 +272,8 @@ def test_a_probe_stopped_by_its_deadline_is_a_resource_limit(tmp_path):
     with open(tmp_path / 'pipeline.json', 'w', encoding='utf-8') as handle:
         json.dump({'status': 'inconclusive: the time budget expired',
                    'failed_stage': 'deadline', 'artifacts': {}}, handle)
-    evidence, *_ = section_planner.probe_evidence(str(tmp_path), 601, 0.1, True,
-                                                  {'resource_limited': False})
+    evidence, *_ = section_contract.probe_evidence(str(tmp_path), 601, 0.1, True,
+                                                   {'resource_limited': False})
     assert evidence['classification']['class'] == 'resource_limit'
     assert evidence['graph_bound_samples'] is None and evidence['passed'] is False
 
@@ -283,13 +284,13 @@ def test_a_probe_stopped_by_its_deadline_is_a_resource_limit(tmp_path):
 def validator():
     from ament_index_python.packages import get_package_share_directory
 
-    from ur10e_trajectory_pkg.failure_census import _validator
+    from ur10e_trajectory_pkg.planning_runtime import make_validator as _validator
     return _validator('/root/ros2_ws/ur10e.urdf', get_package_share_directory('ur_description'))
 
 
 @pytest.mark.parametrize('spin_up_s', [None, 0.2])
 def test_a_recorded_sample_has_the_same_target_in_every_slice(spin_up_s):
-    from ur10e_trajectory_pkg.failure_census import load_trajectory
+    from ur10e_trajectory_pkg.planning_runtime import load_trajectory
 
     long_positions, long_quaternions, _, long_meta = load_trajectory(
         None, 60, with_metadata=True, spin_up_s=spin_up_s, start_index=10)
@@ -308,7 +309,7 @@ def test_a_recorded_sample_has_the_same_target_in_every_slice(spin_up_s):
 
 
 def test_a_cached_solve_is_the_solve_it_replaces(validator):
-    from ur10e_trajectory_pkg.failure_census import WIDE_SEED_BANK_DEG, load_trajectory
+    from ur10e_trajectory_pkg.planning_runtime import WIDE_SEED_BANK_DEG, load_trajectory
 
     positions, quaternions, dt = load_trajectory(None, 20, spin_up_s=0.2)
     seeds = [(np.deg2rad(arm), 1.5) for arm in WIDE_SEED_BANK_DEG[:3]]
@@ -331,7 +332,7 @@ def test_a_cached_solve_is_the_solve_it_replaces(validator):
 
 
 def test_the_pool_answers_exactly_what_the_process_answers(validator):
-    from ur10e_trajectory_pkg.failure_census import WIDE_SEED_BANK_DEG, load_trajectory
+    from ur10e_trajectory_pkg.planning_runtime import WIDE_SEED_BANK_DEG, load_trajectory
 
     positions, quaternions, dt = load_trajectory(None, 12, spin_up_s=0.2)
     seeds = [(np.deg2rad(arm), rail) for arm in WIDE_SEED_BANK_DEG for rail in (0.5, 1.5)]

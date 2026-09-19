@@ -530,7 +530,7 @@ class SectionSearch:
             evidence = min((p for p in state.probes if p['graph_bound_samples'] == bound),
                            key=lambda p: p['samples'])
             return {'kind': 'graph_bound', 'next_sample_fails': True,
-                    'evidence_probe': _probe_key(evidence),
+                    'evidence_probe': probe_key(evidence),
                     'statement': 'the graph from this start disconnects before the next '
                                  f'sample (probe of {evidence["samples"]} samples covered '
                                  f'{bound})'}
@@ -546,7 +546,7 @@ class SectionSearch:
                           start, nearest['samples']) - self.timeline.duration(start, samples),
                       'failure': nearest['classification'],
                       'resource_limited': nearest['resource_limited'],
-                      'evidence_probe': _probe_key(nearest)}
+                      'evidence_probe': probe_key(nearest)}
             record['statement'] = (
                 'the slice one sample longer was probed and failed'
                 if gap == 1 else
@@ -660,5 +660,5 @@ class SectionSearch:
         }
 
 
-def _probe_key(probe):
+def probe_key(probe):
     return {'start': probe['start'], 'samples': probe['samples']}

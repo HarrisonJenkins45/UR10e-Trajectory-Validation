@@ -13,7 +13,9 @@ import sys
 import numpy as np
 import pytest
 
+from ur10e_trajectory_pkg import section_contract as contract
 from ur10e_trajectory_pkg import section_planner as sections
+from ur10e_trajectory_pkg import section_search as search
 from ur10e_trajectory_pkg.joint_coordinates import TWO_PI
 
 LOWER = np.array([0.0, -TWO_PI, -TWO_PI, -np.pi, -TWO_PI, -TWO_PI, -TWO_PI])
@@ -32,25 +34,25 @@ def test_the_located_failure_is_the_earliest_named_time():
                 'elbow_joint': {'first_time_s': 171.0}}}]},
         'task_validation': {'self_clearance': {'passed': False, 'at_time_s': 171.2},
                             'tracking': {'within_tolerance': True, 'at_time_s': 3.0}}}
-    assert sections.located_failure_time(commands) == 170.75
-    assert sections.located_failure_time({'task_validation': {
+    assert contract.located_failure_time(commands) == 170.75
+    assert contract.located_failure_time({'task_validation': {
         'limit_violations': {'elbow_joint': {'jerk': {}}}}}) is None
 
 
 def test_joint_margins_and_the_joints_at_a_limit():
     path = np.array([[1.0, 0.0, -2.7, -0.4, -0.8, 2.5, -6.2],
                      [1.1, 0.1, -2.7, -0.4, -0.8, 2.5, -6.27]])
-    margins = sections.joint_margins(path, LOWER, UPPER)
+    margins = contract.joint_margins(path, LOWER, UPPER)
     assert margins['wrist_3']['to_lower'] == pytest.approx(-6.27 + TWO_PI)
     assert margins['rail']['to_upper'] == pytest.approx(1.9)
-    assert sections.limit_boundary(path[-1], LOWER, UPPER) == [
+    assert contract.limit_boundary(path[-1], LOWER, UPPER) == [
         'wrist_3 at its lower limit (-6.270)']
 
 
 @pytest.mark.parametrize('layer, added, expected', [(1708, 1, 1708), (2, 1, 2), (1, 1, 1),
                                                     (0, 0, 1), (9, 0, 10), (5, 2, 4)])
 def test_layers_after_the_spin_up_are_recorded_samples(layer, added, expected):
-    assert sections.samples_through_layer(layer, added) == expected
+    assert search.samples_through_layer(layer, added) == expected
 
 
 # ---- what a graph disconnect bounds ----------------------------------------
@@ -77,20 +79,20 @@ def _graph(complete, layer=None, attempts=('direct',), winding_aware=True, added
 
 def test_a_disconnect_after_trying_every_start_route_bounds_the_start():
     graph = _graph(False, layer=1709, attempts=('direct', 'direct+via'))
-    assert sections.graph_bound_samples(graph, via_offered=True) == 1708
+    assert contract.graph_bound_samples(graph, via_offered=True) == 1708
     # With no via poses offered, direct starts are all the policy has.
-    assert sections.graph_bound_samples(_graph(False, layer=1709), via_offered=False) == 1708
-    assert sections.graph_bound_samples(_graph(False, layer=0, attempts=(
+    assert contract.graph_bound_samples(_graph(False, layer=1709), via_offered=False) == 1708
+    assert contract.graph_bound_samples(_graph(False, layer=0, attempts=(
         'direct', 'direct+via')), via_offered=True) == 0
 
 
 def test_a_disconnect_that_skipped_a_route_or_used_strict_windings_bounds_nothing():
     direct_only = _graph(False, layer=1709, attempts=('direct',))
-    assert sections.graph_bound_samples(direct_only, via_offered=True) is None
+    assert contract.graph_bound_samples(direct_only, via_offered=True) is None
     strict = _graph(False, layer=1709, attempts=('direct', 'direct+via'),
                     winding_aware=False)
-    assert sections.graph_bound_samples(strict, via_offered=True) is None
-    assert sections.graph_bound_samples(_graph(True), via_offered=True) is None
+    assert contract.graph_bound_samples(strict, via_offered=True) is None
+    assert contract.graph_bound_samples(_graph(True), via_offered=True) is None
 
 
 # ---- evidence from a probe's artifacts -------------------------------------
@@ -116,7 +118,7 @@ def write_probe(work_dir, start, samples, outcome, csv_sha256=None, spin_up_s=1.
 
     outcome: 'pass', 'via_pass', ('graph', layer, attempts), ('refinement', time_s).
     """
-    from ur10e_trajectory_pkg.ClientNode import mount_record
+    from ur10e_trajectory_pkg.target_builder import mount_record
 
     paths = {name: os.path.join(work_dir, f'{name}.json')
              for name in ('candidates', 'graph', 'commands', 'task_plan')}
@@ -155,19 +157,19 @@ def write_probe(work_dir, start, samples, outcome, csv_sha256=None, spin_up_s=1.
 
 def test_a_start_reachable_only_through_a_via_pose_is_certified(tmp_path):
     write_probe(str(tmp_path), 40, 601, 'via_pass')
-    evidence, _, graph, _, plan = sections.probe_evidence(
+    evidence, _, graph, _, plan = contract.probe_evidence(
         str(tmp_path), 601, 0.1, True, {'resource_limited': False})
     assert evidence['passed'] is True
     assert evidence['graph_bound_samples'] is None
     assert plan is not None
-    route = sections._route_record(graph)
+    route = contract.route_record(graph)
     assert route['routes'] == {'direct': 0, 'via': 4}
     assert route['chosen_start']['route_kind'] == 'via'
 
 
 def test_a_located_refinement_failure_suggests_a_shorter_slice_but_bounds_nothing(tmp_path):
     write_probe(str(tmp_path), 0, 1708, ('refinement', 170.80))
-    evidence, *_ = sections.probe_evidence(str(tmp_path), 1708, 0.1, True,
+    evidence, *_ = contract.probe_evidence(str(tmp_path), 1708, 0.1, True,
                                            {'resource_limited': False})
     assert evidence['passed'] is False
     assert evidence['classification']['class'] == 'refinement'
@@ -177,14 +179,14 @@ def test_a_located_refinement_failure_suggests_a_shorter_slice_but_bounds_nothin
 
 def test_a_graph_disconnect_in_a_probe_becomes_its_bound(tmp_path):
     write_probe(str(tmp_path), 0, 2000, ('graph', 1709, ('direct', 'direct+via')))
-    evidence, *_ = sections.probe_evidence(str(tmp_path), 2000, 0.1, True,
+    evidence, *_ = contract.probe_evidence(str(tmp_path), 2000, 0.1, True,
                                            {'resource_limited': False})
     assert evidence['classification']['class'] == 'graph_connectivity'
     assert evidence['graph_bound_samples'] == 1708
 
 
 def test_a_killed_probe_is_a_resource_limit_not_a_failure_of_the_slice(tmp_path):
-    evidence, *_ = sections.probe_evidence(str(tmp_path), 2000, 0.1, True, {
+    evidence, *_ = contract.probe_evidence(str(tmp_path), 2000, 0.1, True, {
         'resource_limited': True, 'killed_reason': 'peak memory'})
     assert evidence['classification']['class'] == 'resource_limit'
     assert evidence['graph_bound_samples'] is None
@@ -226,7 +228,7 @@ class StandInPipeline:
     """run_process for main(): writes a run's artifacts per a rule on the slice."""
 
     def __init__(self, rule, csv_path):
-        from ur10e_trajectory_pkg.failure_census import file_digest
+        from ur10e_trajectory_pkg.planning_runtime import file_digest
 
         self.rule = rule
         self.digest = file_digest(csv_path)
@@ -251,7 +253,7 @@ def command_inputs(tmp_path, monkeypatch):
     _write(home, {'chosen': {'configuration': [1.5, 0.0, -1.31, 1.75, -2.0, -1.4, 0.0]}})
     via = str(tmp_path / 'poses.json')
     _write(via, [{'configuration': [1.0] * 7}])
-    monkeypatch.setattr(sections, '_limits_record', lambda urdf: (
+    monkeypatch.setattr(contract, 'limits_record', lambda urdf: (
         {'statuses': {'arm_jerk': 'assumed'}, 'may_certify_for_hardware': False},
         LOWER, UPPER))
     return {'csv': csv, 'times': times, 'home': home, 'via': via,
