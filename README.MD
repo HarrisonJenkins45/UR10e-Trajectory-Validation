@@ -41,39 +41,283 @@ infeasibility, or finding the longest possible section.
   capability**. A passing plan is **planner-certified, not hardware-certified**.
   The RViz preview is visualization, not a hardware command.
 
-## Run a section search
+## Exact runbook
 
-Clone with the pinned UR description submodule:
+The supported workflow is:
 
-```bash
-git clone --recurse-submodules git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
+```text
+trajectory CSV + pinned home configuration
+                 |
+                 v
+       search and certify a section
+                 |
+                 v
+             best_plan.json
+                 |
+                 v
+              RViz preview
 ```
 
-For an existing checkout, run `git submodule update --init --recursive`.
-Build the container from `ros2_ws/Dockerfile`. The planner commands below run
-**inside** a container (or a host) where the ROS workspace has been built and
-sourced; building the image alone does not install the package on the host.
-Provide the recording and a pinned `home_choice.json`:
+Planning does not require ROS nodes to be running. ROS is used to display or
+execute the plan only after the search has produced `best_plan.json`.
 
-The home file is robot setup, reused across recordings—not a trajectory-specific
-search result. Its required shape is
-`{"chosen": {"configuration": [rail_m, six_arm_joint_radians]}}`.
-The planner rechecks this pose and will not substitute another one. No home
-pose is certified for physical hardware by this repository.
+### 1. Clone and prepare the inputs
+
+Clone the repository with the pinned Universal Robots description package:
 
 ```bash
-docker build -t ur10e_sim ros2_ws
+git clone --recurse-submodules \
+    git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
+cd UR10e-Trajectory-Validation
+```
+
+For an existing checkout:
+
+```bash
+git submodule update --init --recursive
+```
+
+Create persistent input and output directories inside the mounted workspace,
+then copy in the recording and the home-selection artifact:
+
+```bash
+mkdir -p ros2_ws/input ros2_ws/runs/sections
+cp /absolute/path/to/camera_traj.csv ros2_ws/input/camera_traj.csv
+cp /absolute/path/to/home_choice.json ros2_ws/input/home_choice.json
+```
+
+The CSV must contain these columns:
+
+```text
+timestamp,q_I_G_x,q_I_G_y,q_I_G_z,q_I_G_w
+```
+
+Other columns are allowed but ignored. Translation columns are not used. The
+quaternion is the attitude of target body frame G in inertial frame I.
+
+`home_choice.json` is a robot-setup artifact reused across recordings, not a
+trajectory-specific result. At minimum it contains:
+
+```json
+{
+  "chosen": {
+    "configuration": ["rail_m", "shoulder_pan_rad", "shoulder_lift_rad",
+                      "elbow_rad", "wrist_1_rad", "wrist_2_rad", "wrist_3_rad"]
+  }
+}
+```
+
+The strings above document the seven-value ordering; an actual file must use
+finite JSON numbers. The planner rechecks the supplied pose and refuses one
+that fails its current collision, clearance or conditioning criteria. This
+repository deliberately does not claim a hardware-certified home pose.
+
+### 2. Build the image
+
+Run this from the repository root:
+
+```bash
+docker build -t ur10e_sim:latest ros2_ws
+```
+
+### 3. Start the development container
+
+On the host, permit the root user in the container to connect to the local X
+server, then start a named container with the workspace mounted:
+
+```bash
+xhost +si:localuser:root
+
+docker run --rm -it \
+    --name ur10e_sim \
+    --network host \
+    -e DISPLAY="$DISPLAY" \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v "$PWD/ros2_ws:/root/ros2_ws" \
+    ur10e_sim:latest bash
+```
+
+All remaining commands in this runbook are run **inside this container** unless
+they are explicitly labelled as host commands.
+
+### 4. Build and source the ROS workspace
+
+Inside the container:
+
+```bash
+source /opt/ros/humble/setup.bash
+
+colcon --log-base /root/ur10e_log build \
+    --base-paths /root/ros2_ws/src \
+    --build-base /root/ur10e_build \
+    --install-base /root/ur10e_install \
+    --symlink-install
+
+source /root/ur10e_install/setup.bash
+```
+
+This builds outside the mounted repository so generated build files do not
+accumulate in the checkout.
+
+### 5. Find and certify a section of at least 60 seconds
+
+Inside the built and sourced container:
+
+```bash
 python3 -m ur10e_trajectory_pkg.fast_section \
-    --csv camera_traj.csv --home-json home_choice.json \
-    --work-dir runs/sections --workers 12
+    --csv /root/ros2_ws/input/camera_traj.csv \
+    --home-json /root/ros2_ws/input/home_choice.json \
+    --work-dir /root/ros2_ws/runs/sections \
+    --target-s 60 \
+    --time-budget-s 300 \
+    --workers 12
 ```
 
-`--via-poses screened_poses.json` optionally supplies vetted intermediate
-warmup poses. `fast_section` publishes `best_plan.json` immediately when it
-certifies at least 60 seconds, and writes `fast_section.json` and a probe
-journal. If it returns `inconclusive_under_this_budget` or
-`none_found_under_this_search`, it has **not** shown that the recording lacks a
-feasible section: its on-demand beam search is incomplete.
+On success, the reusable plan is:
+
+```text
+ros2_ws/runs/sections/best_plan.json
+```
+
+The directory also contains `fast_section.json` and a probe journal. Inspect
+the final status with:
+
+```bash
+python3 -m json.tool \
+    /root/ros2_ws/runs/sections/fast_section.json | less
+```
+
+`inconclusive_under_this_budget` and `none_found_under_this_search` do **not**
+mean that no feasible section exists. The fast beam search is deliberately
+time-bounded and incomplete.
+
+To supply vetted intermediate poses for a collision-free home-to-task warmup,
+add this option to the search command:
+
+```text
+--via-poses /root/ros2_ws/input/screened_poses.json
+```
+
+### 6. Play the certified plan in RViz
+
+In the same built and sourced container:
+
+```bash
+ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py \
+    plan:=/root/ros2_ws/runs/sections/best_plan.json \
+    csv:=/root/ros2_ws/input/camera_traj.csv
+```
+
+The player verifies the source-recording digest before publishing anything. It
+shows the rail, arm, floor, wall and Target frame and loops this display
+sequence:
+
+```text
+home -> certified warmup -> spin-up -> certified task -> display-only return
+```
+
+The return from the end of the task is a visualization convenience and is not
+planner-certified. Close RViz with `Ctrl-C` in the launch terminal.
+
+Do not start another joint-state source while this command is running. The
+direct plan player publishes `/joint_states` itself.
+
+### 7. Optionally search for a longer certified section
+
+Use the same input files and work directory so this search can reuse the first
+certificate instead of discovering it again:
+
+```bash
+python3 -m ur10e_trajectory_pkg.section_planner \
+    --csv /root/ros2_ws/input/camera_traj.csv \
+    --home-json /root/ros2_ws/input/home_choice.json \
+    --work-dir /root/ros2_ws/runs/sections \
+    --target-s 60 \
+    --workers 12 \
+    --budget-probes 8
+```
+
+This writes `sections.json` and may replace `best_plan.json` with a longer
+certified plan. The reported section is the longest found by that finite
+search, not a guaranteed global maximum. `--engine pipeline` invokes the much
+slower candidate-graph engine and is intended for diagnosis rather than the
+normal five-minute workflow.
+
+### 8. Optional ROS service playback
+
+The direct RViz command above is the simplest way to inspect a plan. The ROS
+client/server path is retained as a hardware-facing interface. It requires
+three sourced terminals in the running container.
+
+From the host, open each additional terminal with:
+
+```bash
+docker exec -it ur10e_sim bash
+```
+
+Then source the workspace inside that new container shell:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /root/ur10e_install/setup.bash
+```
+
+Terminal 1, validation and playback services:
+
+```bash
+ros2 run ur10e_trajectory_pkg validation_server
+```
+
+Terminal 2, passive RViz display:
+
+```bash
+ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py
+```
+
+Terminal 3, execute the certified warmup and task plan:
+
+```bash
+ros2 run ur10e_trajectory_pkg trajectory_client \
+    /root/ros2_ws/runs/sections/best_plan.json
+```
+
+Do not give `plan` and `csv` arguments to the RViz launch in service mode. The
+service publishes `/joint_states`; enabling the direct player at the same time
+would create two competing publishers.
+
+### 9. Run the authoritative tests
+
+Tests are launched from the **host**, not from the interactive container:
+
+```bash
+cd ros2_ws
+./run_tests.sh
+```
+
+To run a selected group:
+
+```bash
+./run_tests.sh -k slice_targets
+```
+
+`run_tests.sh` builds out of tree and runs the tests inside the pinned image.
+The Dockerfile pins its base image and Python dependencies. The reproducibility
+unit is the built image because the apt repository state is not frozen by the
+base-image digest.
+
+### 10. Stop the container
+
+Exit the container shell or stop it from the host:
+
+```bash
+docker stop ur10e_sim
+xhost -si:localuser:root
+```
+
+The container is disposable. Inputs, reports and plans persist because
+`ros2_ws` is mounted from the host.
+
+## Search components
 
 The two search commands share `section_contract.py` for input identity,
 spin-up selection, probe evidence, certificate checks and journal identity.
@@ -85,57 +329,9 @@ policy; `fast_beam.py` contains the oracle-based beam policy; and
 The old corpus benchmark, failure census, placement sweep and MAT-file player
 are not part of this package's execution path.
 
-Use the same work directory to spend a separate budget extending a found
-section. The journal allows the longer search to replay the existing
-certificate rather than rediscover it:
-
-```bash
-python3 -m ur10e_trajectory_pkg.section_planner \
-    --csv camera_traj.csv --home-json home_choice.json \
-    --work-dir runs/sections --workers 12 --budget-probes 8
-```
-
-That command writes `sections.json` and `best_plan.json`. Its reported length
-is the longest **certified by that finite search**, not a global maximum. The
-exhaustive candidate-graph mode (`--engine pipeline`) can bound a particular
-start when its graph disconnects, but is much slower and still does not prove
-that every section of a recording is infeasible.
-
-## Inspect a certified plan in RViz
-
-In a built and sourced ROS workspace:
-
-```bash
-ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py \
-    plan:=/path/to/best_plan.json csv:=/path/to/the/same/camera_traj.csv
-```
-
-The same launch without `plan` and `csv` opens a passive RViz display for a
-separately started joint-state source; it does not start the validation service
-or client. Supply both for certified-plan playback. Do not run service playback
-at the same time as plan playback: both publish `/joint_states`. Both modes
-show the collision-model floor and wall.
-
-The plan player verifies the recording digest and shows the arm, rail and target
-body frame. It can loop home, warmup and task; the reverse return is for
-display only and is **not certified**. Plans lacking a certified warmup, mount,
-recording digest or slice identity are refused. A stored warmup that exceeds
-the current 0.5 m/s rail cap must be replanned and recertified, not silently
-retimed for display.
-
-## Test and reproduce
-
-```bash
-cd ros2_ws
-./run_tests.sh
-./run_tests.sh -k slice_targets
-```
-
-`run_tests.sh` builds out of tree and runs tests inside the pinned container.
-The Dockerfile pins its base image and Python dependencies. The reproducibility
-unit is the **built image**, because the apt repository state is not frozen by
-the base-image digest. Reports include the recording, model and code
-provenance so results from different inputs or revisions are not conflated.
+Plans lacking a certified warmup, mount, recording digest or slice identity
+are refused. A stored warmup that exceeds the current 0.5 m/s rail cap must be
+replanned and recertified, not silently retimed for display.
 
 The prior frame conventions and translation experiments remain in Git history
 and on their own branches; they are not implemented by the current
