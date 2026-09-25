@@ -12,8 +12,8 @@ infeasibility, or finding the longest possible section.
 - Input motion is `q_I_G` only: the attitude of target body frame G in the
   inertial frame I. Required CSV columns are `timestamp`, `q_I_G_x`,
   `q_I_G_y`, `q_I_G_z`, and `q_I_G_w`. SISIFOS translation is ignored. The
-  target is placed at a fixed, legacy arena position; placement optimization
-  and camera-relative motion are not part of this branch.
+  target is placed at `[1.0, 0.5, 0.5]` metres in `rail_base_link`. Placement
+  optimization and camera-relative motion are not part of this branch.
 - `trajectory_input.py` is the single CSV reader and input validator. Search,
   target construction and RViz use its timestamps, orientations,
   slices and source digest. Separate planning processes may reopen the file
@@ -28,6 +28,10 @@ infeasibility, or finding the longest possible section.
 - `joint_motion.py` owns the rest-to-rest quintic warmup and PCHIP task curve.
   The validator, service playback and RViz sample those same joint motions;
   ROS publishes the resulting coordinates rather than defining the motion.
+  The section planners and optional service check task dynamics at 200 Hz;
+  RViz displays at 30 Hz. Collision, clearance and tracking checks also use
+  finite sampling. Certification is relative to these numerical checks,
+  not an analytic proof at every instant.
 - The mount transform `T_EG` (target body G in robot tool frame E) is a
   **provisional identity**. Every exported plan records it. It must be
   established for the real mock-up before hardware use.
@@ -59,7 +63,13 @@ trajectory CSV + pinned home configuration
 ```
 
 Planning does not require ROS nodes to be running. ROS is used to display or
-execute the plan only after the search has produced `best_plan.json`.
+play the plan only after the search has produced `best_plan.json`.
+
+Prerequisites: a Linux host with Docker, Git, and an X11/XWayland display
+(`DISPLAY` must be set and `xhost` available) for the interactive RViz window.
+Planning and tests do not need a display. The commands below use 12 workers;
+reduce `--workers` on smaller machines. A shorter compute budget or fewer
+workers may finish without a certificate.
 
 ### 1. Clone and prepare the inputs
 
@@ -69,6 +79,8 @@ Clone the repository with the pinned Universal Robots description package:
 git clone --recurse-submodules \
     git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
 cd UR10e-Trajectory-Validation
+git switch revision/ik_foundations
+git submodule update --init --recursive
 ```
 
 For an existing checkout:
@@ -77,14 +89,22 @@ For an existing checkout:
 git submodule update --init --recursive
 ```
 
-Create persistent input and output directories inside the mounted workspace,
-then copy in the recording and the home-selection artifact:
+For a self-contained simulation, use the bundled 5,000-sample recording
+(0.1 s spacing, 499.9 s total) and example home pose. Run on the **host** from
+the repository root:
 
 ```bash
 mkdir -p ros2_ws/input ros2_ws/runs/sections
-cp /absolute/path/to/camera_traj.csv ros2_ws/input/camera_traj.csv
-cp /absolute/path/to/home_choice.json ros2_ws/input/home_choice.json
+cp ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
+    ros2_ws/input/camera_traj.csv
+cp ros2_ws/examples/home_choice.json ros2_ws/input/home_choice.json
 ```
+
+The example home is rail = 1.5 m and arm angles =
+`[0, -75, 100, -115, -80, 0]` degrees, stored in radians in the JSON.
+It is a simulation input, re-screened by the planner on each solve.
+For another dataset or robot setup, replace the two input files with your own
+recording and configured home; no home-selection tool is required for this demo.
 
 The CSV must contain these columns:
 
@@ -94,6 +114,10 @@ timestamp,q_I_G_x,q_I_G_y,q_I_G_z,q_I_G_w
 
 Other columns are allowed but ignored. Translation columns are not used. The
 quaternion is the attitude of target body frame G in inertial frame I.
+Timestamps are seconds and must be finite, strictly increasing and uniformly
+spaced (absolute step tolerance `1e-9` s). Quaternion components must be finite
+and unit length (norm tolerance `1e-6`). At least two samples are required;
+a 60-second search needs at least 60 seconds of recorded motion.
 
 `home_choice.json` is a robot-setup artifact reused across recordings, not a
 trajectory-specific result. At minimum it contains:
@@ -123,7 +147,11 @@ docker build -t ur10e_sim:latest ros2_ws
 ### 3. Start the development container
 
 On the host, permit the root user in the container to connect to the local X
-server, then start a named container with the workspace mounted:
+server, then start a named container with the workspace mounted. Check
+`docker ps` first: if `ur10e_sim` already exists, choose another name and use
+that name in later `docker exec` and `docker stop` commands. `ROS_DOMAIN_ID=25`
+keeps this preview separate from default-domain ROS nodes; use another unused
+domain if 25 is already in use:
 
 ```bash
 xhost +si:localuser:root
@@ -132,6 +160,9 @@ docker run --rm -it \
     --name ur10e_sim \
     --network host \
     -e DISPLAY="$DISPLAY" \
+    -e ROS_DOMAIN_ID=25 \
+    -e UR10E_GIT_REVISION="$(git rev-parse HEAD)" \
+    -e UR10E_IMAGE_ID="$(docker image inspect ur10e_sim:latest --format '{{.Id}}')" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "$PWD/ros2_ws:/root/ros2_ws" \
     ur10e_sim:latest bash
@@ -161,7 +192,9 @@ accumulate in the checkout.
 
 ### 5. Find and certify a section of at least 60 seconds
 
-Inside the built and sourced container:
+Inside the built and sourced container. Use a fresh `--work-dir` for a new
+first-certificate run: `fast_section` removes any existing `best_plan.json`
+in that directory before searching. Use step 7 to extend a saved result.
 
 ```bash
 python3 -m ur10e_trajectory_pkg.fast_section \
@@ -172,6 +205,13 @@ python3 -m ur10e_trajectory_pkg.fast_section \
     --time-budget-s 300 \
     --workers 12
 ```
+
+This is the IK solve: it searches rail/arm configurations, connects and
+refines a joint path, then validates the warmup and task before exporting it.
+Exit code 0 and `status: certified_section_found` mean success; only then
+continue to RViz. Codes 1, 2 and 3 mean input refused, no certificate in the
+scheduled search, and budget exhausted, respectively. Invalid input files can
+also produce an exception; inspect the terminal output.
 
 On success, the reusable plan is:
 
@@ -184,7 +224,7 @@ the final status with:
 
 ```bash
 python3 -m json.tool \
-    /root/ros2_ws/runs/sections/fast_section.json | less
+    /root/ros2_ws/runs/sections/fast_section.json
 ```
 
 `inconclusive_under_this_budget` and `none_found_under_this_search` do **not**
@@ -224,7 +264,8 @@ direct plan player publishes `/joint_states` itself.
 
 ### 7. Optionally search for a longer certified section
 
-Use the same input files and work directory so this search can reuse the first
+Use the same input files (including `--via-poses` if supplied), image, source
+revision and work directory so this search can reuse the first
 certificate instead of discovering it again:
 
 ```bash
@@ -246,8 +287,10 @@ normal five-minute workflow.
 ### 8. Optional ROS service playback
 
 The direct RViz command above is the simplest way to inspect a plan. The ROS
-client/server path is retained as a hardware-facing interface. It requires
-three sourced terminals in the running container.
+client/server path revalidates and publishes simulated `/joint_states`; it
+has no robot driver or encoder feedback and does not command physical hardware.
+The client assumes the simulated arm begins at the plan's home. This mode
+requires three sourced terminals in the running container.
 
 From the host, open each additional terminal with:
 
@@ -274,12 +317,17 @@ Terminal 2, passive RViz display:
 ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py
 ```
 
-Terminal 3, execute the certified warmup and task plan:
+Terminal 3, play the certified warmup and task plan:
 
 ```bash
 ros2 run ur10e_trajectory_pkg trajectory_client \
     /root/ros2_ws/runs/sections/best_plan.json
 ```
+
+Keep the recording at the `recording.csv_path` stored in the plan: the service
+client has no CSV-path override. The direct player in step 6 accepts a relocated
+CSV when its digest matches. The service display shows the robot and obstacles;
+the animated Target frame is supplied only by the direct plan player.
 
 Do not give `plan` and `csv` arguments to the RViz launch in service mode. The
 service publishes `/joint_states`; enabling the direct player at the same time
@@ -300,7 +348,9 @@ To run a selected group:
 ./run_tests.sh -k slice_targets
 ```
 
-`run_tests.sh` builds out of tree and runs the tests inside the pinned image.
+`run_tests.sh` builds out of tree and runs the functional tests inside the
+pinned image. It excludes the template copyright, flake8 and pep257 checks;
+a passing run is not a lint result.
 The Dockerfile pins its base image and Python dependencies. The reproducibility
 unit is the built image because the apt repository state is not frozen by the
 base-image digest.
@@ -317,6 +367,9 @@ xhost -si:localuser:root
 The container is disposable. Inputs, reports and plans persist because
 `ros2_ws` is mounted from the host.
 
+A completed bundled-dataset run, review findings and validation evidence are
+recorded in [the branch review](docs/ik_foundations_review.md).
+
 ## Search components
 
 The two search commands share `section_contract.py` for input identity,
@@ -329,9 +382,11 @@ policy; `fast_beam.py` contains the oracle-based beam policy; and
 The old corpus benchmark, failure census, placement sweep and MAT-file player
 are not part of this package's execution path.
 
-Plans lacking a certified warmup, mount, recording digest or slice identity
-are refused. A stored warmup that exceeds the current 0.5 m/s rail cap must be
-replanned and recertified, not silently retimed for display.
+The direct player checks the plan structure, warmup endpoints and rail-speed
+cap, mount, recording digest and slice identity. It does not rerun the full
+motion validator or authenticate a certificate: use unmodified planner output.
+The service path additionally revalidates the motions before playback. A stored
+warmup that exceeds the current 0.5 m/s rail cap must be replanned and recertified, not silently retimed for display.
 
 The prior frame conventions and translation experiments remain in Git history
 and on their own branches; they are not implemented by the current

@@ -16,3 +16,7 @@ log/
 # Python bytecode
 __pycache__/
 *.py[cod]
+
+# Local recordings and generated planning reports
+/ros2_ws/input/
+/ros2_ws/runs/

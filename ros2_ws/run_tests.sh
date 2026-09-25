@@ -41,7 +41,7 @@ docker run --rm \
         set -eo pipefail
         source /opt/ros/humble/setup.bash
         cd /root/ros2_ws
-        colcon build --symlink-install \
+        colcon --log-base /root/clog build --symlink-install \
             --build-base /root/cbuild --install-base /root/cinstall \
             >/dev/null
         source /root/cinstall/setup.bash
