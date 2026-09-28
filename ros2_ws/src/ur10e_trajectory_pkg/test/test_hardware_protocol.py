@@ -110,3 +110,30 @@ def test_homing_line_bounds_the_jog_speed_first():
 ])
 def test_home_flag_reply_is_read_after_the_echo(reply, expected):
     assert wire.parse_rail_bit_reply(reply) is expected
+
+
+def test_controller_modes_and_target_velocity_are_decoded():
+    values = np.zeros(139)
+    values[7:13] = [0.1, 0, 0, 0, 0, 0.2]
+    values[94], values[101], values[131] = 7, 3, 2
+    packet = struct.pack('>I', 1116) + struct.pack('>139d', *values)
+    state = wire.parse_ur_realtime(packet)
+    np.testing.assert_array_equal(state['qd_target'], [0.1, 0, 0, 0, 0, 0.2])
+    assert wire.ur_mode_name(wire.UR_ROBOT_MODES, state['robot_mode']) == 'RUNNING (7)'
+    assert wire.ur_mode_name(wire.UR_SAFETY_MODES, state['safety_mode']) == 'PROTECTIVE_STOP (3)'
+    assert wire.ur_mode_name(wire.UR_PROGRAM_STATES, state['program_state']) == 'PLAYING (2)'
+
+
+def test_streaming_program_is_one_def_with_its_own_watchdog():
+    program = wire.stream_program('192.168.7.50', 50010, 1.0, 2.0, 0.25).decode()
+    assert program.startswith('def ros_speedj_stream():') and program.endswith('end\n')
+    assert 'socket_open("192.168.7.50", 50010, "ros_stream")' in program
+    assert 'if age > 32:' in program                 # 0.25 s at 8 ms per loop
+    lines = [line.strip() for line in program.splitlines()]
+    openers = [line for line in lines
+               if line.endswith(':') and not line.startswith(('else', 'elif'))]
+    assert len(openers) == lines.count('end')        # every block is closed
+    assert wire.stream_vector([0.1, 0, 0, 0, 0, -0.05]) == \
+        b'(0.100000,0.000000,0.000000,0.000000,0.000000,-0.050000)\n'
+    with pytest.raises(ValueError):
+        wire.stream_program('robot.local', 50010, 1.0, 2.0, 0.25)

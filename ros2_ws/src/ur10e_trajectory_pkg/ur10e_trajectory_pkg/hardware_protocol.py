@@ -26,14 +26,38 @@ UR_REALTIME_PORT = 30003
 # Offsets into the packet's doubles, after the 4-byte length prefix. They are
 # the 1-based Simulink selectors [1], [32:37] and [38:43], shifted to 0-based.
 UR_TIME_INDEX = 0
+UR_QD_TARGET = slice(7, 13)
 UR_Q_ACTUAL = slice(31, 37)
 UR_QD_ACTUAL = slice(37, 43)
+# Scalars from the UR client-interface realtime layout. The rig's 1116-byte
+# packet is that layout exactly (139 doubles). Not read by the Simulink model.
+UR_ROBOT_MODE_INDEX = 94
+UR_SAFETY_MODE_INDEX = 101
 # Speed scaling: the fraction of programmed speed the controller is applying,
-# i.e. the pendant speed slider combined with reduced mode or any safety
-# limit. Not read by the Simulink model; offset from the UR client-interface
-# realtime layout (time, 15 six-vectors, then scalars up to index 117).
+# i.e. the speed slider combined with reduced mode or any safety limit.
 UR_SPEED_SCALING_INDEX = 117
+UR_PROGRAM_STATE_INDEX = 131
 UR_MIN_DOUBLES = 43
+
+UR_ROBOT_MODES = {-1: 'NO_CONTROLLER', 0: 'DISCONNECTED', 1: 'CONFIRM_SAFETY', 2: 'BOOTING',
+                  3: 'POWER_OFF', 4: 'POWER_ON', 5: 'IDLE', 6: 'BACKDRIVE', 7: 'RUNNING',
+                  8: 'UPDATING_FIRMWARE'}
+UR_SAFETY_MODES = {1: 'NORMAL', 2: 'REDUCED', 3: 'PROTECTIVE_STOP', 4: 'RECOVERY',
+                   5: 'SAFEGUARD_STOP', 6: 'SYSTEM_EMERGENCY_STOP', 7: 'ROBOT_EMERGENCY_STOP',
+                   8: 'VIOLATION', 9: 'FAULT', 10: 'VALIDATE_JOINT_ID', 11: 'UNDEFINED',
+                   12: 'AUTOMATIC_MODE_SAFEGUARD_STOP', 13: 'SYSTEM_THREE_POSITION_ENABLING_STOP'}
+UR_PROGRAM_STATES = {0: 'STOPPING', 1: 'STOPPED', 2: 'PLAYING', 3: 'PAUSING', 4: 'PAUSED',
+                     5: 'RESUMING'}
+
+
+def ur_mode_name(table, value):
+    """'NAME (n)' for a mode value, or 'unknown (n)'; None stays None."""
+    if value is None:
+        return None
+    number = int(round(value))
+    return f'{table.get(number, "unknown")} ({number})'
+
+
 UR_ARM_JOINTS = 6
 
 
@@ -63,10 +87,17 @@ def parse_ur_realtime(packet):
     qd = np.asarray(values[UR_QD_ACTUAL], dtype=float)
     if not (np.all(np.isfinite(q)) and np.all(np.isfinite(qd))):
         raise ValueError('UR packet has non-finite joint state')
-    scaling = (float(values[UR_SPEED_SCALING_INDEX])
-               if count > UR_SPEED_SCALING_INDEX else None)
+
+    def scalar(index):
+        return float(values[index]) if count > index else None
+
     return {'time': float(values[UR_TIME_INDEX]), 'q': q, 'qd': qd,
-            'speed_scaling': scaling, 'length': length}
+            'qd_target': np.asarray(values[UR_QD_TARGET], dtype=float),
+            'speed_scaling': scalar(UR_SPEED_SCALING_INDEX),
+            'robot_mode': scalar(UR_ROBOT_MODE_INDEX),
+            'safety_mode': scalar(UR_SAFETY_MODE_INDEX),
+            'program_state': scalar(UR_PROGRAM_STATE_INDEX),
+            'length': length}
 
 
 def _ur_vector(values):
@@ -88,6 +119,66 @@ def speedj_command(velocities, acceleration, duration):
         raise ValueError('speedj duration must be positive and finite')
     return (f'speedj({_ur_vector(velocities)},{acceleration:.4f},'
             f'{duration:.4f})\n').encode('ascii')
+
+
+# One persistent program instead of one program per command. Sending a new
+# script to 30003 replaces the running program, so streaming a speedj line
+# per tick restarts the controller's program 20 times a second. This program
+# instead connects back to the PC once, reads velocity vectors in a thread,
+# and runs speedj in a tight loop on the robot. It has its own dead-man: the
+# commanded velocity drops to zero when no vector has arrived for
+# stale_cycles loop periods, even if the PC or network fails. A def...end
+# block sent to 30003 is compiled and run by the controller as a program.
+UR_STREAM_PROGRAM = '''def ros_speedj_stream():
+  global qd = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  global age = 1000000
+  textmsg("ros_speedj_stream: connecting to {host}:{port}")
+  if not socket_open("{host}", {port}, "ros_stream"):
+    textmsg("ros_speedj_stream: cannot connect to {host}:{port}; stopping")
+    halt
+  end
+  textmsg("ros_speedj_stream: connected; speedj every {cycle} s, zero after {stale} cycles")
+  thread reader():
+    while True:
+      msg = socket_read_ascii_float(6, "ros_stream", {read_timeout})
+      if msg[0] == 6:
+        qd = [msg[1], msg[2], msg[3], msg[4], msg[5], msg[6]]
+        age = 0
+      end
+    end
+  end
+  thrd = run reader()
+  while True:
+    if age > {stale}:
+      speedj([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {deceleration}, {cycle})
+    else:
+      speedj(qd, {acceleration}, {cycle})
+    end
+    age = age + 1
+  end
+end
+'''
+
+
+def stream_program(host, port, acceleration, deceleration, command_timeout, cycle=0.008):
+    """The persistent streaming program, ready to send to port 30003."""
+    for name, value in (('acceleration', acceleration), ('deceleration', deceleration),
+                        ('command_timeout', command_timeout), ('cycle', cycle)):
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f'stream {name} must be positive and finite')
+    if not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', host) or not 0 < int(port) < 65536:
+        raise ValueError(f'stream endpoint {host}:{port} is not an IPv4 address and port')
+    stale = max(1, int(math.ceil(command_timeout / cycle)))
+    return UR_STREAM_PROGRAM.format(
+        host=host, port=int(port), cycle=f'{cycle:.4f}', stale=stale,
+        read_timeout=f'{min(command_timeout, 0.1):.3f}',
+        acceleration=f'{acceleration:.4f}', deceleration=f'{deceleration:.4f}',
+    ).encode('ascii')
+
+
+def stream_vector(velocities):
+    """One velocity vector for the streaming program: "(v1,...,v6)" and a newline."""
+    return ('(' + _ur_vector(velocities)[1:-1] + ')\n').encode('ascii')
 
 
 def stopj_command(deceleration):

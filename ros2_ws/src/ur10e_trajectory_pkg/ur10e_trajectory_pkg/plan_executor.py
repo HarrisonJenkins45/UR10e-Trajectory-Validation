@@ -152,9 +152,10 @@ class PlanExecutor(Node):
         self.create_subscription(JointState, '/rail/joint_state',
                                  lambda _: self.saw('rail (/rail/joint_state)'), 10)
         self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED)
-        self.speed_scaling = None
-        self.create_subscription(Float64, '/ur/speed_scaling',
-                                 lambda m: setattr(self, 'speed_scaling', m.data), 10)
+        # Published by ur_bridge only while a UR program is playing; readings
+        # older than a second mean no program is playing and are ignored.
+        self.speed_scaling, self.speed_scaling_at = None, 0.0
+        self.create_subscription(Float64, '/ur/speed_scaling', self.on_speed_scaling, 10)
         self.last_tracking_log = 0.0
         self.reference_pub = self.create_publisher(JointState, '/plan/joint_reference', 10)
         self.arm_pub = self.create_publisher(Float64MultiArray, '/ur/joint_velocity_command', 10)
@@ -175,6 +176,16 @@ class PlanExecutor(Node):
             self.measured = np.array([positions[name] for name in JOINT_NAMES])
             self.measured_velocity = np.array([velocities.get(name, 0.0) for name in JOINT_NAMES])
             self.measured_at = time.monotonic()
+
+    def on_speed_scaling(self, message):
+        self.speed_scaling, self.speed_scaling_at = message.data, time.monotonic()
+
+    def slowed_by_scaling(self):
+        """The current UR speed scaling if it is recent and below 100%, else None."""
+        if (not self.speed_scaling_check or self.speed_scaling is None
+                or time.monotonic() - self.speed_scaling_at > 1.0):
+            return None
+        return self.speed_scaling if self.speed_scaling < 0.99 else None
 
     def on_rail_homed(self, message):
         self.rail_homed = bool(message.data)
@@ -265,10 +276,10 @@ class PlanExecutor(Node):
             response.success, response.message = False, f'already running {self.sequence}'
             return response
         stages, refusal = self.build_sequence(include_plan)
-        if (not refusal and self.speed_scaling_check and self.speed_scaling is not None
-                and self.speed_scaling < 0.99):
-            refusal = (f'UR speed scaling is {self.speed_scaling:.2f}: the arm would run at '
-                       f'{self.speed_scaling * 100:.0f}% of commanded speed while the rail '
+        scaling = self.slowed_by_scaling()
+        if not refusal and scaling is not None:
+            refusal = (f'UR speed scaling is {scaling:.2f}: the arm would run at '
+                       f'{scaling * 100:.0f}% of commanded speed while the rail '
                        'runs at 100%. Set the pendant speed slider to 100% (and leave reduced '
                        'mode). Override only for tests: speed_scaling_check:=false')
         if refusal:
@@ -431,9 +442,9 @@ class PlanExecutor(Node):
         if measured is None:
             self.halt(self.stale_report())
             return
-        if (self.speed_scaling_check and self.speed_scaling is not None
-                and self.speed_scaling < 0.99):
-            self.halt(f'UR speed scaling dropped to {self.speed_scaling:.2f}')
+        scaling = self.slowed_by_scaling()
+        if scaling is not None:
+            self.halt(f'UR speed scaling dropped to {scaling:.2f}')
             return
         error = q_ref - measured
         if np.any(np.abs(error) > self.abort_tolerance):

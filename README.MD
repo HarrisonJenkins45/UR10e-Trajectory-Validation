@@ -458,7 +458,12 @@ ip -4 addr                        # a 192.168.7.x/24 address must be present (wa
 ping -c 3 192.168.7.8             # UR10e
 ping -c 3 192.168.7.6             # Parker rail
 ss -ulpn | grep 5003              # must print nothing: UDP 5003 is free for rail_bridge
+sudo ufw status                   # if active: sudo ufw allow from 192.168.7.8 to any port 50010 proto tcp
 ```
+
+The arm's streaming program runs on the UR and connects back to this PC on
+TCP 50010, so a host firewall must allow that connection from the
+robot.
 
 #### R2. Prepare the rail controller (host shell, Python)
 
@@ -603,6 +608,61 @@ mode. Ctrl-C when done.
 Relaunch the same command with `enable_commands:=true`, with the pendant e-stop
 and the rail's physical stop in reach.
 
+**How the arm is commanded.** With `enable_commands:=true`, `ur_bridge` uploads
+one URScript program (`ros_speedj_stream`) to the UR at launch. The program
+connects back to this PC and runs `speedj` at 125 Hz on the robot, following
+the velocities ROS sends. It zeroes the arm by itself if velocities stop
+arriving for 0.25 s.
+
+The launch log should show, in order:
+
+```text
+Uploading the streaming program to 192.168.7.8:30003; it connects back to 192.168.7.50:50010 ...
+UR program state: PLAYING (2)
+Streaming program connected from 192.168.7.8; ready for commands
+```
+
+The pendant's Log tab shows the program's own messages (`ros_speedj_stream:
+connected ...`). If the log instead says "The robot did not connect back",
+the message lists what to check. The usual causes are:
+
+- the robot is not in Remote Control mode,
+- the host firewall blocks TCP 50010 (R1),
+- the detected PC address is wrong; set it with `ur_host_ip:=<this PC's 192.168.7.x address>`.
+
+If the program stops on the robot (stop pressed on the pendant, a protective
+stop), the bridge latches a fault. `/ur_bridge/reset_fault` re-uploads the
+program.
+
+`ur_stream:=lines` switches back to Simulink's method: one `speedj` program
+per command.
+
+**Reading the arm diagnostics.** While the arm is commanded, `ur_bridge` logs
+one line per second:
+
+```text
+arm: 20 cmd/s | wrist_3_joint cmd +0.0500 target +0.0500 (100%) actual +0.0497 (99%) | scaling 1.00 | RUNNING (7) | NORMAL (1) | PLAYING (2) | stream connected
+```
+
+| Field | Meaning |
+|---|---|
+| `cmd` | What ROS asked for, on the joint with the largest command |
+| `target` | What the UR controller is aiming for (its own target velocity) |
+| `actual` | What the joint measures |
+
+Percentages are the share of the whole command vector delivered. Any
+disagreement is followed by an `arm diagnosis:` warning that says where the
+chain breaks:
+
+- too few commands per second means the executor or ROS is slow,
+- a low `target` means the controller is not running our program,
+- a low `actual` with a good `target` means the arm is held back (safety mode,
+  limits),
+- scaling below 1.00 means the speed slider or Reduced mode.
+
+Robot mode, safety mode, program state and speed scaling are also logged
+whenever they change. Send these lines when reporting a problem.
+
 Before the first plan run, check that the arm follows streamed velocities. With
 the executor idle, stream a slow wrist 3 turn for 4 s: 80 messages at 20 Hz,
 0.05 rad/s, 0.20 rad expected.
@@ -614,8 +674,8 @@ ros2 topic echo --once /ur/joint_states --field position        # wrist_3 should
 ```
 
 Much less than 0.20 rad means the arm is not executing the stream at the
-commanded speed. Check the speed slider, and send the `UR speed scaling` log
-line. Undo the turn with the same command and `-0.05`.
+commanded speed. The `arm:` and `arm diagnosis:` lines logged during the check
+say why. Undo the turn with the same command and `-0.05`.
 
 Then in the second terminal:
 

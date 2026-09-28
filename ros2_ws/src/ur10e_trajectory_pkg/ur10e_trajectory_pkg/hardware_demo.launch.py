@@ -45,6 +45,10 @@ ARGUMENTS = (
     ('rail_abort_tolerance', '0.01', 'm: halt when the rail lags the plan by more'),
     ('speed_scaling_check', 'true', 'refuse/halt unless the UR runs at 100% speed scaling'),
     ('ur_ip', '192.168.7.8', 'UR10e controller'),
+    ('ur_stream', 'program', 'program (one persistent URScript program) or lines '
+     '(a speedj program per command, as Simulink did)'),
+    ('ur_host_ip', '', "this PC's address on the robot network; empty = detect"),
+    ('ur_stream_port', '50010', 'TCP port the streaming program connects back to'),
     ('rail_ip', '192.168.7.6', 'Parker rail controller'),
     ('rail_offset_m', '0.0', 'planner rail coordinate of the homed controller zero'),
     ('rail_sign', '1.0', '+1 if JOG FWD moves toward +x in the URDF, else -1'),
@@ -112,6 +116,9 @@ def generate_launch_description():
         Node(package='ur10e_trajectory_pkg', executable='ur_bridge', output='screen',
              condition=real, parameters=[{
                  'robot_ip': config['ur_ip'],
+                 'stream': config['ur_stream'],
+                 'host_ip': config['ur_host_ip'],
+                 'stream_port': config['ur_stream_port'],
                  'enable_commands': config['enable_commands'],
                  'max_joint_speed': config['arm_speed_limit'],
              }]),
