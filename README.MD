@@ -391,3 +391,14 @@ warmup that exceeds the current 0.5 m/s rail cap must be replanned and recertifi
 The prior frame conventions and translation experiments remain in Git history
 and on their own branches; they are not implemented by the current
 orientation-only planner.
+
+
+
+## Commanding the arm from a ros node (wrist package)
+ros2 run wrist_motion_pkg wrist server
+ros2 service call /trigger_wrist_motion std_srvs/srv/Trigger "{}"
+
+## Commanding the rail from python
+python3 railTest_modified.py /home/hjenkins33/UR10e-Trajectory-Validation/ros2_ws/runs/review_20260925/best_plan.json
+
+
