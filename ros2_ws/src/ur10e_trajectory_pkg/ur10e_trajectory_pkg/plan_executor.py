@@ -100,8 +100,11 @@ class PlanExecutor(Node):
                                         declare(self, 'arm_max_correction', 0.05))
         self.start_tolerance = per_joint(declare(self, 'rail_start_tolerance', 0.01),
                                          declare(self, 'arm_start_tolerance', 0.03))
-        self.abort_tolerance = per_joint(declare(self, 'rail_abort_tolerance', 0.03),
-                                         declare(self, 'arm_abort_tolerance', 0.15))
+        # Tight enough to hold the tool: at 0.15 rad per joint, the old value,
+        # a stalled arm could leave the tool 27 cm off while the rail moved.
+        self.abort_tolerance = per_joint(declare(self, 'rail_abort_tolerance', 0.01),
+                                         declare(self, 'arm_abort_tolerance', 0.02))
+        self.speed_scaling_check = declare(self, 'speed_scaling_check', True)
         self.approach_speed_fraction = declare(self, 'approach_speed_fraction', 0.8)
         self.auto_home_arm_limit = declare(self, 'auto_home_arm_limit', 0.2)
         self.home_rail = declare(self, 'home_rail', 'if_needed')
@@ -149,6 +152,10 @@ class PlanExecutor(Node):
         self.create_subscription(JointState, '/rail/joint_state',
                                  lambda _: self.saw('rail (/rail/joint_state)'), 10)
         self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED)
+        self.speed_scaling = None
+        self.create_subscription(Float64, '/ur/speed_scaling',
+                                 lambda m: setattr(self, 'speed_scaling', m.data), 10)
+        self.last_tracking_log = 0.0
         self.reference_pub = self.create_publisher(JointState, '/plan/joint_reference', 10)
         self.arm_pub = self.create_publisher(Float64MultiArray, '/ur/joint_velocity_command', 10)
         self.rail_pub = self.create_publisher(Float64, '/rail/velocity_command', 10)
@@ -258,6 +265,12 @@ class PlanExecutor(Node):
             response.success, response.message = False, f'already running {self.sequence}'
             return response
         stages, refusal = self.build_sequence(include_plan)
+        if (not refusal and self.speed_scaling_check and self.speed_scaling is not None
+                and self.speed_scaling < 0.99):
+            refusal = (f'UR speed scaling is {self.speed_scaling:.2f}: the arm would run at '
+                       f'{self.speed_scaling * 100:.0f}% of commanded speed while the rail '
+                       'runs at 100%. Set the pendant speed slider to 100% (and leave reduced '
+                       'mode). Override only for tests: speed_scaling_check:=false')
         if refusal:
             response.success, response.message = False, refusal
             return response
@@ -418,11 +431,16 @@ class PlanExecutor(Node):
         if measured is None:
             self.halt(self.stale_report())
             return
+        if (self.speed_scaling_check and self.speed_scaling is not None
+                and self.speed_scaling < 0.99):
+            self.halt(f'UR speed scaling dropped to {self.speed_scaling:.2f}')
+            return
         error = q_ref - measured
         if np.any(np.abs(error) > self.abort_tolerance):
             worst = int(np.argmax(np.abs(error) / self.abort_tolerance))
             self.halt(f'tracking error {error[worst]:.4f} on {JOINT_NAMES[worst]}')
             return
+        self.log_tracking(error, qd_ref)
         command = qd_ref + np.clip(self.kp * error, -self.max_correction, self.max_correction)
         if np.any(np.abs(command) > self.speed_limit):
             self.halt(f'command {np.round(command, 4).tolist()} exceeds speed limits')
@@ -433,6 +451,21 @@ class PlanExecutor(Node):
             self.next_stage()
             return
         self.publish_commands(command)
+
+    def log_tracking(self, error, qd_ref):
+        """Once a second: tracking error, and how fast the arm moves vs. commanded."""
+        now = time.monotonic()
+        if now - self.last_tracking_log < 1.0:
+            return
+        self.last_tracking_log = now
+        arm = int(np.argmax(np.abs(error[1:]))) + 1
+        text = (f'tracking: rail {error[RAIL_INDEX] * 1000:+.1f} mm, worst arm '
+                f'{error[arm]:+.4f} rad ({JOINT_NAMES[arm]})')
+        reference = qd_ref[1:]
+        if self.measured_velocity is not None and np.dot(reference, reference) > 1e-6:
+            ratio = np.dot(self.measured_velocity[1:], reference) / np.dot(reference, reference)
+            text += f', arm speed {ratio * 100:.0f}% of reference'
+        self.get_logger().info(text)
 
 
 def main(args=None):

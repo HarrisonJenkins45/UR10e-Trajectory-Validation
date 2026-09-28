@@ -520,6 +520,14 @@ with `home_rail:=never`.
    joint. Joints on the pendant are Base, Shoulder, Elbow, Wrist 1, Wrist 2,
    Wrist 3, i.e. `[0, -75, 100, -115, -80, 0]` degrees for this plan. `~/start`
    refuses if any joint is further off.
+4. Set the **speed slider** (bottom of the Run screen) to **100%**, and check
+   the robot is not in Reduced mode. The UR scales every commanded arm motion
+   by the slider, but the rail is not scaled. Below 100% the arm lags the
+   rail, and the tool drifts with the carriage instead of holding still. The
+   bridge logs `UR speed scaling ...`, and `~/start` refuses below 100%.
+   The scaling value's position in the UR packet comes from UR's documented
+   layout but is unverified on this controller. If the log shows 100% on the
+   pendant as some other value, relaunch with `speed_scaling_check:=false`.
 
 #### R4. Rail calibration values
 
@@ -593,13 +601,35 @@ mode. Ctrl-C when done.
 #### R7. Enabled launch and the demo
 
 Relaunch the same command with `enable_commands:=true`, with the pendant e-stop
-and the rail's physical stop in reach. Then in the second terminal:
+and the rail's physical stop in reach.
+
+Before the first plan run, check that the arm follows streamed velocities. With
+the executor idle, stream a slow wrist 3 turn for 4 s: 80 messages at 20 Hz,
+0.05 rad/s, 0.20 rad expected.
+
+```bash
+ros2 topic echo --once /ur/joint_states --field position        # note wrist_3 (last value)
+ros2 topic pub -r 20 -t 80 /ur/joint_velocity_command std_msgs/msg/Float64MultiArray "{data: [0, 0, 0, 0, 0, 0.05]}"
+ros2 topic echo --once /ur/joint_states --field position        # wrist_3 should be about 0.20 rad larger
+```
+
+Much less than 0.20 rad means the arm is not executing the stream at the
+commanded speed. Check the speed slider, and send the `UR speed scaling` log
+line. Undo the turn with the same command and `-0.05`.
+
+Then in the second terminal:
 
 ```bash
 ros2 topic echo /plan_executor/phase &                                 # live phase
 ros2 service call /plan_executor/start std_srvs/srv/Trigger            # the whole sequence
 ros2 service call /plan_executor/stop std_srvs/srv/Trigger             # stop, any time
 ```
+
+While moving, the executor logs a line like `tracking: rail +0.4 mm, worst arm
++0.0031 rad (wrist_1_joint), arm speed 99% of reference` once a second. The
+arm speed should stay close to 100%. During the task, the tool should hold
+its position while the carriage slides, because the arm compensates for the
+rail.
 
 `start` straightens the arm if needed, homes the rail if its flag is clear,
 moves the rail to 1.5 m, then runs the warmup (about 20 s at
@@ -635,7 +665,9 @@ The plan itself needs 1 cm (rail) and 0.03 rad (arm).
 The executor halts, commanding zero, on:
 
 - stale feedback,
-- tracking error above 3 cm or 0.15 rad,
+- tracking error above 1 cm (rail) or 0.02 rad (any arm joint), which keeps the tool
+  within a few cm of the plan,
+- UR speed scaling below 100%,
 - a command above the speed limits,
 - homing that does not complete in time.
 

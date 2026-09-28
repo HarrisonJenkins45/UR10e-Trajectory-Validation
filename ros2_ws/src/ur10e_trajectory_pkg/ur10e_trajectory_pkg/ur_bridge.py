@@ -29,7 +29,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray
 from std_srvs.srv import Trigger
 
 from ur10e_trajectory_pkg import hardware_protocol as wire
@@ -64,6 +64,8 @@ class URBridge(Node):
         self.publish_hz = declare(self, 'publish_hz', 125.0)
 
         self.state_pub = self.create_publisher(JointState, '/ur/joint_states', 10)
+        self.scaling_pub = self.create_publisher(Float64, '/ur/speed_scaling', 10)
+        self.logged_scaling = None
         self.create_subscription(Float64MultiArray, '/ur/joint_velocity_command',
                                  self.on_command, 10)
         self.create_service(Trigger, '~/reset_fault', self.on_reset)
@@ -104,11 +106,24 @@ class URBridge(Node):
                         message.position = state['q'].tolist()
                         message.velocity = state['qd'].tolist()
                         self.state_pub.publish(message)
+                        self.report_scaling(state['speed_scaling'])
             except (OSError, ValueError, ConnectionError) as error:
                 if self.running:
                     self.get_logger().warn(f'UR state connection: {error}; retrying',
                                            throttle_duration_sec=5.0)
                     time.sleep(1.0)
+
+    def report_scaling(self, scaling):
+        """Publish the controller's speed scaling; log it whenever it changes."""
+        if scaling is None:
+            return
+        self.scaling_pub.publish(Float64(data=scaling))
+        if self.logged_scaling is None or abs(scaling - self.logged_scaling) > 0.01:
+            self.logged_scaling = scaling
+            log = self.get_logger().info if scaling >= 0.99 else self.get_logger().warn
+            log(f'UR speed scaling {scaling:.2f}: the arm runs at {scaling * 100:.0f}% of '
+                'commanded speed' + ('' if scaling >= 0.99 else
+                                     ' (pendant speed slider or reduced mode)'))
 
     # --- commands ----------------------------------------------------------
 

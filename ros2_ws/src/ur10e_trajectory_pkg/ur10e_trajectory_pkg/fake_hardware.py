@@ -10,7 +10,8 @@ state topics they produce, so the executor, merger and RViz run unchanged:
 
 Commands older than command_timeout are treated as zero, like the real
 bridges' watchdogs. initial_offset shifts the starting pose away from the
-plan's home; start_homed:=false starts with the rail unreferenced, and homing
+plan's home; speed_scaling < 1 slows the arm like the UR speed slider;
+start_homed:=false starts with the rail unreferenced, and homing
 then drives it to rail_switch_m (the planner coordinate of the home switch,
 i.e. the real bridge's rail_offset_m).
 """
@@ -43,6 +44,9 @@ class FakeHardware(Node):
         self.homed = declare(self, 'start_homed', True)
         self.rail_switch = declare(self, 'rail_switch_m', 0.0)
         self.homing_speed = declare(self, 'homing_speed', 0.025)
+        # Like the UR pendant speed slider: the arm executes this fraction of
+        # every commanded velocity; the rail is unaffected.
+        self.speed_scaling = declare(self, 'speed_scaling', 1.0)
         start = (plan_artifact.load_plan(plan_path)['home'] if plan_path
                  else np.zeros(NUM_JOINTS))
         self.q = np.asarray(start, dtype=float) + np.asarray(offset, dtype=float)
@@ -56,6 +60,7 @@ class FakeHardware(Node):
         self.arm_pub = self.create_publisher(JointState, '/ur/joint_states', 10)
         self.rail_pub = self.create_publisher(JointState, '/rail/joint_state', 10)
         self.homed_pub = self.create_publisher(Bool, '/rail/homed', LATCHED)
+        self.scaling_pub = self.create_publisher(Float64, '/ur/speed_scaling', 10)
         self.homed_pub.publish(Bool(data=self.homed))
         self.create_service(Trigger, '/rail_bridge/home', self.on_home)
         self.period = 1.0 / rate_hz
@@ -88,7 +93,7 @@ class FakeHardware(Node):
         dt, self.last_step = now - self.last_step, now
         arm, arm_at = self.arm_command
         rail, rail_at = self.rail_command
-        self.qd[1:] = arm if now - arm_at <= self.command_timeout else 0.0
+        self.qd[1:] = self.speed_scaling * arm if now - arm_at <= self.command_timeout else 0.0
         if self.homing:
             self.qd[0] = -self.homing_speed
             if self.q[0] + self.qd[0] * dt <= self.rail_switch:
@@ -105,6 +110,7 @@ class FakeHardware(Node):
         arm_state.position = self.q[1:].tolist()
         arm_state.velocity = self.qd[1:].tolist()
         self.arm_pub.publish(arm_state)
+        self.scaling_pub.publish(Float64(data=self.speed_scaling))
         rail_state = JointState()
         rail_state.header.stamp = stamp
         rail_state.name = [JOINT_NAMES[0]]

@@ -8,9 +8,11 @@ import pytest
 from ur10e_trajectory_pkg import hardware_protocol as wire
 
 
-def ur_packet(count, q, qd, time_s=12.5):
+def ur_packet(count, q, qd, time_s=12.5, scaling=1.0):
     values = np.zeros(count)
     values[0] = time_s
+    if count > 117:
+        values[117] = scaling
     values[31:37] = q
     values[37:43] = qd
     length = 4 + 8 * count
@@ -26,6 +28,12 @@ def test_ur_realtime_packet_yields_time_and_actual_joints(count):
     np.testing.assert_array_equal(state['q'], q)
     np.testing.assert_array_equal(state['qd'], qd)
     assert state['length'] == 4 + 8 * count
+
+
+def test_ur_packet_reports_speed_scaling_when_present():
+    assert wire.parse_ur_realtime(
+        ur_packet(139, np.zeros(6), np.zeros(6), scaling=0.3))['speed_scaling'] == 0.3
+    assert wire.parse_ur_realtime(ur_packet(60, np.zeros(6), np.zeros(6)))['speed_scaling'] is None
 
 
 def test_simulink_rig_packet_is_1116_bytes():

@@ -28,6 +28,11 @@ UR_REALTIME_PORT = 30003
 UR_TIME_INDEX = 0
 UR_Q_ACTUAL = slice(31, 37)
 UR_QD_ACTUAL = slice(37, 43)
+# Speed scaling: the fraction of programmed speed the controller is applying,
+# i.e. the pendant speed slider combined with reduced mode or any safety
+# limit. Not read by the Simulink model; offset from the UR client-interface
+# realtime layout (time, 15 six-vectors, then scalars up to index 117).
+UR_SPEED_SCALING_INDEX = 117
 UR_MIN_DOUBLES = 43
 UR_ARM_JOINTS = 6
 
@@ -58,8 +63,10 @@ def parse_ur_realtime(packet):
     qd = np.asarray(values[UR_QD_ACTUAL], dtype=float)
     if not (np.all(np.isfinite(q)) and np.all(np.isfinite(qd))):
         raise ValueError('UR packet has non-finite joint state')
+    scaling = (float(values[UR_SPEED_SCALING_INDEX])
+               if count > UR_SPEED_SCALING_INDEX else None)
     return {'time': float(values[UR_TIME_INDEX]), 'q': q, 'qd': qd,
-            'length': length}
+            'speed_scaling': scaling, 'length': length}
 
 
 def _ur_vector(values):
