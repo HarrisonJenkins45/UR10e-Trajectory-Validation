@@ -181,6 +181,155 @@ def stream_vector(velocities):
     return ('(' + _ur_vector(velocities)[1:-1] + ')\n').encode('ascii')
 
 
+# --- RTDE (port 30004): the same persistent program, fed through registers ----
+#
+# Every connection goes from the PC to the robot: the PC writes six velocity
+# registers and a sequence counter over RTDE, and the program reads them. No
+# inbound connection to the PC is needed, so no firewall change either. The
+# upper register range (24..47) is reserved for RTDE, clear of fieldbuses.
+
+UR_RTDE_PORT = 30004
+RTDE_PROTOCOL_VERSION = 2
+RTDE_REQUEST_PROTOCOL_VERSION = 86      # 'V'
+RTDE_TEXT_MESSAGE = 77                  # 'M'
+RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS = 79  # 'O'
+RTDE_CONTROL_PACKAGE_SETUP_INPUTS = 73  # 'I'
+RTDE_CONTROL_PACKAGE_START = 83         # 'S'
+RTDE_CONTROL_PACKAGE_PAUSE = 80         # 'P'
+RTDE_DATA_PACKAGE = 85                  # 'U'
+RTDE_VELOCITY_REGISTER = 24             # input_double_register_24..29
+RTDE_SEQUENCE_REGISTER = 24             # input_int_register_24
+RTDE_INPUTS = tuple(f'input_double_register_{RTDE_VELOCITY_REGISTER + i}' for i in range(6)) + (
+    f'input_int_register_{RTDE_SEQUENCE_REGISTER}',)
+
+
+def rtde_packet(kind, payload=b''):
+    """RTDE framing: uint16 total size, uint8 type, payload."""
+    return struct.pack('>HB', 3 + len(payload), kind) + payload
+
+
+def rtde_read(sock):
+    """One RTDE packet as (type, payload)."""
+    header = b''
+    while len(header) < 3:
+        chunk = sock.recv(3 - len(header))
+        if not chunk:
+            raise ConnectionError('RTDE connection closed')
+        header += chunk
+    size, kind = struct.unpack('>HB', header)
+    payload = b''
+    while len(payload) < size - 3:
+        chunk = sock.recv(size - 3 - len(payload))
+        if not chunk:
+            raise ConnectionError('RTDE connection closed')
+        payload += chunk
+    return kind, payload
+
+
+def rtde_text(payload):
+    """A text message from the controller, as readable text."""
+    if not payload:
+        return ''
+    length = payload[0]
+    return payload[1:1 + length].decode('ascii', 'replace') + ' ' + \
+        payload[1 + length:].decode('ascii', 'replace').strip('\x00')
+
+
+def rtde_setup_inputs(sock, on_message=None, output_hz=10.0):
+    """Negotiate the protocol and the input recipe, start; return the recipe id.
+
+    The controller only starts synchronizing once an output recipe exists
+    too (seen on PolyScope 5.26), so a low-rate timestamp output is set up;
+    the caller must keep reading, and may discard, those packets. Raises
+    with the controller's own reason, e.g. registers owned by another RTDE
+    client (IN_USE). Text messages sent meanwhile go to on_message.
+    """
+    sock.sendall(rtde_packet(RTDE_REQUEST_PROTOCOL_VERSION,
+                             struct.pack('>H', RTDE_PROTOCOL_VERSION)))
+    kind, payload = _rtde_reply(sock, RTDE_REQUEST_PROTOCOL_VERSION, on_message)
+    if not payload or not payload[0]:
+        raise ConnectionError(f'controller refused RTDE protocol {RTDE_PROTOCOL_VERSION}')
+    sock.sendall(rtde_packet(RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS,
+                             struct.pack('>d', output_hz) + b'timestamp'))
+    kind, payload = _rtde_reply(sock, RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS, on_message)
+    if not payload or payload[0] == 0:
+        raise ConnectionError('RTDE output setup refused')
+    sock.sendall(rtde_packet(RTDE_CONTROL_PACKAGE_SETUP_INPUTS,
+                             ','.join(RTDE_INPUTS).encode('ascii')))
+    kind, payload = _rtde_reply(sock, RTDE_CONTROL_PACKAGE_SETUP_INPUTS, on_message)
+    recipe, types = payload[0], payload[1:].decode('ascii', 'replace').split(',')
+    expected = ['DOUBLE'] * 6 + ['INT32']
+    if recipe == 0 or types != expected:
+        raise ConnectionError(f'RTDE input setup refused: {types} (IN_USE means another '
+                              'RTDE client owns these registers; NOT_FOUND means an '
+                              'unsupported controller version)')
+    sock.sendall(rtde_packet(RTDE_CONTROL_PACKAGE_START))
+    kind, payload = _rtde_reply(sock, RTDE_CONTROL_PACKAGE_START, on_message)
+    if not payload or not payload[0]:
+        raise ConnectionError('controller refused to start RTDE synchronization')
+    return recipe
+
+
+def _rtde_reply(sock, expected_kind, on_message=None):
+    """The reply to a control request; controller text messages go to on_message."""
+    while True:
+        kind, payload = rtde_read(sock)
+        if kind == expected_kind:
+            return kind, payload
+        if kind == RTDE_TEXT_MESSAGE and on_message is not None:
+            on_message(rtde_text(payload))
+
+
+def rtde_inputs(recipe, velocities, sequence):
+    """One data package: six velocity registers and the sequence counter."""
+    velocities = np.asarray(velocities, dtype=float)
+    if velocities.shape != (UR_ARM_JOINTS,) or not np.all(np.isfinite(velocities)):
+        raise ValueError('RTDE command needs six finite joint values')
+    return rtde_packet(RTDE_DATA_PACKAGE, struct.pack(
+        '>B6di', recipe, *velocities, int(sequence) & 0x7FFFFFFF))
+
+
+UR_RTDE_PROGRAM = '''def ros_speedj_rtde():
+  global last_seq = read_input_integer_register({seq})
+  global age = 1000000
+  textmsg("{banner}")
+  while True:
+    seq = read_input_integer_register({seq})
+    if seq != last_seq:
+      last_seq = seq
+      age = 0
+    end
+    if age > {stale}:
+      speedj([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {deceleration}, {cycle})
+    else:
+      qd = [{registers}]
+      speedj(qd, {acceleration}, {cycle})
+    end
+    age = age + 1
+  end
+end
+'''
+
+
+def rtde_program(acceleration, deceleration, command_timeout, cycle=0.008):
+    """The register-reading streaming program, ready to send to port 30003."""
+    for name, value in (('acceleration', acceleration), ('deceleration', deceleration),
+                        ('command_timeout', command_timeout), ('cycle', cycle)):
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f'stream {name} must be positive and finite')
+    reg = RTDE_VELOCITY_REGISTER
+    stale = max(1, int(math.ceil(command_timeout / cycle)))
+    banner = (f'ros_speedj_rtde: running; speedj every {cycle:.4f} s from '
+              f'input_double_register_{reg}..{reg + 5}, zero after {stale} cycles without '
+              'a new sequence')
+    registers = ', '.join(f'read_input_float_register({reg + i})' for i in range(6))
+    return UR_RTDE_PROGRAM.format(
+        seq=RTDE_SEQUENCE_REGISTER, banner=banner, registers=registers,
+        cycle=f'{cycle:.4f}', stale=stale,
+        acceleration=f'{acceleration:.4f}', deceleration=f'{deceleration:.4f}',
+    ).encode('ascii')
+
+
 def stopj_command(deceleration):
     if not (math.isfinite(deceleration) and deceleration > 0):
         raise ValueError('stopj deceleration must be positive and finite')

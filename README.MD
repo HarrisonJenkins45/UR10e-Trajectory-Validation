@@ -458,12 +458,13 @@ ip -4 addr                        # a 192.168.7.x/24 address must be present (wa
 ping -c 3 192.168.7.8             # UR10e
 ping -c 3 192.168.7.6             # Parker rail
 ss -ulpn | grep 5003              # must print nothing: UDP 5003 is free for rail_bridge
-sudo ufw status                   # if active: sudo ufw allow from 192.168.7.8 to any port 50010 proto tcp
 ```
 
-The arm's streaming program runs on the UR and connects back to this PC on
-TCP 50010, so a host firewall must allow that connection from the
-robot.
+The arm is commanded over RTDE by default. Every connection goes from this PC
+to the robot, so no firewall change or sudo is needed. Only the optional
+`ur_stream:=program` needs the robot to connect back to this PC on TCP 50010.
+To see whether a firewall is on, without sudo: `grep ENABLED
+/etc/ufw/ufw.conf` and `systemctl is-active ufw firewalld`.
 
 #### R2. Prepare the rail controller (host shell, Python)
 
@@ -521,11 +522,13 @@ with `home_rail:=never`.
 2. Enable remote control: Settings → System → Remote Control → Enable. Then
    switch the mode (top right) from Local to **Remote**. Scripts sent to
    30003 are not executed in Local mode.
-3. Move the arm to within 0.2 rad (about 11°) of the plan's home on every
+3. Check that RTDE is enabled: Settings → Security → Services → RTDE. It is
+   on by default. `ur_bridge` writes the arm velocities through it.
+4. Move the arm to within 0.2 rad (about 11°) of the plan's home on every
    joint. Joints on the pendant are Base, Shoulder, Elbow, Wrist 1, Wrist 2,
    Wrist 3, i.e. `[0, -75, 100, -115, -80, 0]` degrees for this plan. `~/start`
    refuses if any joint is further off.
-4. Set the **speed slider** (bottom of the Run screen) to **100%**, and check
+5. Set the **speed slider** (bottom of the Run screen) to **100%**, and check
    the robot is not in Reduced mode. The UR scales every commanded arm motion
    by the slider, but the rail is not scaled. Below 100% the arm lags the
    rail, and the tool drifts with the carriage instead of holding still. The
@@ -608,40 +611,53 @@ mode. Ctrl-C when done.
 Relaunch the same command with `enable_commands:=true`, with the pendant e-stop
 and the rail's physical stop in reach.
 
-**How the arm is commanded.** With `enable_commands:=true`, `ur_bridge` uploads
-one URScript program (`ros_speedj_stream`) to the UR at launch. The program
-connects back to this PC and runs `speedj` at 125 Hz on the robot, following
-the velocities ROS sends. It zeroes the arm by itself if velocities stop
-arriving for 0.25 s.
+**How the arm is commanded.** With `enable_commands:=true`, `ur_bridge`:
+
+1. connects to the UR's RTDE interface (port 30004),
+2. uploads one URScript program, `ros_speedj_rtde`, over port 30003.
+
+ROS writes the six joint velocities and a sequence counter into RTDE input
+registers (`input_double_register_24..29`, `input_int_register_24`). The
+program reads them and runs `speedj` at 125 Hz on the robot. It zeroes the
+arm by itself if no new command arrives for 0.25 s. All connections go from
+this PC to the robot.
 
 The launch log should show, in order:
 
 ```text
-Uploading the streaming program to 192.168.7.8:30003; it connects back to 192.168.7.50:50010 ...
-UR program state: PLAYING (2)
-Streaming program connected from 192.168.7.8; ready for commands
+RTDE connected to 192.168.7.8:30004; writing arm velocities to input_double_register_24..29 ...
+Uploading the streaming program ros_speedj_rtde to 192.168.7.8:30003; ...
+Streaming program running on the robot; ready for commands
 ```
 
-The pendant's Log tab shows the program's own messages (`ros_speedj_stream:
-connected ...`). If the log instead says "The robot did not connect back",
-the message lists what to check. The usual causes are:
+The pendant's Log tab shows the program's own start-up message
+(`ros_speedj_rtde: running ...`). If something fails, the bridge log names the
+cause and what to check:
 
-- the robot is not in Remote Control mode,
-- the host firewall blocks TCP 50010 (R1),
-- the detected PC address is wrong; set it with `ur_host_ip:=<this PC's 192.168.7.x address>`.
+| Log message | Check |
+|---|---|
+| "RTDE setup ... failed" | RTDE is disabled on the robot, or another RTDE client (`ur_robot_driver`, a second bridge) holds the registers |
+| "did not start" | Remote Control mode; robot powered on with brakes released; the pendant Log tab |
 
 If the program stops on the robot (stop pressed on the pendant, a protective
-stop), the bridge latches a fault. `/ur_bridge/reset_fault` re-uploads the
-program.
+stop), the bridge latches a fault. `/ur_bridge/reset_fault` restarts the
+program on the existing RTDE connection.
 
-`ur_stream:=lines` switches back to Simulink's method: one `speedj` program
-per command.
+Other transports:
+
+- `ur_stream:=program`: the same persistent program, but it connects back to
+  this PC on TCP 50010. It needs an open firewall.
+- `ur_stream:=lines`: Simulink's method, a new one-line `speedj` program per
+  command.
+
+These were validated on URSim (PolyScope 5.26). All three tracked a wrist
+command at 100%.
 
 **Reading the arm diagnostics.** While the arm is commanded, `ur_bridge` logs
 one line per second:
 
 ```text
-arm: 20 cmd/s | wrist_3_joint cmd +0.0500 target +0.0500 (100%) actual +0.0497 (99%) | scaling 1.00 | RUNNING (7) | NORMAL (1) | PLAYING (2) | stream connected
+arm: 20 cmd/s | wrist_3_joint cmd +0.0500 target +0.0500 (100%) actual +0.0497 (99%) | scaling 1.00 | RUNNING (7) | NORMAL (1) | PLAYING (2) | stream running
 ```
 
 | Field | Meaning |

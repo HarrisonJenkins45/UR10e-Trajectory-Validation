@@ -5,16 +5,21 @@ State:    reads realtime packets from port 30003 and publishes the six arm
           joints on /ur/joint_states (position and velocity), and the
           controller's speed scaling on /ur/speed_scaling.
 Command:  /ur/joint_velocity_command (Float64MultiArray, six rad/s), by one of
-          two transports (parameter `stream`):
+          three transports (parameter `stream`):
 
-  program  (default) uploads ONE URScript program to 30003. The program
-           connects back to this PC (stream_port), reads velocity vectors in
-           a thread, and runs speedj in a loop on the robot at 125 Hz. It
-           zeroes the velocity by itself when vectors stop arriving for
-           command_timeout, even if this process or the network fails.
+  rtde     (default) writes the velocities and a sequence counter to RTDE
+           input registers (port 30004) and uploads ONE URScript program to
+           30003 that reads them and runs speedj on the robot at 125 Hz. Every
+           connection goes from this PC to the robot: no firewall change.
+  program  the same persistent program, but it connects back to this PC
+           (stream_port) for the velocities: needs inbound TCP to the PC.
   lines    sends a new one-line `speedj(...)` program per command, exactly as
            the Simulink model did. Each one replaces the running program, so
            the controller restarts a program 20 times a second.
+
+The persistent programs (rtde, program) zero the arm by themselves when new
+commands stop arriving for command_timeout, even if this process or the
+network fails.
 
 Diagnostics: mode changes (robot, safety, program state) and speed scaling
 are logged as they change. While commands flow, one line per second compares
@@ -43,6 +48,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64, Float64MultiArray
@@ -53,7 +59,9 @@ from ur10e_trajectory_pkg.configurations import JOINT_NAMES
 from ur10e_trajectory_pkg.ros_params import declare
 
 ARM_JOINT_NAMES = list(JOINT_NAMES[1:])
-STREAMS = ('program', 'lines')
+STREAMS = ('rtde', 'program', 'lines')
+PERSISTENT = ('rtde', 'program')
+READY = ('connected', 'running')
 
 
 def _receive_exactly(sock, count):
@@ -93,7 +101,8 @@ class URBridge(Node):
         self.robot_ip = declare(self, 'robot_ip', '192.168.7.8')
         self.port = declare(self, 'port', wire.UR_REALTIME_PORT)
         self.enable_commands = declare(self, 'enable_commands', False)
-        self.stream = declare(self, 'stream', 'program')
+        self.stream = declare(self, 'stream', 'rtde')
+        self.rtde_port = declare(self, 'rtde_port', wire.UR_RTDE_PORT)
         self.host_ip = declare(self, 'host_ip', '')
         self.stream_port = declare(self, 'stream_port', 50010)
         self.acceleration = declare(self, 'acceleration', 1.0)
@@ -119,6 +128,11 @@ class URBridge(Node):
         self.logged = {}
         self.command_sock = None      # lines mode
         self.stream_sock = None       # program mode: the robot's connection back
+        self.rtde_sock = None         # rtde mode: this PC's connection to 30004
+        self.rtde_recipe = None
+        self.rtde_sequence = 0
+        self.stream_started = 0.0
+        self.send_lock = threading.Lock()
         self.server = None
         self.stream_state = 'not started'
         self.moving = False
@@ -126,6 +140,7 @@ class URBridge(Node):
         self.last_command = 0.0
         self.last_vector = np.zeros(6)
         self.commands_this_period = 0
+        self.streaming_since = 0.0
         self.running = True
         threading.Thread(target=self.read_state, daemon=True).start()
 
@@ -134,8 +149,10 @@ class URBridge(Node):
         else:
             mode = f'COMMANDS ENABLED, stream={self.stream}'
         self.get_logger().info(f'UR bridge to {self.robot_ip}:{self.port}, {mode}')
-        if self.enable_commands and self.stream == 'program':
+        if self.enable_commands and self.stream in PERSISTENT:
             self.start_stream()
+            if self.stream == 'rtde':
+                self.create_timer(0.5, self.check_rtde_started)
 
     # --- state -------------------------------------------------------------
 
@@ -200,6 +217,8 @@ class URBridge(Node):
             if value is None or self.logged.get(label) == value:
                 continue
             self.logged[label] = value
+            if label == 'program state':
+                self.track_program(value)
             # One call site per severity: rclpy raises if a single logging call
             # changes severity between calls, which used to drop the state link.
             if value.split()[0] in normal:
@@ -249,12 +268,13 @@ class URBridge(Node):
                 name = wire.ur_mode_name(table, state[key])
                 if name is not None:
                     parts.append(name)
-        if self.stream == 'program':
+        if self.stream in PERSISTENT:
             parts.append(f'stream {self.stream_state}')
         self.get_logger().info(' | '.join(parts))
-        # A stream that just ended is not a slow stream.
-        still_streaming = time.monotonic() - self.last_command < 0.2
-        for problem in self.diagnose(count if still_streaming else 20, state, target, actual):
+        # A stream that just started or just ended is not a slow stream.
+        now = time.monotonic()
+        steady = now - self.last_command < 0.2 and now - self.streaming_since > 1.5
+        for problem in self.diagnose(count if steady else 20, state, target, actual):
             self.get_logger().warn(f'arm diagnosis: {problem}')
 
     def diagnose(self, count, state, target, actual):
@@ -269,8 +289,8 @@ class URBridge(Node):
         if scaling is not None and scaling < 0.99:
             problems.append(f'speed scaling {scaling:.2f} slows every arm motion')
         if target < 0.8:
-            where = ('the streaming program is not connected'
-                     if self.stream == 'program' and self.stream_state != 'connected'
+            where = (f'the streaming program is {self.stream_state}'
+                     if self.stream in PERSISTENT and self.stream_state not in READY
                      else 'the program may not be running; check program state and the UR log')
             problems.append(f'the controller targets only {target * 100:.0f}% of the '
                             f'commanded velocity: {where}')
@@ -282,6 +302,117 @@ class URBridge(Node):
     # --- persistent streaming program ------------------------------------------
 
     def start_stream(self):
+        if self.stream == 'rtde':
+            self.start_rtde()
+        else:
+            self.start_program_stream()
+
+    def connect_rtde(self, attempts=5):
+        """A started RTDE session; retries while a previous session still holds the registers."""
+        for attempt in range(attempts):
+            sock = socket.create_connection((self.robot_ip, self.rtde_port), timeout=2.0)
+            try:
+                recipe = wire.rtde_setup_inputs(sock, on_message=self.log_rtde_message)
+                sock.settimeout(None)
+                return sock, recipe
+            except ConnectionError as error:
+                sock.close()
+                if 'IN_USE' not in str(error) or attempt == attempts - 1:
+                    raise
+                self.get_logger().warn('RTDE registers still held by a previous session; '
+                                       'retrying in 0.5 s')
+                time.sleep(0.5)
+
+    def start_rtde(self):
+        """Connect to RTDE (or reuse the link), zero the registers, upload the program."""
+        self.stream_state = 'connecting to RTDE'
+        try:
+            if self.rtde_sock is None:
+                self.close_stream()
+                sock, recipe = self.connect_rtde()
+                self.rtde_sock, self.rtde_recipe = sock, recipe
+                self.get_logger().info(
+                    f'RTDE connected to {self.robot_ip}:{self.rtde_port}; writing arm velocities '
+                    f'to {wire.RTDE_INPUTS[0]}..{wire.RTDE_INPUTS[5].rsplit("_", 1)[1]} and a '
+                    f'sequence counter to {wire.RTDE_INPUTS[6]}')
+                threading.Thread(target=self.read_rtde, args=(sock,), daemon=True).start()
+            else:
+                self.get_logger().info('Reusing the RTDE connection')
+            if not self.send_velocities(np.zeros(6)):
+                raise ConnectionError('could not write the initial zero velocity')
+        except (OSError, ConnectionError, ValueError, IndexError) as error:
+            self.stream_state = 'RTDE failed'
+            self.get_logger().error(
+                f'RTDE setup with {self.robot_ip}:{self.rtde_port} failed: {error}. Check that '
+                'RTDE is enabled on the robot (Settings > Security > Services) and that no '
+                'other RTDE client (ur_robot_driver, a second bridge) owns input registers '
+                '24..29 or int register 24.')
+            self.trip('RTDE setup failed')
+            return
+        self.stream_state = 'uploaded, waiting for PLAYING'
+        self.stream_started = time.monotonic()
+        self.get_logger().info(
+            f'Uploading the streaming program ros_speedj_rtde to {self.robot_ip}:{self.port}; '
+            f'it runs speedj at 125 Hz and zeroes the arm after {self.command_timeout} s '
+            'without a new command')
+        if not self.upload(wire.rtde_program(self.acceleration, self.stop_deceleration,
+                                             self.command_timeout)):
+            self.stream_state = 'upload failed'
+            self.trip('could not upload the streaming program')
+
+    def check_rtde_started(self):
+        """Notice the uploaded program playing, or report once that it never did."""
+        if self.stream_state != 'uploaded, waiting for PLAYING':
+            return
+        with self.state_lock:
+            state = self.latest
+        elapsed = time.monotonic() - self.stream_started
+        if (elapsed > 0.3 and state is not None and state['program_state'] is not None
+                and int(round(state['program_state'])) == 2):
+            self.stream_state = 'running'
+            self.get_logger().info('Streaming program running on the robot; ready for commands')
+            return
+        if elapsed > self.connect_timeout:
+            self.stream_state = 'never started'
+            self.get_logger().error(
+                f'The streaming program did not start within {self.connect_timeout} s '
+                '(program state never PLAYING). Check, in order: Remote Control mode on the '
+                'pendant; the pendant Log tab for "ros_speedj_rtde" or a program error; robot '
+                'powered on with brakes released (robot mode RUNNING).')
+            self.trip('streaming program did not start')
+
+    def track_program(self, value):
+        """Program state changes: our program started, or it ended."""
+        name = value.split()[0]
+        if self.stream != 'rtde' or not self.enable_commands:
+            return
+        if name == 'PLAYING' and self.stream_state == 'uploaded, waiting for PLAYING':
+            self.stream_state = 'running'
+            self.get_logger().info('Streaming program running on the robot; ready for commands')
+        elif name in ('STOPPING', 'STOPPED') and self.stream_state == 'running' and self.running:
+            self.stream_state = 'stopped'
+            self.trip('the streaming program on the robot ended (stopped from the pendant, '
+                      'protective stop, or replaced by another program); '
+                      'call ~/reset_fault to restart it')
+
+    def log_rtde_message(self, text):
+        self.get_logger().warn(f'RTDE message from the controller: {text}')
+
+    def read_rtde(self, sock):
+        """Drain RTDE output packets, log controller messages, notice a lost link."""
+        try:
+            while True:
+                kind, payload = wire.rtde_read(sock)
+                if kind == wire.RTDE_TEXT_MESSAGE:
+                    self.log_rtde_message(wire.rtde_text(payload))
+        except (OSError, ConnectionError):
+            pass
+        if self.rtde_sock is sock and self.running:
+            self.rtde_sock = None
+            self.stream_state = 'RTDE lost'
+            self.trip('the RTDE connection to the robot closed; call ~/reset_fault to reconnect')
+
+    def start_program_stream(self):
         """Listen, upload the program, and wait for the robot to connect back."""
         host = self.host_ip or detect_host_ip(self.robot_ip, self.port)
         program = wire.stream_program(host, self.stream_port, self.acceleration,
@@ -350,7 +481,13 @@ class URBridge(Node):
                       'call ~/reset_fault to restart it')
 
     def close_stream(self):
-        for sock in (self.stream_sock, self.server):
+        rtde, self.rtde_sock = self.rtde_sock, None
+        if rtde is not None:
+            try:
+                rtde.sendall(wire.rtde_packet(wire.RTDE_CONTROL_PACKAGE_PAUSE))
+            except OSError:
+                pass
+        for sock in (self.stream_sock, self.server, rtde):
             if sock is not None:
                 try:
                     sock.close()
@@ -367,6 +504,20 @@ class URBridge(Node):
             self.get_logger().info(f'[shadow] would command arm velocities [{vector}] rad/s',
                                    throttle_duration_sec=1.0)
             return True
+        if self.stream == 'rtde':
+            if self.rtde_sock is None:
+                self.get_logger().error(f'no RTDE connection ({self.stream_state})',
+                                        throttle_duration_sec=2.0)
+                return False
+            try:
+                with self.send_lock:
+                    self.rtde_sequence += 1
+                    self.rtde_sock.sendall(wire.rtde_inputs(self.rtde_recipe, velocities,
+                                                            self.rtde_sequence))
+                return True
+            except OSError as error:
+                self.get_logger().error(f'RTDE send failed: {error}')
+                return False
         if self.stream == 'program':
             if self.stream_sock is None:
                 self.get_logger().error(f'no streaming program connection ({self.stream_state})',
@@ -410,7 +561,8 @@ class URBridge(Node):
         if not self.enable_commands:
             self.get_logger().info('[shadow] stop', throttle_duration_sec=1.0)
             return
-        if self.stream == 'program' and self.stream_sock is not None:
+        if (self.stream == 'program' and self.stream_sock is not None) or (
+                self.stream == 'rtde' and self.rtde_sock is not None):
             if self.send_velocities(np.zeros(6)):
                 return
         # No stream (lines mode, or the stream is gone): stop with a program.
@@ -436,7 +588,10 @@ class URBridge(Node):
             self.trip(f'arm command {np.round(velocities, 3).tolist()} exceeds '
                       f'{self.max_joint_speed} rad/s')
             return
-        self.last_command = time.monotonic()
+        now = time.monotonic()
+        if now - self.last_command > 0.5:
+            self.streaming_since = now
+        self.last_command = now
         self.commands_this_period += 1
         if not np.any(velocities):
             if self.moving:
@@ -455,9 +610,9 @@ class URBridge(Node):
     def on_reset(self, request, response):
         self.fault = None
         message = 'UR bridge fault cleared'
-        if self.enable_commands and self.stream == 'program' and self.stream_sock is None:
+        if self.enable_commands and self.stream in PERSISTENT and self.stream_state not in READY:
             self.start_stream()
-            message += '; streaming program re-uploaded, watch the log for "connected"'
+            message += '; streaming program restarted, watch the log for "ready for commands"'
         response.success, response.message = True, message
         self.get_logger().info(message)
         return response
@@ -474,7 +629,7 @@ class URBridge(Node):
         try:
             if self.enable_commands:
                 self.stop()
-                if self.stream == 'program':
+                if self.stream in PERSISTENT:
                     # Replace the streaming program with a stop, ending it.
                     self.upload(wire.stopj_command(self.stop_deceleration))
         finally:
@@ -487,8 +642,12 @@ def main(args=None):
     node = URBridge()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # A signal can shut ROS down mid-spin; only real errors propagate.
+        if rclpy.ok():
+            raise
     finally:
         node.shutdown()
         node.destroy_node()

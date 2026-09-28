@@ -10,6 +10,7 @@ model rather than showing a stale pose as live.
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
@@ -56,8 +57,12 @@ def main(args=None):
     node = JointStateMerger()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # A signal can shut ROS down mid-spin; only real errors propagate.
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         if rclpy.ok():

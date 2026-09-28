@@ -42,6 +42,7 @@ import threading
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -400,8 +401,12 @@ def main(args=None):
     node = RailBridge()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # A signal can shut ROS down mid-spin; only real errors propagate.
+        if rclpy.ok():
+            raise
     finally:
         node.shutdown()
         node.destroy_node()

@@ -45,8 +45,9 @@ ARGUMENTS = (
     ('rail_abort_tolerance', '0.01', 'm: halt when the rail lags the plan by more'),
     ('speed_scaling_check', 'true', 'refuse/halt unless the UR runs at 100% speed scaling'),
     ('ur_ip', '192.168.7.8', 'UR10e controller'),
-    ('ur_stream', 'program', 'program (one persistent URScript program) or lines '
-     '(a speedj program per command, as Simulink did)'),
+    ('ur_stream', 'rtde', 'rtde (persistent program fed through RTDE registers; PC-to-robot '
+     'connections only), program (persistent program that connects back to this PC), or '
+     'lines (a speedj program per command, as Simulink did)'),
     ('ur_host_ip', '', "this PC's address on the robot network; empty = detect"),
     ('ur_stream_port', '50010', 'TCP port the streaming program connects back to'),
     ('rail_ip', '192.168.7.6', 'Parker rail controller'),
