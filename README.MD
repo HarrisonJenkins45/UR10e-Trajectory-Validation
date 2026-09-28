@@ -370,6 +370,283 @@ The container is disposable. Inputs, reports and plans persist because
 A completed bundled-dataset run, review findings and validation evidence are
 recorded in [the branch review](docs/ik_foundations_review.md).
 
+## Executing a plan on hardware through ROS (demo)
+
+`hardware_demo.launch.py` replaces the Simulink BaseFrameDetermination command
+path. It uses the same ports and wire formats, but takes its reference from
+`best_plan.json` instead of a hand-written sinusoid:
+
+| Simulink | ROS node | Topic |
+|---|---|---|
+| `refVel(t)`, Manual Switch, 20 Hz hold | `plan_executor` | `/plan/joint_reference`, `/ur/joint_velocity_command`, `/rail/velocity_command` |
+| `tcpUR10eBlock` + `UR10eSend` (`speedj`, :30003) | `ur_bridge` | `/ur/joint_states` |
+| `udpPARKERBlock` + rail Subsystem (`JOG VEL`, :5002/:5003) | `rail_bridge` | `/rail/joint_state` |
+| Gamma/dGamma mux | `joint_state_merger` | `/joint_states` |
+
+RViz shows the measured robot solid and the plan reference translucent. The
+reference is published under the `sim/` TF prefix; `gazebo:=true` also drives
+the Gazebo model from it. The plan is still **planner-certified, not
+hardware-certified**. `~/move_to_home` is an uncertified move with no
+collision check.
+
+### Rehearse with fake hardware
+
+Inside the built, sourced container (steps 3 and 4):
+
+```bash
+ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
+    plan:=/root/ros2_ws/runs/sections/best_plan.json \
+    csv:=/root/ros2_ws/input/camera_traj.csv \
+    hardware:=fake mode:=warmup time_scale:=0.1
+```
+
+In a second shell:
+
+```bash
+ros2 service call /plan_executor/start std_srvs/srv/Trigger
+ros2 service call /plan_executor/stop std_srvs/srv/Trigger       # any time
+```
+
+`~/start` is one call from wherever the robot is. It runs these stages:
+
+1. **Straighten the arm** to the plan-home posture, with the rail held still.
+   Only if every arm joint is within `auto_home_arm_limit` (0.2 rad).
+   Otherwise it refuses and prints the pendant joint values to use.
+2. **Home the rail**: `AXIS0 JOG VEL <rail_homing_speed>:AXIS0 JOG HOME -1`.
+   With `home_rail:=if_needed` (default) this only happens when the
+   home-found flag is clear; `always` homes every time, `never` requires the
+   flag to be set already.
+3. **Move to plan home**: the rail moves with the arm held at home. From the
+   task start (after a warmup-only run), it retraces the certified warmup
+   instead.
+4. **Run the plan**: the warmup (`mode:=warmup`), or warmup plus task
+   (`mode:=full`).
+
+`~/move_to_home` runs steps 1 to 3 only.
+
+Stage 3's rail move and the rail homing keep the arm at the screened home
+posture. The modelled wall and floor are uniform along the rail, so the
+clearance stays as screened. Obstacles in the lab that are not in the model
+are not covered.
+
+`time_scale` slows every stage uniformly: velocities scale by it and
+accelerations by its square. The executor logs the resulting peak speeds, and
+refuses if they exceed `arm_speed_limit` (0.5 rad/s) or `rail_speed_limit`
+(0.05 m/s).
+
+To rehearse homing, add `fake_rail_homed:=false` to the launch; the fake rail
+homes to `rail_offset_m`.
+
+### On the rig: full runbook
+
+Plan used below: `runs/review_20260925/best_plan.json`. Its home is rail
+1.5 m and arm `[0, -75, 100, -115, -80, 0]` degrees. For another plan, print
+its home with:
+
+```bash
+python3 -c "import json,math;h=json.load(open('ros2_ws/runs/review_20260925/best_plan.json'))['home'];print('rail m',h[0],'arm deg',[round(math.degrees(a),3) for a in h[1:]])"
+```
+
+Controllers: UR10e at `192.168.7.8` (TCP 30003), Parker rail at `192.168.7.6`
+(TCP 5002 commands, UDP 5003 feedback). One process at a time may own each:
+close Simulink, PuTTY and any other rail or UR client first.
+
+#### R1. Host network (host shell)
+
+```bash
+ip -4 addr                        # a 192.168.7.x/24 address must be present (was 192.168.7.50 on enp4s0f1)
+ping -c 3 192.168.7.8             # UR10e
+ping -c 3 192.168.7.6             # Parker rail
+ss -ulpn | grep 5003              # must print nothing: UDP 5003 is free for rail_bridge
+```
+
+#### R2. Prepare the rail controller (host shell, Python)
+
+This is the same interactive socket helper as `TERMINAL_SOCKET.md` on
+`revision/hardware_movement`. From the host:
+
+```bash
+python3
+```
+
+Then paste this into Python:
+
+```python
+import socket
+s = socket.create_connection(("192.168.7.6", 5002), timeout=2)
+s.settimeout(0.5)
+
+def command(text):
+    s.sendall((text + "\r").encode("ascii"))
+    try:
+        while True:
+            data = s.recv(4096)
+            if not data:
+                break
+            print(data.decode("ascii", errors="replace"), end="", flush=True)
+    except socket.timeout:
+        pass
+
+```
+
+Then run these, one at a time:
+
+```python
+command("VER")                 # controller answers: connection works
+command("PRINT P12349")        # jog acceleration: expect 10, not 0.1 (0.1 makes homing crawl)
+command("PRINT P12350")        # jog deceleration: expect 10
+command("FSTAT0(48,2)")        # UDP feedback word 0: position counts
+command("FSTAT1(48,58)")       # UDP feedback word 8: jog velocity
+command("FSTAT ON")
+command("AXIS0 DRIVE ON")      # enables the drive; the rail can now move on command
+command("PRINT BIT 16134")     # home-found flag: -1 homed, 0 not homed
+s.close()
+exit()
+```
+
+Note the exact text `PRINT BIT 16134` printed: `rail_bridge` parses that
+reply. If its format is not the command echo, then `-1` or `0` on its own
+line, then a prompt, the bridge will log "unreadable home-flag reply". In
+that case, home here with `command("AXIS0 JOG HOME -1")` and launch below
+with `home_rail:=never`.
+
+#### R3. Prepare the UR10e (teach pendant)
+
+1. Power on and release the brakes.
+2. Enable remote control: Settings → System → Remote Control → Enable. Then
+   switch the mode (top right) from Local to **Remote**. Scripts sent to
+   30003 are not executed in Local mode.
+3. Move the arm to within 0.2 rad (about 11°) of the plan's home on every
+   joint. Joints on the pendant are Base, Shoulder, Elbow, Wrist 1, Wrist 2,
+   Wrist 3, i.e. `[0, -75, 100, -115, -80, 0]` degrees for this plan. `~/start`
+   refuses if any joint is further off.
+
+#### R4. Rail calibration values
+
+- `rail_offset_m`: the planner rail coordinate (URDF metres) of the
+  controller's homed zero. The carriage centre is `AXIS0 JOG ABS 1550`, and
+  the URDF rail runs 0–3 m. If 1550 controller units = 1550 mm = the
+  planner's 1.5 m, then the offset is -0.05. **Confirm by measuring** before
+  trusting it.
+- `rail_sign`: +1 if JOG FWD (increasing counts) moves toward the URDF +x end.
+
+A wrong offset is caught by the start gate, not by motion. It still decides
+where "plan home" is on the real rail, so check it in R6.
+
+#### R5. Plan, recording and container (host shell)
+
+`ros2_ws/runs/` and `ros2_ws/input/` are not in Git. The plan and the
+recording it was certified on must be copied onto this PC. The executor
+refuses a recording whose SHA-256 differs from the one stored in the plan.
+From the repository root:
+
+```bash
+mkdir -p ros2_ws/input ros2_ws/runs/review_20260925
+cp ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv ros2_ws/input/
+# copy best_plan.json into ros2_ws/runs/review_20260925/, then check the digests match:
+python3 -c "import json;print(json.load(open('ros2_ws/runs/review_20260925/best_plan.json'))['recording']['csv_sha256'])"
+sha256sum ros2_ws/input/camera_traj.csv
+```
+
+Start the container as in step 3 above, keeping `--network host`, which the
+bridges need to reach 192.168.7.x. Then build and source as in step 4.
+Everything below runs inside the container.
+
+Without Docker (ROS 2 Humble installed natively):
+
+1. Build the workspace with colcon.
+2. Install the Python pins from `ros2_ws/requirements.txt`.
+3. Add `urdf:=<clone>/ros2_ws/ur10e.urdf` to the launch commands.
+4. Replace the `/root/ros2_ws/...` paths with your clone's `ros2_ws`.
+
+The pinned container is the tested route.
+
+#### R6. Shadow launch: read both devices, send no motion
+
+```bash
+ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
+    plan:=/root/ros2_ws/runs/review_20260925/best_plan.json \
+    csv:=/root/ros2_ws/input/camera_traj.csv \
+    hardware:=real enable_commands:=false \
+    rail_offset_m:=-0.05 rail_sign:=1 \
+    mode:=warmup time_scale:=0.1 kp:=1.0
+```
+
+In a second terminal (`docker exec -it ur10e_sim bash`, then source as in
+step 8), check:
+
+```bash
+ros2 topic echo --once /joint_states     # 7 values: rail m, then arm rad; compare with the pendant
+ros2 topic echo --once /rail/homed       # data: true/false (the launch log also prints it)
+```
+
+In RViz, the solid robot should match the real one.
+
+If the rail is homed, it reads `rail_offset_m` at the switch. Otherwise, the
+position is meaningless until `~/start` homes it.
+
+The launch log's `[shadow]` lines show the exact `speedj` and `JOG` text that
+would be sent. Calling `~/start` now runs the executor, but the robot does not
+move, so the executor halts on tracking error. That is expected in shadow
+mode. Ctrl-C when done.
+
+#### R7. Enabled launch and the demo
+
+Relaunch the same command with `enable_commands:=true`, with the pendant e-stop
+and the rail's physical stop in reach. Then in the second terminal:
+
+```bash
+ros2 topic echo /plan_executor/phase &                                 # live phase
+ros2 service call /plan_executor/start std_srvs/srv/Trigger            # the whole sequence
+ros2 service call /plan_executor/stop std_srvs/srv/Trigger             # stop, any time
+```
+
+`start` straightens the arm if needed, homes the rail if its flag is clear,
+moves the rail to 1.5 m, then runs the warmup (about 20 s at
+`time_scale:=0.1`).
+
+Calling `start` again returns along the warmup and repeats it. For the tumble,
+relaunch with `mode:=full time_scale:=0.14` (the elbow limits the scale; about
+7.5 minutes).
+
+If a call is refused, its reply says why. After a bridge fault:
+
+```bash
+ros2 service call /ur_bridge/reset_fault std_srvs/srv/Trigger
+ros2 service call /rail_bridge/reset_fault std_srvs/srv/Trigger
+```
+
+If the rail ignores jog commands, relaunch with `rail_terminator:=lfcr` (the
+line ending Simulink used).
+
+#### R8. Shut down
+
+1. Call `~/stop`, then Ctrl-C the launch. The bridges send `stopj` and
+   `JOG OFF` on exit.
+2. Optionally disable the rail drive from the R2 helper with
+   `command("AXIS0 DRIVE OFF")`.
+3. Put the pendant back in Local mode.
+
+#### What the system does on its own
+
+Each motion stage refuses to begin unless the measured pose matches its start.
+The plan itself needs 1 cm (rail) and 0.03 rad (arm).
+
+The executor halts, commanding zero, on:
+
+- stale feedback,
+- tracking error above 3 cm or 0.15 rad,
+- a command above the speed limits,
+- homing that does not complete in time.
+
+The bridges also stop independently:
+
+- a command stream silent for 0.25 s triggers `stopj` or `JOG OFF`,
+- `speedj` expires after 0.2 s on the controller itself,
+- the rail stops at its soft limits `rail_soft_min_m`/`rail_soft_max_m`
+  (moving back inside is allowed),
+- `~/stop` aborts rail homing with `JOG OFF`.
+
 ## Search components
 
 The two search commands share `section_contract.py` for input identity,
@@ -395,6 +672,10 @@ orientation-only planner.
 
 
 ## Commanding the arm from a ros node (wrist package)
+
+These two one-off tests predate the plan executor. To run a plan on the
+hardware, use [Executing a plan on hardware through ROS](#executing-a-plan-on-hardware-through-ros-demo).
+
 ros2 run wrist_motion_pkg wrist server
 ros2 service call /trigger_wrist_motion std_srvs/srv/Trigger "{}"
 

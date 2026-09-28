@@ -13,7 +13,9 @@ setup(
 
         ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj.py']),
         ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/VisualizeTraj_RvizPlayback.py']),
+        ('share/' + package_name + '/launch', ['ur10e_trajectory_pkg/hardware_demo.launch.py']),
         ('share/' + package_name + '/rviz', ['rviz/target_preview.rviz']),
+        ('share/' + package_name + '/rviz', ['rviz/hardware_demo.rviz']),
 
     ],
 
@@ -36,6 +38,11 @@ setup(
             'trajectory_fast_section = ur10e_trajectory_pkg.fast_section:main',
             'preview_certified_plan_rviz = ur10e_trajectory_pkg.preview_certified_plan_rviz:main',
             'joint_state_to_gazebo_bridge = ur10e_trajectory_pkg.joint_state_to_gazebo_bridge:main',
+            'plan_executor = ur10e_trajectory_pkg.plan_executor:main',
+            'ur_bridge = ur10e_trajectory_pkg.ur_bridge:main',
+            'rail_bridge = ur10e_trajectory_pkg.rail_bridge:main',
+            'joint_state_merger = ur10e_trajectory_pkg.joint_state_merger:main',
+            'fake_hardware = ur10e_trajectory_pkg.fake_hardware:main',
         ],
     },
 )

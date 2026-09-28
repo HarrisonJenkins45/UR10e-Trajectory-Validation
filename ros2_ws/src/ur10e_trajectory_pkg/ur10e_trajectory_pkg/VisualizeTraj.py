@@ -1,7 +1,8 @@
 # VisualizeTraj.py
 import os
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, SetEnvironmentVariable
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -69,15 +70,20 @@ def generate_launch_description():
     )
 
     # 5. Relay /joint_states (published by validation_server) onto the
-    #    per-joint /cmd/<joint_name> topics the bridge above forwards to Gazebo
+    #    per-joint /cmd/<joint_name> topics the bridge above forwards to Gazebo.
+    #    joint_topic lets hardware_demo drive Gazebo from the plan reference
+    #    while /joint_states carries the measured robot.
     joint_state_relay = Node(
         package='ur10e_trajectory_pkg',
         executable='joint_state_to_gazebo_bridge',
         name='joint_state_to_gazebo_bridge',
-        output='screen'
+        output='screen',
+        remappings=[('/joint_states', LaunchConfiguration('joint_topic'))]
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument('joint_topic', default_value='/joint_states',
+                              description='JointState topic Gazebo follows'),
         set_gz_resource_path,
         set_ign_resource_path,
         gz_sim,
