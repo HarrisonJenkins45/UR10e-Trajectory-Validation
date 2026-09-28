@@ -139,3 +139,15 @@ def test_approach_straightens_the_arm_before_moving_the_rail():
 def test_approach_refuses_a_large_uncertified_arm_sweep():
     with pytest.raises(ValueError, match='pendant'):
         approach(HOME + np.array([0, 0, 0.5, 0, 0, 0, 0]))
+
+
+def test_approach_from_task_start_absorbs_a_small_rail_offset():
+    # The rail tracks open-loop and can finish a warmup a few cm short.
+    segments, description = approach(START + np.array([0.03, 0, 0, 0, 0, 0, 0]))
+    assert 'certified warmup' in description
+    align = segments[0]
+    for t in np.linspace(0.0, align.duration, 9):
+        np.testing.assert_allclose(align.evaluate(t)[0][1:], START[1:])
+    np.testing.assert_allclose(plan_reference.Reference(segments).end, HOME)
+    with pytest.raises(ValueError, match='pendant'):
+        approach(START + np.array([0.08, 0, 0, 0, 0, 0, 0]))

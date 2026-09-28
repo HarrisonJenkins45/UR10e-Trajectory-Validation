@@ -143,6 +143,11 @@ class PlanExecutor(Node):
         self.phase = 'idle'
 
         self.create_subscription(JointState, '/joint_states', self.on_joint_states, 10)
+        self.device_seen = {'arm (/ur/joint_states)': None, 'rail (/rail/joint_state)': None}
+        self.create_subscription(JointState, '/ur/joint_states',
+                                 lambda _: self.saw('arm (/ur/joint_states)'), 10)
+        self.create_subscription(JointState, '/rail/joint_state',
+                                 lambda _: self.saw('rail (/rail/joint_state)'), 10)
         self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED)
         self.reference_pub = self.create_publisher(JointState, '/plan/joint_reference', 10)
         self.arm_pub = self.create_publisher(Float64MultiArray, '/ur/joint_velocity_command', 10)
@@ -166,6 +171,16 @@ class PlanExecutor(Node):
 
     def on_rail_homed(self, message):
         self.rail_homed = bool(message.data)
+
+    def saw(self, device):
+        self.device_seen[device] = time.monotonic()
+
+    def stale_report(self):
+        """Why /joint_states is not fresh, naming the device that went quiet."""
+        now = time.monotonic()
+        ages = ', '.join(f'{name} {"never seen" if at is None else f"{now - at:.2f} s ago"}'
+                         for name, at in self.device_seen.items())
+        return f'no fresh /joint_states (last messages: {ages})'
 
     def fresh_measurement(self):
         if self.measured is None or time.monotonic() - self.measured_at > self.feedback_timeout:
@@ -209,7 +224,7 @@ class PlanExecutor(Node):
         """Stage builders from the current state, or a refusal message."""
         measured = self.fresh_measurement()
         if measured is None:
-            return None, 'no fresh /joint_states from both devices'
+            return None, self.stale_report()
         if include_plan and self.over_limit(self.plan_peaks):
             return None, self.over_limit(self.plan_peaks)
         if self.rail_homed is None and self.home_rail != 'never':
@@ -283,12 +298,12 @@ class PlanExecutor(Node):
         if stage is None:
             return None
         if isinstance(stage, ReferenceStage):
+            measured = self.fresh_measurement()
+            if measured is None:
+                return self.stale_report()
             problem = self.over_limit(stage.reference.peak_speeds(plan_rate_hz=200.0))
             if problem:
                 return f'{stage.label}: {problem}'
-            measured = self.fresh_measurement()
-            if measured is None:
-                return 'no fresh /joint_states'
             error = np.abs(measured - stage.reference.start)
             if np.any(error > self.start_tolerance):
                 names = [f'{JOINT_NAMES[i]} off by {error[i]:.4f}'
@@ -307,7 +322,7 @@ class PlanExecutor(Node):
             builder = self.pending.pop(0)
             measured = self.fresh_measurement()
             if measured is None:
-                self.halt('feedback stale between stages')
+                self.halt(self.stale_report())
                 return
             try:
                 stage = builder(measured)
@@ -365,7 +380,7 @@ class PlanExecutor(Node):
         self.set_phase('homing rail')
         measured = self.fresh_measurement()
         if measured is None:
-            self.halt('feedback stale while homing')
+            self.halt(self.stale_report())
             return
         # The rail's position is meaningless until homing completes: show the
         # measured pose rather than a reference.
@@ -401,7 +416,7 @@ class PlanExecutor(Node):
         self.set_phase(phase)
         measured = self.fresh_measurement()
         if measured is None:
-            self.halt('feedback stale')
+            self.halt(self.stale_report())
             return
         error = q_ref - measured
         if np.any(np.abs(error) > self.abort_tolerance):

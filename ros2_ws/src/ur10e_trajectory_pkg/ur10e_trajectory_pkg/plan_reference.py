@@ -136,15 +136,21 @@ def move_segment(start, goal, max_speed, minimum_duration=2.0, name='move to hom
     return quintic_segment(name, start, goal, duration)
 
 
-def approach_segments(plan, measured, tolerance, arm_limit, max_speed, settle_s=1.0):
+def approach_segments(plan, measured, tolerance, arm_limit, max_speed, settle_s=1.0,
+                      rail_realign_limit=0.05):
     """How to bring the robot from its measured pose to the plan's home.
 
     Returns (segments, description), with segments in plan time. Raises
     ValueError when there is no motion this function is willing to choose:
 
       at home        nothing to do.
-      at task start  retrace the certified warmup backwards (e.g. after a
-                     warmup-only run), so demonstrations repeat safely.
+      at task start  (arm within tolerance, rail within rail_realign_limit)
+                     re-align slowly, then retrace the certified warmup
+                     backwards (e.g. after a warmup-only run), so
+                     demonstrations repeat. The rail tracks open-loop in
+                     0.1 mm/s steps and can end a few cm off; correcting it
+                     with the arm held keeps the arm's clearance, because the
+                     mounting wall and floor both run parallel to the rail.
       arm near home  (every arm joint within arm_limit): first straighten
                      the arm with the rail held, then move the rail with the
                      arm held at home. The modelled wall and floor are uniform
@@ -163,8 +169,11 @@ def approach_segments(plan, measured, tolerance, arm_limit, max_speed, settle_s=
     tolerance = np.asarray(tolerance, dtype=float)
     if np.all(np.abs(measured - home) <= tolerance):
         return [], 'at plan home'
-    if np.all(np.abs(measured - task_start) <= tolerance):
-        return ([quintic_segment('align to task start', measured, task_start, 1.0)]
+    at_task_start = (np.all(np.abs(measured[1:] - task_start[1:]) <= tolerance[1:]) and
+                     abs(measured[0] - task_start[0]) <= rail_realign_limit)
+    if at_task_start:
+        return ([move_segment(measured, task_start, max_speed, minimum_duration=1.0,
+                              name='align to task start')]
                 + reverse_warmup_segments(plan)
                 + [hold_segment('at home', home, settle_s)],
                 'returning along the certified warmup')

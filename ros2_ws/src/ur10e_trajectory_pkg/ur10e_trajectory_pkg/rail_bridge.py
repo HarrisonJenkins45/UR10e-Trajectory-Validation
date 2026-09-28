@@ -58,6 +58,10 @@ LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 # over from an earlier homing cannot end a new one before it has started.
 HOMING_MIN_S = 1.0
 STOPPED_M_S = 0.0005
+# Fast-status subscription renewal: periodically, and whenever the stream
+# has been quiet this long (it normally arrives at about 100 Hz).
+RESUBSCRIBE_S = 5.0
+QUIET_S = 0.1
 
 
 class RailBridge(Node):
@@ -107,10 +111,9 @@ class RailBridge(Node):
         self.last_command = 0.0
         self.running = True
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.settimeout(0.2)
+        self.udp.settimeout(0.05)
         # No SO_REUSEADDR: fail loudly if another listener owns port 5003.
         self.udp.bind(('0.0.0.0', self.feedback_port))
-        self.udp.sendto(wire.RAIL_SUBSCRIBE, (self.host, self.feedback_port))
         threading.Thread(target=self.read_feedback, daemon=True).start()
         threading.Thread(target=self.poll_homed, daemon=True).start()
         mode = 'COMMANDS ENABLED' if self.enable_commands else 'shadow mode (no motion sent)'
@@ -121,19 +124,31 @@ class RailBridge(Node):
 
     # --- state -------------------------------------------------------------
 
+    def subscribe(self):
+        try:
+            self.udp.sendto(wire.RAIL_SUBSCRIBE, (self.host, self.feedback_port))
+        except OSError as error:
+            self.get_logger().warn(f'rail subscribe failed: {error}', throttle_duration_sec=5.0)
+        return time.monotonic()
+
     def read_feedback(self):
-        quiet_since = time.monotonic()
+        # The fast-status stream has been seen to stop on its own (see the
+        # rail_protocol captures). Renew the subscription periodically, and at
+        # once when the ~100 Hz stream goes quiet, so a lapse costs a few
+        # hundred milliseconds rather than a stale-feedback halt.
+        last_packet, subscribed = time.monotonic(), 0.0
         while self.running:
+            now = time.monotonic()
+            if now - subscribed > RESUBSCRIBE_S or (
+                    now - last_packet > QUIET_S and now - subscribed > QUIET_S):
+                if now - last_packet > QUIET_S:
+                    self.get_logger().warn(
+                        f'rail feedback quiet for {now - last_packet:.2f} s; resubscribing',
+                        throttle_duration_sec=2.0)
+                subscribed = self.subscribe()
             try:
                 data, peer = self.udp.recvfrom(65535)
             except socket.timeout:
-                if time.monotonic() - quiet_since > 1.0:
-                    # Renew the subscription if the stream has gone quiet.
-                    try:
-                        self.udp.sendto(wire.RAIL_SUBSCRIBE, (self.host, self.feedback_port))
-                    except OSError:
-                        pass
-                    quiet_since = time.monotonic()
                 continue
             except OSError:
                 if self.running:
@@ -146,13 +161,13 @@ class RailBridge(Node):
             except ValueError as error:
                 self.get_logger().warn(f'bad rail packet: {error}', throttle_duration_sec=2.0)
                 continue
-            quiet_since = time.monotonic()
+            last_packet = time.monotonic()
             position = self.calibration.position_m(counts)
             velocity_m_s = self.calibration.velocity_m_s(velocity)
             with self.lock:
                 self.position = position
                 self.measured_velocity = velocity_m_s
-                self.received_at = quiet_since
+                self.received_at = last_packet
             message = JointState()
             message.header.stamp = self.get_clock().now().to_msg()
             message.name = [RAIL_JOINT]
