@@ -117,13 +117,15 @@ def test_world_to_rail_base_is_identity(validator):
 def test_rail_base_to_carriage_is_rail_along_x_plus_mount_height(validator, rail_m):
     """The rail coordinate and the 25 mm mount live here, inside FK.
 
-    A client target must carry neither.
+    A client target must carry neither. The arm stands on the carriage turned
+    180 deg about its base axis, as on the rig: at home it reaches toward the
+    rail's 0 end.
     """
     q_full = np.concatenate(([rail_m], np.deg2rad([0.0, -135.0, 90.0, -90.0, 45.0, 0.0])))
     pose = validator.robot.fkine(q_full, end=frames.CARRIAGE_FRAME)
     np.testing.assert_allclose(
         pose.t, [rail_m, 0.0, CARRIAGE_MOUNT_Z_M], atol=FK_TOL)
-    np.testing.assert_allclose(pose.R, np.eye(3), atol=FK_TOL)
+    np.testing.assert_allclose(pose.R, np.diag([-1.0, -1.0, 1.0]), atol=FK_TOL)
 
 
 def test_changing_the_rail_seed_does_not_move_client_targets():

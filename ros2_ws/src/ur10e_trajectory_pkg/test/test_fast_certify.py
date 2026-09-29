@@ -312,7 +312,9 @@ def test_a_cached_solve_is_the_solve_it_replaces(validator):
     from ur10e_trajectory_pkg.planning_runtime import WIDE_SEED_BANK_DEG, load_trajectory
 
     positions, quaternions, dt = load_trajectory(None, 20, spin_up_s=0.2)
-    seeds = [(np.deg2rad(arm), 1.5) for arm in WIDE_SEED_BANK_DEG[:3]]
+    # Seeds that reach this target with the arm mounted as on the rig
+    # (turned 180 deg on the carriage); the bank's first three face away.
+    seeds = [(np.deg2rad(arm), 1.5) for arm in WIDE_SEED_BANK_DEG[3:5] + WIDE_SEED_BANK_DEG[6:7]]
 
     def fresh_oracle():
         context = fast.FastContext('/root/ros2_ws/ur10e.urdf', np.zeros(7), workers=1,

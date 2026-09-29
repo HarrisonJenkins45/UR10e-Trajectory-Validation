@@ -388,20 +388,23 @@ class TrajectoryValidator:
         # Same order as self._q_link_names, i.e. same order as q_full.
         self._pb_joint_indices = [pb_joint_index_by_link_name[n] for n in self._q_link_names]
 
-        # Wall: vertical plane parallel to XZ, standing at Y = +1.0m.
-        # Floor: horizontal plane parallel to XY, lying at Z = -0.05m.
-        # (Matches MATLAB's actual code, not its stale comment -- see script
-        # header.) These two names were previously swapped, and the comment
-        # naming their planes was wrong in both directions: a surface at
-        # constant Y is parallel to XZ, not XY. Geometry is unchanged.
+        # The rig's rail is bolted to a wall, so this frame is the wall's:
+        # +x along the rail, +y up, +z out of the wall.
+        # Wall: the plane the rail is mounted on, thin in Z at Z = -0.05,
+        #   from the floor up to 1.5 m above the rail.
+        # Floor: thin in Y, 1 m below the rail at Y = -1.0, 3 m out from the
+        #   wall. Within the arm's 1.3 m reach, so it is a real constraint.
+        # The earlier model read this frame as a floor-mounted rail: its
+        # "floor" at Z = -0.05 was really this wall, and its "wall" at
+        # Y = +1.0 was a ceiling 1 m above the rail that the rig does not have.
         #
         # Sizes below are the original Cuboid `scale` (full extents) halved,
         # since pybullet boxes take half-extents.
         wall_shape = pb.createCollisionShape(
-            pb.GEOM_BOX, halfExtents=[3.0, 0.025, 1.5], physicsClientId=self._pb_client
+            pb.GEOM_BOX, halfExtents=[3.0, 1.25, 0.025], physicsClientId=self._pb_client
         )
         floor_shape = pb.createCollisionShape(
-            pb.GEOM_BOX, halfExtents=[3.0, 1.5, 0.025], physicsClientId=self._pb_client
+            pb.GEOM_BOX, halfExtents=[3.0, 0.025, 1.5], physicsClientId=self._pb_client
         )
         # 6 m long, centred at X = +1.5, spanning -1.5 -> 4.5. Covers the
         # REACHABLE workspace rather than the rail's 0 -> 3 travel: the arm
@@ -410,12 +413,12 @@ class TrajectoryValidator:
         # floor to hit. Must stay in step with obstacle_markers.
         self.wall_id = pb.createMultiBody(
             baseCollisionShapeIndex=wall_shape,
-            basePosition=[1.5, 1.0, 0.0],
+            basePosition=[1.5, 0.25, -0.05],
             physicsClientId=self._pb_client,
         )
         self.floor_id = pb.createMultiBody(
             baseCollisionShapeIndex=floor_shape,
-            basePosition=[1.5, 0.0, -0.05],
+            basePosition=[1.5, -1.0, 1.5],
             physicsClientId=self._pb_client,
         )
 

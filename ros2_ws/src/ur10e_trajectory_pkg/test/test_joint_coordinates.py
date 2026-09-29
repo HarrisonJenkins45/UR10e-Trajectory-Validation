@@ -227,8 +227,11 @@ def tracked(validator):
         targets, quaternions, dt = load_trajectory(None, 500)
     except FileNotFoundError:
         pytest.skip('packaged trajectory CSV not present')
-    return run_tracking(validator, targets, quaternions, dt,
-                        LEGACY_MATLAB_START_Q)
+    # The legacy start was defined for an arm mounted facing the other way;
+    # shoulder_pan + 180 deg is the same pose in the world on the rig's mount.
+    start = LEGACY_MATLAB_START_Q.copy()
+    start[1] += np.pi
+    return run_tracking(validator, targets, quaternions, dt, start)
 
 
 def test_the_trajectory_is_one_segment_with_the_velocity_gate_enabled(tracked):

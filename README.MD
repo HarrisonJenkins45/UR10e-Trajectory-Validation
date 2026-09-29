@@ -151,9 +151,14 @@ server, then start a named container with the workspace mounted. Check
 `docker ps` first: if `ur10e_sim` already exists, choose another name and use
 that name in later `docker exec` and `docker stop` commands. `ROS_DOMAIN_ID=25`
 keeps this preview separate from default-domain ROS nodes; use another unused
-domain if 25 is already in use:
+domain if 25 is already in use.
+
+Run it **from the repository root**: the container mounts `$PWD/ros2_ws`. If
+it is started elsewhere, Docker creates and mounts an empty folder, and the
+build finds no packages (`Summary: 0 packages finished`):
 
 ```bash
+cd <your clone>                 # the folder that contains ros2_ws/
 xhost +si:localuser:root
 
 docker run --rm -it \
@@ -169,7 +174,15 @@ docker run --rm -it \
 ```
 
 All remaining commands in this runbook are run **inside this container** unless
-they are explicitly labelled as host commands.
+they are explicitly labelled as host commands. At container start,
+`bash: /root/ros2_ws/install/setup.bash: No such file or directory` is
+harmless: it is the image looking for an old build location. For a second
+shell in the same container:
+
+```bash
+docker exec -it ur10e_sim bash
+source /root/ur10e_install/setup.bash
+```
 
 ### 4. Build and source the ROS workspace
 
@@ -386,19 +399,86 @@ path. It uses the same ports and wire formats, but takes its reference from
 RViz shows the measured robot solid and the plan reference translucent. The
 reference is published under the `sim/` TF prefix; `gazebo:=true` also drives
 the Gazebo model from it. The plan is still **planner-certified, not
-hardware-certified**. `~/move_to_home` is an uncertified move with no
-collision check.
+hardware-certified**.
+
+### Rig geometry (the model's frame)
+
+The rail is bolted to a wall. The model uses the wall's frame:
+
+| Axis | On the rig |
+|---|---|
+| +x | along the rail, away from the home switch (rail 0 is the switch end) |
+| +y | up |
+| +z | horizontally out of the wall |
+
+- **Arm mounting:** the arm stands on the carriage **turned 180° about its
+  base axis** (`base_joint` in `ur10e.urdf`). At home posture it reaches
+  toward the switch end.
+- **Collision model:** the mounting wall, just behind the rail, and the
+  floor, 1 m below it.
+- **RViz** draws this frame with +z up, so the rail appears to lie on a
+  surface that is really the wall.
+
+A model that disagrees with the rig shows up as the tool drifting with the
+carriage: with the arm turned the wrong way, the flange moves twice the rail
+travel. Replay a plan through the model (FK of `tool0` along `q_path`) to
+check.
+
+### Running the wall-mount plan
+
+The committed plan is `ros2_ws/plans/wallmount_20260929/best_plan.json`; see
+the README beside it for its provenance. It uses the packaged recording, so
+nothing needs copying.
+
+1. **Pendant:** power on, release the brakes, switch to **Remote** mode (R3).
+2. **Container:** start it from the repository root (step 3), then build and
+   source (step 4).
+3. **Launch** the real hardware with commands enabled:
+
+   ```bash
+   PYTHONUNBUFFERED=1 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
+       plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+       csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
+       hardware:=real enable_commands:=true \
+       rail_offset_m:=-0.05 rail_sign:=1 \
+       mode:=full time_scale:=0.1 task_time_scale:=1.0 kp:=1.0 2>&1 | tee /root/ros2_ws/session.log
+   ```
+
+4. **Wait** until both `arm bridge status: ready` and `rail bridge status:
+   ready` appear.
+5. **Start** from a second shell (`docker exec -it ur10e_sim bash`, then
+   `source /root/ur10e_install/setup.bash`):
+
+   ```bash
+   ros2 service call /plan_executor/start std_srvs/srv/Trigger   # whole sequence
+   ros2 service call /plan_executor/stop std_srvs/srv/Trigger    # stop, any time
+   ```
+
+   One `start` from any pose runs the whole sequence (about 2 minutes, 61 s
+   of it the task):
+   - homes the rail if its flag is clear;
+   - returns the arm to home with a collision-checked move;
+   - moves the rail to 1.5 m;
+   - runs the warmup at `time_scale`;
+   - runs the task at `task_time_scale`, which is its recorded speed at 1.0.
+
+   To repeat, call `start` again.
 
 ### Rehearse with fake hardware
 
-Inside the built, sourced container (steps 3 and 4):
+Inside the built, sourced container (steps 3 and 4). This is the same
+command as on the rig, with fake hardware:
 
 ```bash
 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
-    plan:=/root/ros2_ws/runs/sections/best_plan.json \
-    csv:=/root/ros2_ws/input/camera_traj.csv \
-    hardware:=fake mode:=warmup time_scale:=0.1
+    plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+    csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
+    hardware:=fake mode:=full time_scale:=0.1 task_time_scale:=1.0 kp:=1.0
 ```
+
+To start away from home, as after a run, add
+`fake_initial_offset:='[r, a1, a2, a3, a4, a5, a6]'`: the start pose minus
+plan home (rail m, arm rad).
 
 In a second shell:
 
@@ -409,9 +489,14 @@ ros2 service call /plan_executor/stop std_srvs/srv/Trigger       # any time
 
 `~/start` is one call from wherever the robot is. It runs these stages:
 
-1. **Straighten the arm** to the plan-home posture, with the rail held still.
-   Only if every arm joint is within `auto_home_arm_limit` (0.2 rad).
-   Otherwise it refuses and prints the pendant joint values to use.
+1. **Return the arm** to the plan-home posture, with the rail held still.
+   Within `auto_home_arm_limit` (0.2 rad) per joint, the executor moves it
+   directly. Beyond that, the straight joint move is first checked against
+   the planner's collision model (wall, floor, self-clearance, joint limits)
+   and runs only if clear. Otherwise `start` refuses, gives the reason, and
+   prints the pendant joint values to use. `check_moves:=false` disables the
+   check and restores the plain 0.2 rad limit. Unmodelled obstacles in the
+   lab are not covered.
 2. **Home the rail**: `AXIS0 JOG VEL <rail_homing_speed>:AXIS0 JOG HOME -1`.
    With `home_rail:=if_needed` (default) this only happens when the
    home-found flag is clear; `always` homes every time, `never` requires the
@@ -420,7 +505,8 @@ ros2 service call /plan_executor/stop std_srvs/srv/Trigger       # any time
    task start (after a warmup-only run), it retraces the certified warmup
    instead.
 4. **Run the plan**: the warmup (`mode:=warmup`), or warmup plus task
-   (`mode:=full`).
+   (`mode:=full`). The warmup runs at `time_scale`, and the task at
+   `task_time_scale`.
 
 `~/move_to_home` runs steps 1 to 3 only.
 
@@ -429,22 +515,23 @@ posture. The modelled wall and floor are uniform along the rail, so the
 clearance stays as screened. Obstacles in the lab that are not in the model
 are not covered.
 
-`time_scale` slows every stage uniformly: velocities scale by it and
-accelerations by its square. The executor logs the resulting peak speeds, and
-refuses if they exceed `arm_speed_limit` (0.5 rad/s) or `rail_speed_limit`
-(0.05 m/s).
+`time_scale` slows the approach moves and the warmup, and `task_time_scale`
+slows the task (0 means the same as `time_scale`). Velocities scale by the
+factor and accelerations by its square. At launch, the executor logs each
+stage's duration and peak speeds. It refuses a stage whose peaks exceed
+`arm_speed_limit` (0.5 rad/s) or `rail_speed_limit` (0.05 m/s).
 
 To rehearse homing, add `fake_rail_homed:=false` to the launch; the fake rail
 homes to `rail_offset_m`.
 
 ### On the rig: full runbook
 
-Plan used below: `runs/review_20260925/best_plan.json`. Its home is rail
+Plan used below: `plans/wallmount_20260929/best_plan.json`. Its home is rail
 1.5 m and arm `[0, -75, 100, -115, -80, 0]` degrees. For another plan, print
 its home with:
 
 ```bash
-python3 -c "import json,math;h=json.load(open('ros2_ws/runs/review_20260925/best_plan.json'))['home'];print('rail m',h[0],'arm deg',[round(math.degrees(a),3) for a in h[1:]])"
+python3 -c "import json,math;h=json.load(open('ros2_ws/plans/wallmount_20260929/best_plan.json'))['home'];print('rail m',h[0],'arm deg',[round(math.degrees(a),3) for a in h[1:]])"
 ```
 
 Controllers: UR10e at `192.168.7.8` (TCP 30003), Parker rail at `192.168.7.6`
@@ -506,46 +593,55 @@ Close it before launching: one command client at a time.
 1. Power on and release the brakes.
 2. Enable remote control: Settings → System → Remote Control → Enable. Then
    switch the mode (top right) from Local to **Remote**. Scripts sent to
-   30003 are not executed in Local mode.
+   30003 are not executed in Local mode. If the streaming program "did not
+   start", the log quotes the dashboard's answer to `is in remote control`;
+   `'false'` means this step. Switch to Remote, then call
+   `/ur_bridge/reset_fault`.
 3. Check that RTDE is enabled: Settings → Security → Services → RTDE. It is
    on by default. `ur_bridge` writes the arm velocities through it.
-4. Move the arm to within 0.2 rad (about 11°) of the plan's home on every
-   joint. Joints on the pendant are Base, Shoulder, Elbow, Wrist 1, Wrist 2,
-   Wrist 3, i.e. `[0, -75, 100, -115, -80, 0]` degrees for this plan. `~/start`
-   refuses if any joint is further off.
-5. Set the **speed slider** (bottom of the Run screen) to **100%**, and check
-   the robot is not in Reduced mode. The UR scales every commanded arm motion
-   by the slider, but the rail is not scaled. Below 100% the arm lags the
-   rail, and the tool drifts with the carriage instead of holding still. The
-   bridge logs `UR speed scaling ...`, and `~/start` refuses below 100%.
-   The scaling value's position in the UR packet comes from UR's documented
-   layout but is unverified on this controller. If the log shows 100% on the
-   pendant as some other value, relaunch with `speed_scaling_check:=false`.
+4. The arm can start from any pose. `~/start` returns it to plan home
+   (`[0, -75, 100, -115, -80, 0]` degrees for this plan): within 0.2 rad
+   (11°) per joint directly, and beyond that only after the straight move
+   has been checked against the collision model (wall, floor,
+   self-clearance). If the check fails, `start` refuses with the reason and
+   the arm must be moved from the pendant. The model knows nothing of
+   unmodelled obstacles in the lab: watch the return sweep.
+5. **Speed scaling must be 100%.** The UR scales every arm motion by it (the
+   speed slider, Reduced mode), but the rail is not scaled, so below 100% the
+   arm lags the rail. There is no need to find the slider: once the
+   streaming program runs, the arm bridge logs `UR speed scaling 1.00 while
+   playing`. Both the arm bridge and `~/start` refuse below 100%.
 
 #### R4. Rail calibration values
 
 - `rail_offset_m`: the planner rail coordinate (URDF metres) of the
   controller's homed zero. The carriage centre is `AXIS0 JOG ABS 1550`, and
   the URDF rail runs 0–3 m. If 1550 controller units = 1550 mm = the
-  planner's 1.5 m, then the offset is -0.05. **Confirm by measuring** before
-  trusting it.
+  planner's 1.5 m, then the offset is -0.05. **Confirmed on 2026-09-29:**
+  plan home (1.5 m) lands at the rail's centre.
 - `rail_sign`: +1 if JOG FWD (increasing counts) moves toward the URDF +x end.
+  **+1 confirmed**: homing (JOG HOME -1) runs to the switch end, rail 0.
+- `rail_units_per_mm`: **1 confirmed**. Homing at 25 units/s measured
+  25.1–25.4 mm/s from the encoder.
 
 A wrong offset is caught by the start gate, not by motion. It still decides
 where "plan home" is on the real rail, so check it in R6.
 
 #### R5. Plan, recording and container (host shell)
 
-`ros2_ws/runs/` and `ros2_ws/input/` are not in Git. The plan and the
-recording it was certified on must be copied onto this PC. The executor
+The wall-mount plan is committed under `ros2_ws/plans/` and certified on the
+packaged recording, so it needs no copying: pass the paths shown in "Running
+the wall-mount plan". The steps below are for a plan produced elsewhere.
+`ros2_ws/runs/` and `ros2_ws/input/` are not in Git, so such a plan, and the
+recording it was certified on, must be copied onto this PC. The executor
 refuses a recording whose SHA-256 differs from the one stored in the plan.
 From the repository root:
 
 ```bash
-mkdir -p ros2_ws/input ros2_ws/runs/review_20260925
+mkdir -p ros2_ws/input ros2_ws/runs/my_plan
 cp ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv ros2_ws/input/
-# copy best_plan.json into ros2_ws/runs/review_20260925/, then check the digests match:
-python3 -c "import json;print(json.load(open('ros2_ws/runs/review_20260925/best_plan.json'))['recording']['csv_sha256'])"
+# copy best_plan.json into ros2_ws/runs/my_plan/, then check the digests match:
+python3 -c "import json;print(json.load(open('ros2_ws/runs/my_plan/best_plan.json'))['recording']['csv_sha256'])"
 sha256sum ros2_ws/input/camera_traj.csv
 ```
 
@@ -565,16 +661,20 @@ The pinned container is the tested route.
 #### R6. Shadow launch: read both devices, send no motion
 
 ```bash
-ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
-    plan:=/root/ros2_ws/runs/review_20260925/best_plan.json \
-    csv:=/root/ros2_ws/input/camera_traj.csv \
+PYTHONUNBUFFERED=1 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
+    plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+    csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
     hardware:=real enable_commands:=false \
     rail_offset_m:=-0.05 rail_sign:=1 \
-    mode:=warmup time_scale:=0.1 kp:=1.0
+    mode:=full time_scale:=0.1 task_time_scale:=1.0 kp:=1.0 2>&1 | tee /root/ros2_ws/session.log
 ```
 
-In a second terminal (`docker exec -it ur10e_sim bash`, then source as in
-step 8), check:
+`PYTHONUNBUFFERED=1` keeps the log file complete through a pipe. If a
+`ros2 topic` command fails with `RuntimeError: !rclpy.ok()`, run
+`ros2 daemon stop; ros2 daemon start` and retry.
+
+In a second terminal (`docker exec -it ur10e_sim bash`, then
+`source /root/ur10e_install/setup.bash`), check:
 
 ```bash
 ros2 topic echo --once /joint_states     # 7 values: rail m, then arm rad; compare with the pendant
@@ -688,25 +788,40 @@ chain breaks:
 Robot mode, safety mode, program state and speed scaling are also logged
 whenever they change. Send these lines when reporting a problem.
 
-Before the first plan run, check that the arm follows streamed velocities. The
-arm bridge only accepts commands from `plan_executor`, so for this check add
-`arm_command_nodes:=any` to the enabled launch, and relaunch without it for
-the demo. With the executor idle, stream a slow wrist 3 turn for 4 s: 80
-messages at 20 Hz, 0.05 rad/s, 0.20 rad expected.
+Before the first plan run on a new setup, check that the arm follows
+streamed velocities.
 
-```bash
-ros2 topic echo --once /ur/joint_states --field position        # note wrist_3 (last value)
-ros2 topic pub -r 20 -t 80 /ur/joint_velocity_command std_msgs/msg/Float64MultiArray "{data: [0, 0, 0, 0, 0, 0.05]}"
-ros2 topic echo --once /ur/joint_states --field position        # wrist_3 should be about 0.20 rad larger
-```
+1. **Relax the publisher rule.** The arm bridge only accepts commands from
+   `plan_executor`, so add `arm_command_nodes:=any` to the enabled launch.
+   Relaunch without it for the demo.
+2. **Turn wrist 3.** With the executor idle, turn it for 4 s at 0.05 rad/s,
+   so 0.20 rad is expected. This script waits for the bridge, publishes at a
+   steady 20 Hz and ends with a zero:
+
+   ```bash
+   ros2 topic echo --once /ur/joint_states --field position   # note wrist_3 (last value)
+   python3 - <<'PY'
+   import time, rclpy
+   from std_msgs.msg import Float64MultiArray as M
+   rclpy.init(); n = rclpy.create_node('wrist_check')
+   p = n.create_publisher(M, '/ur/joint_velocity_command', 10)
+   while p.get_subscription_count() == 0:
+       time.sleep(0.05)
+   time.sleep(0.5)
+   for _ in range(80):
+       p.publish(M(data=[0.0, 0.0, 0.0, 0.0, 0.0, 0.05])); time.sleep(0.05)
+   p.publish(M(data=[0.0] * 6)); time.sleep(0.2)
+   PY
+   ros2 topic echo --once /ur/joint_states --field position   # wrist_3 about 0.20 rad larger
+   ```
+
+3. **Undo the turn** with the same script and `-0.05`.
 
 Much less than 0.20 rad means the arm is not executing the stream at the
-commanded speed. The `arm:` and `arm diagnosis:` lines logged during the check
-say why. The stream ends without a zero command, so the check ends in a
-latched `no arm command ... while moving` fault. That is the stall
-protection working: the arm is stopped. Clear it with
-`ros2 service call /ur_bridge/reset_fault std_srvs/srv/Trigger`, then undo
-the turn with the same command and `-0.05` (and reset again).
+commanded speed; the `arm:` and `arm diagnosis:` lines logged during the check
+say why. Don't use `ros2 topic pub -r 20` for this. It stutters for its first
+second, and a gap of more than 0.25 s trips the bridge's stall protection: a
+latched `no arm command ... while moving` fault that `reset_fault` clears.
 
 Then in the second terminal:
 
@@ -722,29 +837,24 @@ arm speed should stay close to 100%. During the task, the tool should hold
 its position while the carriage slides, because the arm compensates for the
 rail.
 
-`start` straightens the arm if needed, homes the rail if its flag is clear,
-moves the rail to 1.5 m, then runs the warmup (about 20 s at
-`time_scale:=0.1`).
+`start` returns the arm to home (collision-checked when far), homes the
+rail if its flag is clear, moves the rail to 1.5 m, then runs the plan.
 
-**Warmup first, then the task.** The plan starts at plan home, so there are
-two ways to run the tumble:
+**Two time scales.** The warmup and the task are separate stages. Each is
+checked against the speed limits at its own scale:
 
-- **In one go:** launch with `mode:=full` and call `start` from plan home. It
-  runs home → warmup → task.
-- **In two steps:**
-  1. Launch with `mode:=warmup` and call `start`. The robot ends at the task
-     start.
-  2. Relaunch with `mode:=full` and call `start`. The robot is already at the
-     task start, so it runs the task directly without going back home.
+- `time_scale` scales the approach moves and the warmup.
+- `task_time_scale` scales the task; 0 means the same as `time_scale`.
 
-  The task-start check needs the arm within 0.03 rad of the task start and the
-  rail within 5 cm (the rail is re-aligned first). If the arm did not reach the
-  task start, `start` says so. That means the arm is not following commands:
-  check the `arm:` diagnostics before anything else.
+The warmup's large swings need a small scale (≤ 0.14 for this plan). The task
+runs at its recorded speed with `task_time_scale:=1.0`, and the executor logs
+both stages' durations and peak speeds at launch.
 
-In `mode:=warmup`, calling `start` again from the task start returns along the
-warmup and repeats it. The task at `time_scale:=0.14` takes about 7 minutes
-(the elbow limits the scale).
+With `mode:=full`, a robot already at the task start runs the task directly.
+That check needs the arm within 0.03 rad of the task start and the rail
+within 5 cm (the rail is re-aligned first). With `mode:=warmup`, the plan
+ends at the task start, and calling `start` again returns along the warmup
+and repeats it.
 
 If a call is refused, its reply says why. After a bridge fault:
 
@@ -872,6 +982,6 @@ ros2 run wrist_motion_pkg wrist server
 ros2 service call /trigger_wrist_motion std_srvs/srv/Trigger "{}"
 
 ## Commanding the rail from python
-python3 railTest_modified.py /home/hjenkins33/UR10e-Trajectory-Validation/ros2_ws/runs/review_20260925/best_plan.json
+python3 railTest_modified.py ros2_ws/plans/wallmount_20260929/best_plan.json
 
 

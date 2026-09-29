@@ -169,14 +169,15 @@ def test_environment_spans_full_rail_travel(validator, body_name):
 def test_wall_and_floor_are_distinguished_by_orientation(validator):
     """The names must follow the geometry.
 
-    These two were swapped once already, which made the horizontal floor
-    render as a wall and every collision message name the wrong surface.
-    A wall is thin in Y; a floor is thin in Z.
+    The rail is bolted to a wall and the model's frame is the wall's: +y up,
+    +z out of the wall. So the wall the rail is mounted on is thin in Z, and
+    the floor below is thin in Y. An earlier model had these the other way
+    round, reading the frame as a floor-mounted rail.
     """
     _, wall_extents = _env_body_extents(validator, validator.wall_id)
     _, floor_extents = _env_body_extents(validator, validator.floor_id)
-    assert np.argmin(wall_extents) == 1, 'wall_id is not thin in Y'
-    assert np.argmin(floor_extents) == 2, 'floor_id is not thin in Z'
+    assert np.argmin(wall_extents) == 2, 'wall_id is not thin in Z'
+    assert np.argmin(floor_extents) == 1, 'floor_id is not thin in Y'
 
 
 # --------------------------------------------------------------------------
@@ -306,7 +307,7 @@ def test_environment_covers_the_reachable_workspace(validator, body_name):
     assert x_max >= RAIL_UPPER_M + MAX_ARM_REACH_M - TOL_M
 
 
-def test_floor_collision_is_detected_past_the_rail_end(validator):
+def test_wall_collision_is_detected_past_the_rail_end(validator):
     """The gap the widened environment closes.
 
     While the planes spanned only the rail's 0 to 3 m travel, this pose
@@ -315,7 +316,9 @@ def test_floor_collision_is_detected_past_the_rail_end(validator):
     reachable and had to be modelled before collision clearance could mean
     anything there.
     """
-    q_dipping = _q(RAIL_UPPER_M, 0, -50, 120, -90, 0, 0)
+    # The arm is mounted turned 180 deg, so at shoulder_pan 0 it reaches
+    # toward -x: this pose dips into the mounting wall past the rail's 0 end.
+    q_dipping = _q(RAIL_LOWER_M, 0, -50, 120, -90, 0, 0)
     wrist_x = validator.robot.fkine(q_dipping, end='wrist_3_link').t[0]
-    assert wrist_x > RAIL_UPPER_M, 'pose no longer overhangs the rail end'
+    assert wrist_x < RAIL_LOWER_M, 'pose no longer overhangs the rail end'
     assert validator.check_all_collisions(q_dipping) is True

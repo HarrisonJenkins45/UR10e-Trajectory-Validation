@@ -611,7 +611,11 @@
   <!-- base_joint now fixes base_link to the rail carriage (previously fixed
        directly to 'world'; the rail sits between them instead) -->
   <joint name="base_joint" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <!-- The arm stands on the carriage turned 180 deg about its base axis: at
+         home posture it reaches toward the home-switch (rail 0) end, as on the
+         rig. The rail is on a wall: +x along the rail, +y up, +z out of the
+         wall. -->
+    <origin rpy="0 0 3.141592653589793" xyz="0 0 0"/>
     <parent link="rail_carriage_link"/>
     <child link="base_link"/>
   </joint>
