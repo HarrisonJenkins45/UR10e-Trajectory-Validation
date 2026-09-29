@@ -26,6 +26,12 @@ Services (std_srvs/Trigger)
                      3. move to the plan's home: rail only, arm held at home;
                         or, from the task start, retrace the certified warmup
                      4. the plan: warmup, or warmup + task (mode)
+                   In mode 'full', a robot already at the task start (the
+                   warmup was run before, e.g. with mode 'warmup') runs the
+                   task directly instead.
+                   Refuses unless /ur/status and /rail/status both say
+                   'ready', and halts any motion if either stops saying so:
+                   a faulted arm bridge never leaves the rail moving alone.
   ~/move_to_home   steps 1-3 only.
   ~/stop           zero all velocities now; aborts rail homing too.
 
@@ -91,7 +97,7 @@ class PlanExecutor(Node):
         csv_path = declare(self, 'csv', '')
         self.rate_hz = declare(self, 'rate_hz', 20.0)
         self.time_scale = declare(self, 'time_scale', 0.1)
-        mode = declare(self, 'mode', 'warmup')
+        mode = self.mode = declare(self, 'mode', 'warmup')
         self.settle_s = declare(self, 'settle_s', 1.0)
         self.kp = declare(self, 'kp', 0.0)
         self.feedback_timeout = declare(self, 'feedback_timeout', 0.25)
@@ -126,6 +132,8 @@ class PlanExecutor(Node):
         self.home = np.asarray(self.plan['home'], dtype=float)
         self.plan_segments = plan_reference.plan_segments(
             self.plan, dt, self.settle_s, include_task=(mode == 'full'))
+        self.task_segments = plan_reference.task_only_segments(self.plan, dt, self.settle_s)
+        self.task_start = np.asarray(self.plan['q_path'][0], dtype=float)
         plan_only = plan_reference.Reference(self.plan_segments, self.time_scale)
         self.plan_peaks = plan_only.peak_speeds(plan_rate_hz=200.0)
         self.get_logger().info(
@@ -153,6 +161,13 @@ class PlanExecutor(Node):
         self.create_subscription(JointState, '/rail/joint_state',
                                  lambda _: self.saw('rail (/rail/joint_state)'), 10)
         self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED)
+        # Each bridge says 'ready', or why its device would not follow.
+        self.device_status = {'arm': None, 'rail': None}
+        for device in self.device_status:
+            self.create_subscription(
+                String, f'/{"ur" if device == "arm" else "rail"}/status',
+                lambda message, device=device: self.device_status.__setitem__(
+                    device, message.data), LATCHED)
         # Published by ur_bridge only while a UR program is playing; readings
         # older than a second mean no program is playing and are ignored.
         self.speed_scaling, self.speed_scaling_at = None, 0.0
@@ -201,6 +216,17 @@ class PlanExecutor(Node):
                          for name, at in self.device_seen.items())
         return f'no fresh /joint_states (last messages: {ages})'
 
+    def not_ready(self, allow_rail_homing=False):
+        """Why the arm or rail would not follow commands, or None when both would."""
+        problems = []
+        for device, status in self.device_status.items():
+            if status == 'ready' or (device == 'rail' and allow_rail_homing
+                                     and status == 'homing'):
+                continue
+            problems.append(f'{device} bridge not ready: '
+                            f'{status or "no status received (bridge not running?)"}')
+        return '; '.join(problems) or None
+
     def fresh_measurement(self):
         if self.measured is None or time.monotonic() - self.measured_at > self.feedback_timeout:
             return None
@@ -229,6 +255,18 @@ class PlanExecutor(Node):
                               'straighten arm')
 
     def approach(self, measured, include_plan):
+        if (include_plan and self.mode == 'full' and
+                plan_reference.at_task_start(self.plan, measured, self.start_tolerance)):
+            # The warmup has already been run (e.g. mode:=warmup, then
+            # mode:=full): start the task from here instead of going home.
+            segments = []
+            if np.any(np.abs(measured - self.task_start) > self.start_tolerance):
+                segments.append(plan_reference.move_segment(
+                    measured, self.task_start, self.approach_speed(), minimum_duration=1.0,
+                    name='align to task start'))
+            return ReferenceStage(
+                plan_reference.Reference(segments + self.task_segments, self.time_scale),
+                'at the task start, warmup already done: running the task')
         segments, description = plan_reference.approach_segments(
             self.plan, measured, self.start_tolerance, self.auto_home_arm_limit,
             self.approach_speed(), self.settle_s)
@@ -244,6 +282,8 @@ class PlanExecutor(Node):
         measured = self.fresh_measurement()
         if measured is None:
             return None, self.stale_report()
+        if self.not_ready():
+            return None, self.not_ready()
         if include_plan and self.over_limit(self.plan_peaks):
             return None, self.over_limit(self.plan_peaks)
         if self.rail_homed is None and self.home_rail != 'never':
@@ -407,6 +447,9 @@ class PlanExecutor(Node):
         if measured is None:
             self.halt(self.stale_report())
             return
+        if self.not_ready(allow_rail_homing=True):
+            self.halt(self.not_ready(allow_rail_homing=True))
+            return
         # The rail's position is meaningless until homing completes: show the
         # measured pose rather than a reference.
         self.hold = measured
@@ -442,6 +485,9 @@ class PlanExecutor(Node):
         measured = self.fresh_measurement()
         if measured is None:
             self.halt(self.stale_report())
+            return
+        if self.not_ready():
+            self.halt(self.not_ready())
             return
         scaling = self.slowed_by_scaling()
         if scaling is not None:

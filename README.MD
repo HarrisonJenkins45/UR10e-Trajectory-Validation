@@ -617,8 +617,9 @@ and the rail's physical stop in reach.
 2. uploads one URScript program, `ros_speedj_rtde`, over port 30003.
 
 ROS writes the six joint velocities and a sequence counter into RTDE input
-registers (`input_double_register_24..29`, `input_int_register_24`). The
-program reads them and runs `speedj` at 125 Hz on the robot. It zeroes the
+registers (`input_double_register_24..29`, `input_int_register_24`). On older
+controller software without those registers, it falls back to 18..23 and logs
+which set it uses. The program reads them and runs `speedj` at 125 Hz on the robot. It zeroes the
 arm by itself if no new command arrives for 0.25 s. All connections go from
 this PC to the robot.
 
@@ -628,6 +629,20 @@ The launch log should show, in order:
 RTDE connected to 192.168.7.8:30004; writing arm velocities to input_double_register_24..29 ...
 Uploading the streaming program ros_speedj_rtde to 192.168.7.8:30003; ...
 Streaming program running on the robot; ready for commands
+arm bridge status: ready
+rail bridge status: ready
+```
+
+**Both status lines must say `ready` before `start` will move anything.** If
+either bridge is not ready (shadow mode, a fault, a streaming program that did
+not start, no rail feedback), `start` refuses and names the bridge and the
+reason. Any motion also halts, rail included, the moment either one stops
+being ready. So a faulted arm bridge can no longer leave the rail moving on
+its own. Check them any time with:
+
+```bash
+ros2 topic echo --once --qos-durability transient_local /ur/status
+ros2 topic echo --once --qos-durability transient_local /rail/status
 ```
 
 The pendant's Log tab shows the program's own start-up message
@@ -711,9 +726,25 @@ rail.
 moves the rail to 1.5 m, then runs the warmup (about 20 s at
 `time_scale:=0.1`).
 
-Calling `start` again returns along the warmup and repeats it. For the tumble,
-relaunch with `mode:=full time_scale:=0.14` (the elbow limits the scale; about
-7.5 minutes).
+**Warmup first, then the task.** The plan starts at plan home, so there are
+two ways to run the tumble:
+
+- **In one go:** launch with `mode:=full` and call `start` from plan home. It
+  runs home → warmup → task.
+- **In two steps:**
+  1. Launch with `mode:=warmup` and call `start`. The robot ends at the task
+     start.
+  2. Relaunch with `mode:=full` and call `start`. The robot is already at the
+     task start, so it runs the task directly without going back home.
+
+  The task-start check needs the arm within 0.03 rad of the task start and the
+  rail within 5 cm (the rail is re-aligned first). If the arm did not reach the
+  task start, `start` says so. That means the arm is not following commands:
+  check the `arm:` diagnostics before anything else.
+
+In `mode:=warmup`, calling `start` again from the task start returns along the
+warmup and repeats it. The task at `time_scale:=0.14` takes about 7 minutes
+(the elbow limits the scale).
 
 If a call is refused, its reply says why. After a bridge fault:
 

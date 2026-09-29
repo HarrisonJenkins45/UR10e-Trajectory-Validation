@@ -111,6 +111,22 @@ def plan_segments(plan, dt, settle_s=1.0, include_task=True):
     return segments
 
 
+def task_only_segments(plan, dt, settle_s=1.0):
+    """A settle at the task start, then the certified task (no warmup)."""
+    task_start = np.asarray(plan['q_path'][0], dtype=float)
+    segments = [hold_segment('settle', task_start, settle_s)] if settle_s > 0 else []
+    return segments + [task_segment(plan['q_path'], dt)]
+
+
+def at_task_start(plan, measured, tolerance, rail_realign_limit=0.05):
+    """True when the arm is at the task start and the rail close enough to re-align."""
+    measured = _configuration(measured, 'measured pose')
+    task_start = np.asarray(plan['q_path'][0], dtype=float)
+    tolerance = np.asarray(tolerance, dtype=float)
+    return bool(np.all(np.abs(measured[1:] - task_start[1:]) <= tolerance[1:]) and
+                abs(measured[0] - task_start[0]) <= rail_realign_limit)
+
+
 def reverse_warmup_segments(plan):
     """The certified warmup path traversed backwards: task start to home.
 
@@ -169,9 +185,7 @@ def approach_segments(plan, measured, tolerance, arm_limit, max_speed, settle_s=
     tolerance = np.asarray(tolerance, dtype=float)
     if np.all(np.abs(measured - home) <= tolerance):
         return [], 'at plan home'
-    at_task_start = (np.all(np.abs(measured[1:] - task_start[1:]) <= tolerance[1:]) and
-                     abs(measured[0] - task_start[0]) <= rail_realign_limit)
-    if at_task_start:
+    if at_task_start(plan, measured, tolerance, rail_realign_limit):
         return ([move_segment(measured, task_start, max_speed, minimum_duration=1.0,
                               name='align to task start')]
                 + reverse_warmup_segments(plan)

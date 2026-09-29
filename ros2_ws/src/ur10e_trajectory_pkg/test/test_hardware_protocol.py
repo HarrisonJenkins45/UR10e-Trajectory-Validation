@@ -137,3 +137,11 @@ def test_streaming_program_is_one_def_with_its_own_watchdog():
         b'(0.100000,0.000000,0.000000,0.000000,0.000000,-0.050000)\n'
     with pytest.raises(ValueError):
         wire.stream_program('robot.local', 50010, 1.0, 2.0, 0.25)
+
+
+def test_rtde_program_and_registers_follow_the_register_base():
+    assert wire.rtde_input_names(18) == tuple(
+        f'input_double_register_{n}' for n in range(18, 24)) + ('input_int_register_18',)
+    program = wire.rtde_program(1.0, 2.0, 0.25, base=18).decode()
+    assert 'read_input_integer_register(18)' in program
+    assert 'read_input_float_register(23)' in program and '(24)' not in program

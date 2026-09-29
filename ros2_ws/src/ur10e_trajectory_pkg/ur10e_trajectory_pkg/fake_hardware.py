@@ -24,7 +24,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64, Float64MultiArray
+from std_msgs.msg import Bool, Float64, Float64MultiArray, String
 from std_srvs.srv import Trigger
 
 from ur10e_trajectory_pkg import plan_artifact
@@ -63,6 +63,11 @@ class FakeHardware(Node):
         self.homed_pub = self.create_publisher(Bool, '/rail/homed', LATCHED)
         self.scaling_pub = self.create_publisher(Float64, '/ur/speed_scaling', 10)
         self.homed_pub.publish(Bool(data=self.homed))
+        # The fake devices are always ready, like healthy bridges.
+        self.status_pubs = [self.create_publisher(String, topic, LATCHED)
+                            for topic in ('/ur/status', '/rail/status')]
+        for publisher in self.status_pubs:
+            publisher.publish(String(data='ready'))
         self.create_service(Trigger, '/rail_bridge/home', self.on_home)
         self.period = 1.0 / rate_hz
         self.last_step = time.monotonic()

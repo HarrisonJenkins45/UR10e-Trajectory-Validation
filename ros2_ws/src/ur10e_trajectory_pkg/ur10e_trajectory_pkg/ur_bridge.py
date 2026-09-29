@@ -51,7 +51,8 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64, Float64MultiArray
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import Float64, Float64MultiArray, String
 from std_srvs.srv import Trigger
 
 from ur10e_trajectory_pkg import hardware_protocol as wire
@@ -59,6 +60,7 @@ from ur10e_trajectory_pkg.configurations import JOINT_NAMES
 from ur10e_trajectory_pkg.ros_params import declare
 
 ARM_JOINT_NAMES = list(JOINT_NAMES[1:])
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 STREAMS = ('rtde', 'program', 'lines')
 PERSISTENT = ('rtde', 'program')
 READY = ('connected', 'running')
@@ -117,6 +119,11 @@ class URBridge(Node):
 
         self.state_pub = self.create_publisher(JointState, '/ur/joint_states', 10)
         self.scaling_pub = self.create_publisher(Float64, '/ur/speed_scaling', 10)
+        # 'ready', or why commands would not reach the arm; the executor
+        # refuses to move anything unless this says 'ready'.
+        self.status_pub = self.create_publisher(String, '/ur/status', LATCHED)
+        self.published_status = None
+        self.create_timer(0.2, self.publish_status)
         self.create_subscription(Float64MultiArray, '/ur/joint_velocity_command',
                                  self.on_command, 10)
         self.create_service(Trigger, '~/reset_fault', self.on_reset)
@@ -130,6 +137,7 @@ class URBridge(Node):
         self.stream_sock = None       # program mode: the robot's connection back
         self.rtde_sock = None         # rtde mode: this PC's connection to 30004
         self.rtde_recipe = None
+        self.rtde_base = wire.RTDE_REGISTER_BASES[0]
         self.rtde_sequence = 0
         self.stream_started = 0.0
         self.send_lock = threading.Lock()
@@ -277,6 +285,26 @@ class URBridge(Node):
         for problem in self.diagnose(count if steady else 20, state, target, actual):
             self.get_logger().warn(f'arm diagnosis: {problem}')
 
+    def status(self):
+        if not self.enable_commands:
+            return 'shadow mode (enable_commands:=false): arm commands are not sent'
+        if self.fault:
+            return f'fault: {self.fault}'
+        if self.stream in PERSISTENT and self.stream_state not in READY:
+            return f'streaming program {self.stream_state}'
+        with self.state_lock:
+            state = self.latest
+        if state is None:
+            return 'no UR state received'
+        return 'ready'
+
+    def publish_status(self):
+        status = self.status()
+        if status != self.published_status:
+            self.published_status = status
+            self.status_pub.publish(String(data=status))
+            self.get_logger().info(f'arm bridge status: {status}')
+
     def diagnose(self, count, state, target, actual):
         """Plain-language reasons why the arm is not following, if any."""
         problems = []
@@ -308,20 +336,32 @@ class URBridge(Node):
             self.start_program_stream()
 
     def connect_rtde(self, attempts=5):
-        """A started RTDE session; retries while a previous session still holds the registers."""
-        for attempt in range(attempts):
-            sock = socket.create_connection((self.robot_ip, self.rtde_port), timeout=2.0)
-            try:
-                recipe = wire.rtde_setup_inputs(sock, on_message=self.log_rtde_message)
-                sock.settimeout(None)
-                return sock, recipe
-            except ConnectionError as error:
-                sock.close()
-                if 'IN_USE' not in str(error) or attempt == attempts - 1:
-                    raise
-                self.get_logger().warn('RTDE registers still held by a previous session; '
-                                       'retrying in 0.5 s')
-                time.sleep(0.5)
+        """A started RTDE session as (socket, recipe, register base).
+
+        Tries the preferred register set, then the lower one the controller
+        may be limited to; retries while a previous session holds them.
+        """
+        for base in wire.RTDE_REGISTER_BASES:
+            for attempt in range(attempts):
+                sock = socket.create_connection((self.robot_ip, self.rtde_port), timeout=2.0)
+                try:
+                    recipe = wire.rtde_setup_inputs(sock, on_message=self.log_rtde_message,
+                                                    base=base)
+                    sock.settimeout(None)
+                    return sock, recipe, base
+                except ConnectionError as error:
+                    sock.close()
+                    if 'NOT_FOUND' in str(error) and base != wire.RTDE_REGISTER_BASES[-1]:
+                        self.get_logger().warn(
+                            f'This controller has no RTDE input registers {base}..{base + 5}; '
+                            'trying the lower register range')
+                        break
+                    if 'IN_USE' not in str(error) or attempt == attempts - 1:
+                        raise
+                    self.get_logger().warn('RTDE registers still held by a previous session; '
+                                           'retrying in 0.5 s')
+                    time.sleep(0.5)
+        raise ConnectionError('no usable RTDE input registers')
 
     def start_rtde(self):
         """Connect to RTDE (or reuse the link), zero the registers, upload the program."""
@@ -329,12 +369,12 @@ class URBridge(Node):
         try:
             if self.rtde_sock is None:
                 self.close_stream()
-                sock, recipe = self.connect_rtde()
-                self.rtde_sock, self.rtde_recipe = sock, recipe
+                sock, recipe, base = self.connect_rtde()
+                self.rtde_sock, self.rtde_recipe, self.rtde_base = sock, recipe, base
+                names = wire.rtde_input_names(base)
                 self.get_logger().info(
                     f'RTDE connected to {self.robot_ip}:{self.rtde_port}; writing arm velocities '
-                    f'to {wire.RTDE_INPUTS[0]}..{wire.RTDE_INPUTS[5].rsplit("_", 1)[1]} and a '
-                    f'sequence counter to {wire.RTDE_INPUTS[6]}')
+                    f'to {names[0]}..{base + 5} and a sequence counter to {names[6]}')
                 threading.Thread(target=self.read_rtde, args=(sock,), daemon=True).start()
             else:
                 self.get_logger().info('Reusing the RTDE connection')
@@ -345,8 +385,8 @@ class URBridge(Node):
             self.get_logger().error(
                 f'RTDE setup with {self.robot_ip}:{self.rtde_port} failed: {error}. Check that '
                 'RTDE is enabled on the robot (Settings > Security > Services) and that no '
-                'other RTDE client (ur_robot_driver, a second bridge) owns input registers '
-                '24..29 or int register 24.')
+                'other RTDE client (ur_robot_driver, a second bridge) owns the input '
+                'registers named above.')
             self.trip('RTDE setup failed')
             return
         self.stream_state = 'uploaded, waiting for PLAYING'
@@ -356,7 +396,7 @@ class URBridge(Node):
             f'it runs speedj at 125 Hz and zeroes the arm after {self.command_timeout} s '
             'without a new command')
         if not self.upload(wire.rtde_program(self.acceleration, self.stop_deceleration,
-                                             self.command_timeout)):
+                                             self.command_timeout, base=self.rtde_base)):
             self.stream_state = 'upload failed'
             self.trip('could not upload the streaming program')
 

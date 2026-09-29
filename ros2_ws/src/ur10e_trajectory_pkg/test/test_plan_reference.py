@@ -151,3 +151,16 @@ def test_approach_from_task_start_absorbs_a_small_rail_offset():
     np.testing.assert_allclose(plan_reference.Reference(segments).end, HOME)
     with pytest.raises(ValueError, match='pendant'):
         approach(START + np.array([0.08, 0, 0, 0, 0, 0, 0]))
+
+
+def test_task_start_check_and_task_only_sequence():
+    plan = synthetic_plan()
+    assert plan_reference.at_task_start(plan, START, TOLERANCE)
+    assert plan_reference.at_task_start(plan, START + np.array([0.04, 0, 0, 0, 0, 0, 0]), TOLERANCE)
+    assert not plan_reference.at_task_start(plan, START + np.array([0, 0.1, 0, 0, 0, 0, 0]),
+                                            TOLERANCE)
+    segments = plan_reference.task_only_segments(plan, 0.1, settle_s=1.0)
+    assert [s.name for s in segments] == ['settle', 'task']
+    reference = plan_reference.Reference(segments)
+    np.testing.assert_allclose(reference.start, START)
+    np.testing.assert_allclose(reference.end, plan['q_path'][-1])

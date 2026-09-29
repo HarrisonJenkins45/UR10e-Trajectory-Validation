@@ -197,10 +197,19 @@ RTDE_CONTROL_PACKAGE_SETUP_INPUTS = 73  # 'I'
 RTDE_CONTROL_PACKAGE_START = 83         # 'S'
 RTDE_CONTROL_PACKAGE_PAUSE = 80         # 'P'
 RTDE_DATA_PACKAGE = 85                  # 'U'
-RTDE_VELOCITY_REGISTER = 24             # input_double_register_24..29
-RTDE_SEQUENCE_REGISTER = 24             # input_int_register_24
-RTDE_INPUTS = tuple(f'input_double_register_{RTDE_VELOCITY_REGISTER + i}' for i in range(6)) + (
-    f'input_int_register_{RTDE_SEQUENCE_REGISTER}',)
+# Register sets, preferred first: the upper range (24..47) only exists on
+# newer controller software, which the rig's 1116-byte realtime packet
+# suggests it may not have; the lower range (0..23) exists on all e-Series.
+RTDE_REGISTER_BASES = (24, 18)
+
+
+def rtde_input_names(base):
+    """Six velocity registers from `base`, then the sequence counter at `base`."""
+    return tuple(f'input_double_register_{base + i}' for i in range(6)) + (
+        f'input_int_register_{base}',)
+
+
+RTDE_INPUTS = rtde_input_names(RTDE_REGISTER_BASES[0])
 
 
 def rtde_packet(kind, payload=b''):
@@ -235,7 +244,7 @@ def rtde_text(payload):
         payload[1 + length:].decode('ascii', 'replace').strip('\x00')
 
 
-def rtde_setup_inputs(sock, on_message=None, output_hz=10.0):
+def rtde_setup_inputs(sock, on_message=None, output_hz=10.0, base=RTDE_REGISTER_BASES[0]):
     """Negotiate the protocol and the input recipe, start; return the recipe id.
 
     The controller only starts synchronizing once an output recipe exists
@@ -255,7 +264,7 @@ def rtde_setup_inputs(sock, on_message=None, output_hz=10.0):
     if not payload or payload[0] == 0:
         raise ConnectionError('RTDE output setup refused')
     sock.sendall(rtde_packet(RTDE_CONTROL_PACKAGE_SETUP_INPUTS,
-                             ','.join(RTDE_INPUTS).encode('ascii')))
+                             ','.join(rtde_input_names(base)).encode('ascii')))
     kind, payload = _rtde_reply(sock, RTDE_CONTROL_PACKAGE_SETUP_INPUTS, on_message)
     recipe, types = payload[0], payload[1:].decode('ascii', 'replace').split(',')
     expected = ['DOUBLE'] * 6 + ['INT32']
@@ -311,20 +320,21 @@ end
 '''
 
 
-def rtde_program(acceleration, deceleration, command_timeout, cycle=0.008):
+def rtde_program(acceleration, deceleration, command_timeout, cycle=0.008,
+                 base=RTDE_REGISTER_BASES[0]):
     """The register-reading streaming program, ready to send to port 30003."""
     for name, value in (('acceleration', acceleration), ('deceleration', deceleration),
                         ('command_timeout', command_timeout), ('cycle', cycle)):
         if not (math.isfinite(value) and value > 0):
             raise ValueError(f'stream {name} must be positive and finite')
-    reg = RTDE_VELOCITY_REGISTER
+    reg = base
     stale = max(1, int(math.ceil(command_timeout / cycle)))
     banner = (f'ros_speedj_rtde: running; speedj every {cycle:.4f} s from '
               f'input_double_register_{reg}..{reg + 5}, zero after {stale} cycles without '
               'a new sequence')
     registers = ', '.join(f'read_input_float_register({reg + i})' for i in range(6))
     return UR_RTDE_PROGRAM.format(
-        seq=RTDE_SEQUENCE_REGISTER, banner=banner, registers=registers,
+        seq=base, banner=banner, registers=registers,
         cycle=f'{cycle:.4f}', stale=stale,
         acceleration=f'{acceleration:.4f}', deceleration=f'{deceleration:.4f}',
     ).encode('ascii')

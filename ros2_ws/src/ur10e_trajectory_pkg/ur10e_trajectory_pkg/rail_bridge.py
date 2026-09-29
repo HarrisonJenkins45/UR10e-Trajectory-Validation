@@ -46,7 +46,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64
+from std_msgs.msg import Bool, Float64, String
 from std_srvs.srv import Trigger
 
 from ur10e_trajectory_pkg import hardware_protocol as wire
@@ -94,6 +94,11 @@ class RailBridge(Node):
 
         self.state_pub = self.create_publisher(JointState, '/rail/joint_state', 10)
         self.homed_pub = self.create_publisher(Bool, '/rail/homed', LATCHED)
+        # 'ready', or why jog commands would not move the rail; the executor
+        # refuses to move anything unless this says 'ready' (or 'homing').
+        self.status_pub = self.create_publisher(String, '/rail/status', LATCHED)
+        self.published_status = None
+        self.create_timer(0.2, self.publish_status)
         self.create_subscription(Float64, '/rail/velocity_command', self.on_command, 10)
         self.create_service(Trigger, '~/reset_fault', self.on_reset)
         self.create_service(Trigger, '~/home', self.on_home)
@@ -175,6 +180,24 @@ class RailBridge(Node):
             message.position = [position]
             message.velocity = [velocity_m_s]
             self.state_pub.publish(message)
+
+    def status(self):
+        if not self.enable_commands:
+            return 'shadow mode (enable_commands:=false): rail commands are not sent'
+        if self.fault:
+            return f'fault: {self.fault}'
+        if self.homing_since is not None:
+            return 'homing'
+        if self.feedback() is None:
+            return 'no fresh rail feedback (UDP 5003)'
+        return 'ready'
+
+    def publish_status(self):
+        status = self.status()
+        if status != self.published_status:
+            self.published_status = status
+            self.status_pub.publish(String(data=status))
+            self.get_logger().info(f'rail bridge status: {status}')
 
     def feedback(self):
         """(position, velocity) if fresh, else None."""
