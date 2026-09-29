@@ -429,6 +429,20 @@ def rail_jog_command(velocity_units):
 # Home-found flag: -1 when set, 0 when clear. Read-only; it says the axis has
 # been referenced since power-up, not that the carriage is at the switch now.
 RAIL_HOMED_QUERY = b'PRINT BIT 16134'
+# Jog-active flag: -1 while a jog (including its deceleration after JOG OFF)
+# is in progress, 0 once it has ended. Read-only.
+RAIL_JOG_ACTIVE_QUERY = b'PRINT BIT 792'
+# Jog acceleration and deceleration, controller units/s^2. JOG OFF stops at
+# the deceleration: at 0.1 (seen on this controller before) a stop from
+# 35 units/s takes almost six minutes.
+RAIL_JOG_ACCEL_QUERY = b'PRINT P12349'
+RAIL_JOG_DECEL_QUERY = b'PRINT P12350'
+RAIL_VERSION_QUERY = b'VER'
+RAIL_DRIVE_ON = b'AXIS0 DRIVE ON'
+RAIL_DRIVE_OFF = b'AXIS0 DRIVE OFF'
+# Fast-status mapping for the UDP feedback: word 0 = actual position counts
+# (P12290), word 8 = current jog velocity (P12346). Telemetry only, no motion.
+RAIL_FSTAT_SETUP = (b'FSTAT0(48,2)', b'FSTAT1(48,58)', b'FSTAT ON')
 
 
 def rail_home_command(velocity_units, direction=-1):
@@ -440,16 +454,23 @@ def rail_home_command(velocity_units, direction=-1):
     return f'AXIS0 JOG VEL {velocity_units:05.1f}:AXIS0 JOG HOME {direction:d}'.encode('ascii')
 
 
-def parse_rail_bit_reply(reply, query=RAIL_HOMED_QUERY.decode('ascii')):
-    """True/False from a PRINT BIT reply, or None if it cannot be read.
+def parse_rail_number_reply(reply, query):
+    """The number a PRINT query answered, or None if it cannot be read.
 
     The controller echoes the command, then prints the value on its own line
-    and a prompt. Only a standalone -1 or 0 after the echo is accepted, so a
+    and a prompt. Only a standalone number after the echo is accepted, so a
     prompt such as P00> is never mistaken for the value.
     """
     index = reply.find(query)
     rest = reply[index + len(query):] if index >= 0 else reply
-    match = re.search(r'^\s*(-?\d+)\s*$', rest, flags=re.MULTILINE)
+    match = re.search(r'^\s*(-?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?)\s*$', rest, flags=re.MULTILINE)
     if match is None:
         return None
-    return {'-1': True, '0': False}.get(match.group(1))
+    value = float(match.group(1))
+    return value if math.isfinite(value) else None
+
+
+def parse_rail_bit_reply(reply, query=RAIL_HOMED_QUERY.decode('ascii')):
+    """True/False from a PRINT BIT reply (-1 set, 0 clear), or None if unreadable."""
+    value = parse_rail_number_reply(reply, query)
+    return {-1.0: True, 0.0: False}.get(value)

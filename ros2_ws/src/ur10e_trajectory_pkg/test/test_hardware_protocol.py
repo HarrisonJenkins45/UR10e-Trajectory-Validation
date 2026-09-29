@@ -112,6 +112,22 @@ def test_home_flag_reply_is_read_after_the_echo(reply, expected):
     assert wire.parse_rail_bit_reply(reply) is expected
 
 
+@pytest.mark.parametrize('reply, expected', [
+    ('PRINT P12350\r\n10\r\nSYS>', 10.0),
+    ('PRINT P12350\r\n0.1\r\nSYS>', 0.1),
+    ('P00>PRINT P12350\r\n1.5e1\r\nP00>', 15.0),
+    ('PRINT P12350\r\nSYS>', None),
+    ('PRINT P12350\r\nnan\r\nSYS>', None),
+])
+def test_parameter_reply_is_read_after_the_echo(reply, expected):
+    assert wire.parse_rail_number_reply(reply, 'PRINT P12350') == expected
+
+
+def test_jog_active_flag_uses_its_own_echo():
+    reply = 'PRINT BIT 792\r\n-1\r\nSYS>'
+    assert wire.parse_rail_bit_reply(reply, wire.RAIL_JOG_ACTIVE_QUERY.decode()) is True
+
+
 def test_controller_modes_and_target_velocity_are_decoded():
     values = np.zeros(139)
     values[7:13] = [0.1, 0, 0, 0, 0, 0.2]

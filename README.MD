@@ -466,55 +466,40 @@ to the robot, so no firewall change or sudo is needed. Only the optional
 To see whether a firewall is on, without sudo: `grep ENABLED
 /etc/ufw/ufw.conf` and `systemctl is-active ufw firewalld`.
 
-#### R2. Prepare the rail controller (host shell, Python)
+#### R2. The rail controller (automatic, checked at every launch)
 
-This is the same interactive socket helper as `TERMINAL_SOCKET.md` on
-`revision/hardware_movement`. From the host:
+`rail_bridge` prepares the rail itself each time it starts, in shadow mode
+too, and again on `~/reset_fault`, in this order:
 
-```bash
-python3
-```
+1. `AXIS0 JOG OFF`, before anything else, whatever a previous process left
+   running.
+2. The fast-status mapping: `FSTAT0(48,2)`, `FSTAT1(48,58)`, `FSTAT ON`.
+3. Fresh UDP feedback, then a **verified** stop: the encoder still for 0.3 s
+   and the jog-active bit (`PRINT BIT 792`) clear.
+4. Reads `VER`, the jog acceleration/deceleration (`P12349`/`P12350`) and the
+   home-found and jog-active flags. It refuses a deceleration that cannot
+   stop the rail from `rail_speed_limit` within 15 cm. At 0.1, the value this
+   controller once had, a stop takes minutes. Every reply must be readable.
+5. With `enable_commands:=true` only: `AXIS0 DRIVE ON`. On exit, the bridge
+   verifies the stop and sends `AXIS0 DRIVE OFF`, so the drive is only
+   energised while an enabled bridge is running.
 
-Then paste this into Python:
+The log shows each step as `preflight: ...`, then `rail bridge status:
+ready`. A failure latches `fault: preflight failed: <reason>`, including the
+controller's raw reply where one was unreadable.
 
-```python
-import socket
-s = socket.create_connection(("192.168.7.6", 5002), timeout=2)
-s.settimeout(0.5)
-
-def command(text):
-    s.sendall((text + "\r").encode("ascii"))
-    try:
-        while True:
-            data = s.recv(4096)
-            if not data:
-                break
-            print(data.decode("ascii", errors="replace"), end="", flush=True)
-    except socket.timeout:
-        pass
-
-```
-
-Then run these, one at a time:
+For troubleshooting, or to inspect the controller by hand with no bridge
+running, use the interactive helper in `TERMINAL_SOCKET.md` (branch
+`revision/hardware_movement`), for example:
 
 ```python
-command("VER")                 # controller answers: connection works
-command("PRINT P12349")        # jog acceleration: expect 10, not 0.1 (0.1 makes homing crawl)
 command("PRINT P12350")        # jog deceleration: expect 10
-command("FSTAT0(48,2)")        # UDP feedback word 0: position counts
-command("FSTAT1(48,58)")       # UDP feedback word 8: jog velocity
-command("FSTAT ON")
-command("AXIS0 DRIVE ON")      # enables the drive; the rail can now move on command
+command("PRINT BIT 792")       # jog active: -1 set, 0 clear
 command("PRINT BIT 16134")     # home-found flag: -1 homed, 0 not homed
-s.close()
-exit()
+command("AXIS0 JOG OFF")       # stop
 ```
 
-Note the exact text `PRINT BIT 16134` printed: `rail_bridge` parses that
-reply. If its format is not the command echo, then `-1` or `0` on its own
-line, then a prompt, the bridge will log "unreadable home-flag reply". In
-that case, home here with `command("AXIS0 JOG HOME -1")` and launch below
-with `home_rail:=never`.
+Close it before launching: one command client at a time.
 
 #### R3. Prepare the UR10e (teach pendant)
 
@@ -760,8 +745,9 @@ line ending Simulink used).
 
 1. Call `~/stop`, then Ctrl-C the launch. The bridges send `stopj` and
    `JOG OFF` on exit.
-2. Optionally disable the rail drive from the R2 helper with
-   `command("AXIS0 DRIVE OFF")`.
+2. The rail bridge switches the rail drive off on exit (`AXIS0 DRIVE OFF`)
+   after verifying the stop. If its log says `rail stop NOT verified at
+   exit`, use the physical stop.
 3. Put the pendant back in Local mode.
 
 #### What the system does on its own
@@ -785,6 +771,36 @@ The bridges also stop independently:
 - the rail stops at its soft limits `rail_soft_min_m`/`rail_soft_max_m`
   (moving back inside is allowed),
 - `~/stop` aborts rail homing with `JOG OFF`.
+
+
+The rail bridge treats JOG OFF as a request, never as a stop:
+
+- **Every stop is verified.** JOG OFF is resent every 0.25 s until the
+  encoder has been still for 0.3 s and the jog-active bit reads clear. If
+  that takes longer than the measured deceleration allows, a fault latches
+  and `AXIS0 DRIVE OFF` is sent.
+- **Idle means still.** With nothing commanded, encoder motion over 1 mm/s,
+  1 mm of drift, or a set jog-active bit is a fault, followed by the verified
+  stop above. That catches a jog left running, a lost JOG OFF, and another
+  client moving the rail.
+- **Jog faults.** While jogging, each of these latches a fault and stops:
+  - a gap of more than 0.25 s in commands;
+  - stale feedback;
+  - motion against the commanded direction (a wrong `rail_sign`);
+  - a jog without a confirmed home-found flag;
+  - a position that could not stop inside the soft limits.
+- **Reversals are stopped first.** A reversal stops, verified, before
+  jogging the other way.
+- **Only `plan_executor` may command the rail.** Any other publisher on
+  `/rail/velocity_command`, such as a forgotten `ros2 topic pub`, blocks
+  motion and is named in `/rail/status`.
+- **Supervision is independent of ROS.** These checks run on their own
+  thread, not in the ROS executor.
+- **Faults latch.** `/rail_bridge/reset_fault` re-runs the whole R2
+  preflight.
+
+None of this can stop the rail if the bridge process is killed, the PC loses
+power, or the network drops: keep the physical stop within reach.
 
 ## Search components
 
