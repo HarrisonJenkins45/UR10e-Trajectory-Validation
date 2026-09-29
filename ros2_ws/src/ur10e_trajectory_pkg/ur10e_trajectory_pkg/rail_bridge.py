@@ -53,7 +53,8 @@ Safety behaviour:
     are always sent: a stop cannot start motion.
   * faults latch until ~/reset_fault, which re-runs the preflight.
   * only nodes named in allowed_command_nodes may publish commands; a
-    leftover `ros2 topic pub` makes the bridge refuse to move.
+    leftover `ros2 topic pub` makes the bridge refuse to move ('any' lifts
+    the restriction).
 This node cannot stop the rail if it is killed (SIGKILL), the PC loses
 power, or the network fails: keep the physical stop within reach.
 """
@@ -141,7 +142,9 @@ class RailBridge(Node):
         self.verify_jog_bit = declare(self, 'verify_jog_bit', True)
         self.configure_fstat = declare(self, 'configure_fstat', True)
         allowed = declare(self, 'allowed_command_nodes', 'plan_executor')
-        self.allowed_command_nodes = {n.strip() for n in allowed.split(',') if n.strip()}
+        names = {name.strip() for name in allowed.split(',') if name.strip()}
+        # 'any' (or nothing) lifts the restriction.
+        self.allowed_command_nodes = set() if names == {'any'} else names
         if not self.soft_min < self.soft_max:
             raise ValueError('soft_min_m must be below soft_max_m')
         if not 0 < self.homing_speed <= self.max_speed:

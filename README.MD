@@ -619,9 +619,14 @@ rail bridge status: ready
 ```
 
 **Both status lines must say `ready` before `start` will move anything.** If
-either bridge is not ready (shadow mode, a fault, a streaming program that did
-not start, no rail feedback), `start` refuses and names the bridge and the
-reason. Any motion also halts, rail included, the moment either one stops
+either bridge is not ready, `start` refuses and names the bridge and the
+reason. Reasons include shadow mode, a fault, a streaming program that did
+not start, and no rail feedback. For the arm, `ready` also requires:
+
+- robot mode RUNNING and safety mode NORMAL,
+- speed scaling at 100%,
+- no other node publishing arm commands,
+- an arm verified still since launch. Any motion also halts, rail included, the moment either one stops
 being ready. So a faulted arm bridge can no longer leave the rail moving on
 its own. Check them any time with:
 
@@ -640,8 +645,12 @@ cause and what to check:
 | "did not start" | Remote Control mode; robot powered on with brakes released; the pendant Log tab |
 
 If the program stops on the robot (stop pressed on the pendant, a protective
-stop), the bridge latches a fault. `/ur_bridge/reset_fault` restarts the
-program on the existing RTDE connection.
+stop), the bridge latches a fault. `/ur_bridge/reset_fault` re-verifies that
+the arm is still and restarts the program on the existing RTDE connection.
+
+With commands enabled, the bridge owns the arm. Moving it from the pendant or
+by freedrive while the bridge runs latches an "arm moving without a command"
+fault. Position the arm before launching, or reset afterwards.
 
 Other transports:
 
@@ -679,9 +688,11 @@ chain breaks:
 Robot mode, safety mode, program state and speed scaling are also logged
 whenever they change. Send these lines when reporting a problem.
 
-Before the first plan run, check that the arm follows streamed velocities. With
-the executor idle, stream a slow wrist 3 turn for 4 s: 80 messages at 20 Hz,
-0.05 rad/s, 0.20 rad expected.
+Before the first plan run, check that the arm follows streamed velocities. The
+arm bridge only accepts commands from `plan_executor`, so for this check add
+`arm_command_nodes:=any` to the enabled launch, and relaunch without it for
+the demo. With the executor idle, stream a slow wrist 3 turn for 4 s: 80
+messages at 20 Hz, 0.05 rad/s, 0.20 rad expected.
 
 ```bash
 ros2 topic echo --once /ur/joint_states --field position        # note wrist_3 (last value)
@@ -691,7 +702,11 @@ ros2 topic echo --once /ur/joint_states --field position        # wrist_3 should
 
 Much less than 0.20 rad means the arm is not executing the stream at the
 commanded speed. The `arm:` and `arm diagnosis:` lines logged during the check
-say why. Undo the turn with the same command and `-0.05`.
+say why. The stream ends without a zero command, so the check ends in a
+latched `no arm command ... while moving` fault. That is the stall
+protection working: the arm is stopped. Clear it with
+`ros2 service call /ur_bridge/reset_fault std_srvs/srv/Trigger`, then undo
+the turn with the same command and `-0.05` (and reset again).
 
 Then in the second terminal:
 
@@ -766,12 +781,34 @@ The executor halts, commanding zero, on:
 
 The bridges also stop independently:
 
-- a command stream silent for 0.25 s triggers `stopj` or `JOG OFF`,
-- `speedj` expires after 0.2 s on the controller itself,
+- a command stream silent for 0.25 s mid-motion latches a fault and stops
+  the arm or rail,
+- the arm's streaming program zeroes the arm on the robot itself when no new
+  command arrives for 0.25 s, even if the PC, the process or the network
+  fails (`ur_stream:=lines`: each `speedj` expires after 0.2 s),
 - the rail stops at its soft limits `rail_soft_min_m`/`rail_soft_max_m`
   (moving back inside is allowed),
 - `~/stop` aborts rail homing with `JOG OFF`.
 
+
+The arm bridge supervises the arm the same way, from its own thread, with
+commands enabled:
+
+- **Every stop is verified.** Zero velocity is resent every 0.1 s until
+  measured and target speed are below 0.005 rad/s on every joint for 0.2 s.
+  If that takes longer than the deceleration allows, a fault latches and the
+  program is ended: `stopj`, then the dashboard server's `stop` (port 29999).
+- **Idle means still.** Any joint moving over 0.02 rad/s with nothing
+  commanded is a fault.
+- **Moving faults.** Each of these latches a fault and stops the arm:
+  - stale UR state;
+  - robot mode or safety mode leaving RUNNING/NORMAL (a protective stop);
+  - speed scaling below 100%;
+  - another command publisher;
+  - the arm delivering under half of the commanded velocity for a second,
+    so it would lag the rail.
+- **Shadow mode is passive for the arm.** It uploads, stops and supervises
+  nothing, because the robot may be running someone else's program.
 
 The rail bridge treats JOG OFF as a request, never as a stop:
 

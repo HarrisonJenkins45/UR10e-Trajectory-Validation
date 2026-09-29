@@ -50,6 +50,8 @@ ARGUMENTS = (
      'lines (a speedj program per command, as Simulink did)'),
     ('ur_host_ip', '', "this PC's address on the robot network; empty = detect"),
     ('ur_stream_port', '50010', 'TCP port the streaming program connects back to'),
+    ('arm_command_nodes', 'plan_executor',
+     'nodes ur_bridge accepts arm commands from; any = no restriction (hand-run checks)'),
     ('rail_ip', '192.168.7.6', 'Parker rail controller'),
     ('rail_offset_m', '0.0', 'planner rail coordinate of the homed controller zero'),
     ('rail_sign', '1.0', '+1 if JOG FWD moves toward +x in the URDF, else -1'),
@@ -122,6 +124,8 @@ def generate_launch_description():
                  'stream_port': config['ur_stream_port'],
                  'enable_commands': config['enable_commands'],
                  'max_joint_speed': config['arm_speed_limit'],
+                 'speed_scaling_check': config['speed_scaling_check'],
+                 'allowed_command_nodes': config['arm_command_nodes'],
              }]),
         Node(package='ur10e_trajectory_pkg', executable='rail_bridge', output='screen',
              condition=real, parameters=[{

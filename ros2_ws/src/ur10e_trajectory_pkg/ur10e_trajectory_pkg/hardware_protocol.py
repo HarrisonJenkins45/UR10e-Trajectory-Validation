@@ -23,6 +23,13 @@ import numpy as np
 # --- UR10e realtime interface (port 30003) ---------------------------------
 
 UR_REALTIME_PORT = 30003
+# Dashboard server: one text command per line, one reply line. Used to ask
+# whether the robot is in Remote Control and, as a last resort, to stop the
+# running program.
+UR_DASHBOARD_PORT = 29999
+UR_RUNNING = 7                  # robot mode
+UR_SAFETY_NORMAL = 1            # safety mode
+UR_PLAYING = 2                  # program state
 # Offsets into the packet's doubles, after the 4-byte length prefix. They are
 # the 1-based Simulink selectors [1], [32:37] and [38:43], shifted to 0-based.
 UR_TIME_INDEX = 0
@@ -244,6 +251,29 @@ def rtde_text(payload):
         payload[1 + length:].decode('ascii', 'replace').strip('\x00')
 
 
+class RTDEInputsRefused(ConnectionError):
+    """The controller refused the input recipe; `types` says why per field.
+
+    IN_USE: another RTDE client owns the register. NOT_FOUND: this
+    controller has no such register. Callers decide on `types`, never on the
+    message text, which names both.
+    """
+
+    def __init__(self, types):
+        self.types = list(types)
+        super().__init__(f'RTDE input setup refused: {self.types} (IN_USE means another '
+                         'RTDE client owns these registers; NOT_FOUND means an '
+                         'unsupported controller version)')
+
+    @property
+    def in_use(self):
+        return 'IN_USE' in self.types
+
+    @property
+    def not_found(self):
+        return 'NOT_FOUND' in self.types
+
+
 def rtde_setup_inputs(sock, on_message=None, output_hz=10.0, base=RTDE_REGISTER_BASES[0]):
     """Negotiate the protocol and the input recipe, start; return the recipe id.
 
@@ -269,9 +299,7 @@ def rtde_setup_inputs(sock, on_message=None, output_hz=10.0, base=RTDE_REGISTER_
     recipe, types = payload[0], payload[1:].decode('ascii', 'replace').split(',')
     expected = ['DOUBLE'] * 6 + ['INT32']
     if recipe == 0 or types != expected:
-        raise ConnectionError(f'RTDE input setup refused: {types} (IN_USE means another '
-                              'RTDE client owns these registers; NOT_FOUND means an '
-                              'unsupported controller version)')
+        raise RTDEInputsRefused(types)
     sock.sendall(rtde_packet(RTDE_CONTROL_PACKAGE_START))
     kind, payload = _rtde_reply(sock, RTDE_CONTROL_PACKAGE_START, on_message)
     if not payload or not payload[0]:
