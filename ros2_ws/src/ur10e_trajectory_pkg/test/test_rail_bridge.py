@@ -49,6 +49,8 @@ class FakeParker:
         self.home_switch = home_switch_mm
         self.ignore_stop = ignore_stop
         self.reversed_while_moving = False
+        # Like the rig: fast-status packets read all zero until FSTAT ON.
+        self.fstat_on = False
         self.lines = []
         self.lock = threading.Lock()
         self.running = True
@@ -97,9 +99,10 @@ class FakeParker:
                     if self.jog_active and self.target == 0 and self.velocity == 0:
                         self.jog_active = False
                 packet = bytearray(320)
-                struct.pack_into('>i', packet, 0,
-                                 int(round(self.position * wire.RAIL_COUNTS_PER_MM)))
-                struct.pack_into('>f', packet, 32, self.velocity)
+                if self.fstat_on:
+                    struct.pack_into('>i', packet, 0,
+                                     int(round(self.position * wire.RAIL_COUNTS_PER_MM)))
+                    struct.pack_into('>f', packet, 32, self.velocity)
                 subscriber = self.subscriber
             if subscriber is not None:
                 try:
@@ -184,6 +187,8 @@ class FakeParker:
                 self.target, self.homing = 0.0, False
         elif words[:3] == ['AXIS0', 'JOG', 'HOME'] and self.drive:
             self.homing, self.homed, self.jog_active = True, False, True
+        elif command == 'FSTAT ON':
+            self.fstat_on = True
         elif command == 'AXIS0 DRIVE ON':
             self.drive = True
         elif command == 'AXIS0 DRIVE OFF':
@@ -378,3 +383,23 @@ def test_shutdown_stops_the_rail_and_switches_the_drive_off():
         assert fake.velocity == 0.0 and not fake.jog_active
         assert fake.sent('AXIS0 DRIVE OFF') == 1 and not fake.drive
         assert math.isfinite(fake.position)
+
+
+def test_zero_packets_before_fstat_are_not_taken_for_position_or_motion():
+    # The rig: zeros until FSTAT ON, then the real count far from zero.
+    fake = FakeParker(position_mm=-27500.0)
+    with bridge_for(fake) as (bridge, _):
+        assert ready(bridge), bridge.status()
+        assert bridge.fault is None
+        assert bridge.feedback()[0] == pytest.approx(-27.5, abs=0.001)
+
+
+def test_a_feedback_jump_while_jogging_faults():
+    fake = FakeParker()
+    with bridge_for(fake) as (bridge, publisher):
+        assert ready(bridge)
+        stream(publisher, 0.005, 0.6)
+        with fake.lock:
+            fake.position += 500.0          # 0.5 m in one packet
+        stream(publisher, 0.005, 0.2)
+        assert bridge.fault is not None and 'jumped' in bridge.fault

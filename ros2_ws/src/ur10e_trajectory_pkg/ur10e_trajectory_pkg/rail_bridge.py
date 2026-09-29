@@ -88,6 +88,11 @@ RESUBSCRIBE_S = 5.0
 QUIET_S = 0.1
 # Encoder speed is the position change over this window.
 SPEED_WINDOW_S = 0.1
+# A position step faster than this between packets is not motion (the rail
+# tops out near 0.05 m/s) but a discontinuity in the feedback: the FSTAT
+# mapping coming on (packets read all zero before it), or homing resetting
+# the controller's position.
+JUMP_M_S = 1.0
 HISTORY_S = 0.5
 # Stop verification: still (below STOPPED_M_S) for SETTLE_S, jog bit clear.
 STOPPED_M_S = 0.0005
@@ -258,6 +263,7 @@ class RailBridge(Node):
             last_packet = time.monotonic()
             position = self.calibration.position_m(counts)
             with self.lock:
+                self.check_continuity(last_packet, position)
                 self.position, self.received_at = position, last_packet
                 self.history.append((last_packet, position))
                 while self.history and last_packet - self.history[0][0] > HISTORY_S:
@@ -270,6 +276,29 @@ class RailBridge(Node):
             message.position = [position]
             message.velocity = [speed or 0.0]
             self.publish(self.state_pub, message)
+
+    def check_continuity(self, now, position):
+        """Handle a position step no rail could make: a feedback discontinuity."""
+        if not self.history:
+            return
+        stamp, previous = self.history[-1]
+        if now <= stamp or abs(position - previous) / (now - stamp) <= JUMP_M_S:
+            return
+        jump = position - previous
+        self.history.clear()
+        self.speed = None
+        self.stationary_since = None
+        if self.state == 'jogging':
+            self.trip(f'rail feedback jumped {jump:+.4f} m between packets while jogging')
+        elif self.state == 'homing':
+            self.get_logger().info(f'rail position reset by homing ({jump:+.4f} m)')
+        else:
+            # Not motion; judge motion from the new reference on.
+            self.anchor = position
+            self.get_logger().warn(
+                f'rail feedback jumped {previous:.4f} -> {position:.4f} m between packets: '
+                'a feedback discontinuity (FSTAT mapping, controller position reset), '
+                'not motion; re-anchoring')
 
     def encoder_speed(self, now, position):
         """m/s over the last SPEED_WINDOW_S of counts, or None until there is one.
@@ -397,6 +426,12 @@ class RailBridge(Node):
                 for line, (_, reply) in self.session(wire.RAIL_FSTAT_SETUP, parse=False).items():
                     if any(word in reply.lower() for word in ERROR_WORDS):
                         raise PreflightError(f'{line.decode()} answered {reply!r}')
+                # Anything received before the mapping was on is not position:
+                # drop it, and verify the stop again on configured feedback.
+                with self.lock:
+                    self.position, self.speed, self.anchor = None, None, None
+                    self.history.clear()
+                    self.request_stop('verifying the stop on configured feedback')
             self.step('waiting for fresh rail feedback (UDP)')
             if not self.wait_for(lambda: self.feedback() is not None, 3.0):
                 raise PreflightError(

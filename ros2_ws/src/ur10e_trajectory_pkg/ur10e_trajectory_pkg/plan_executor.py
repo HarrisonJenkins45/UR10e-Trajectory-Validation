@@ -35,6 +35,15 @@ Services (std_srvs/Trigger)
   ~/move_to_home   steps 1-3 only.
   ~/stop           zero all velocities now; aborts rail homing too.
 
+Step 1 beyond auto_home_arm_limit (a robot left anywhere, e.g. at the end of
+the task or where a halted run stopped) is collision-checked first: the
+straight joint move to the home posture, rail held, is swept against the
+planner's own model (walls, floor, self-clearance, joint limits) with
+warmup.plan_warmup, the check the certified warmup passed. It runs only if
+clear; otherwise ~/start refuses with the reason. The model knows nothing of
+unmodelled lab obstacles. check_moves:=false (or a model that fails to load)
+restores the plain limit: beyond it, move the arm from the pendant.
+
 Steps 1 and 3's rail move are not certified motions, but the rail move keeps
 the arm at the screened home posture, and the modelled wall and floor are
 uniform along the rail, so it keeps the clearance that posture was screened
@@ -43,16 +52,21 @@ with. Rail homing is done in the same posture.
 Command = reference velocity + kp * (reference - measured), the correction
 clipped per joint. kp = 0 reproduces the Simulink model's pure feed-forward.
 Execution aborts, commanding zero, if feedback goes stale or tracking error
-exceeds the abort tolerances. time_scale < 1 slows every stage uniformly
-(see plan_reference). The bridges enforce their own speed caps and watchdogs
-independently of this node.
+exceeds the abort tolerances. time_scale < 1 slows the approach moves and the
+warmup uniformly (see plan_reference); task_time_scale does the same for the
+task alone (0, the default, means time_scale). The warmup's large swings need
+a small scale; the task often runs at its recorded speed (1.0). The two are
+separate stages, each checked against the speed limits at its own scale.
+The bridges enforce their own speed caps and watchdogs independently of this
+node.
 """
 
 import time
 
 import numpy as np
 import rclpy
-from rclpy.executors import ExternalShutdownException
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -97,6 +111,7 @@ class PlanExecutor(Node):
         csv_path = declare(self, 'csv', '')
         self.rate_hz = declare(self, 'rate_hz', 20.0)
         self.time_scale = declare(self, 'time_scale', 0.1)
+        self.task_time_scale = declare(self, 'task_time_scale', 0.0) or self.time_scale
         mode = self.mode = declare(self, 'mode', 'warmup')
         self.settle_s = declare(self, 'settle_s', 1.0)
         self.kp = declare(self, 'kp', 0.0)
@@ -115,6 +130,8 @@ class PlanExecutor(Node):
         self.approach_speed_fraction = declare(self, 'approach_speed_fraction', 0.8)
         self.auto_home_arm_limit = declare(self, 'auto_home_arm_limit', 0.2)
         self.home_rail = declare(self, 'home_rail', 'if_needed')
+        self.check_moves = declare(self, 'check_moves', True)
+        urdf = declare(self, 'urdf', '/root/ros2_ws/ur10e.urdf')
         self.homing_timeout = declare(self, 'homing_timeout', 250.0)
         if not plan_path:
             raise ValueError('the plan parameter (best_plan.json) is required')
@@ -130,23 +147,29 @@ class PlanExecutor(Node):
         # The same structural and rail-cap checks the RViz player applies.
         preview.playback_frames(self.plan, dt, 10.0)
         self.home = np.asarray(self.plan['home'], dtype=float)
-        self.plan_segments = plan_reference.plan_segments(
-            self.plan, dt, self.settle_s, include_task=(mode == 'full'))
+        self.warmup_segments = plan_reference.plan_segments(
+            self.plan, dt, self.settle_s, include_task=False)
         self.task_segments = plan_reference.task_only_segments(self.plan, dt, self.settle_s)
         self.task_start = np.asarray(self.plan['q_path'][0], dtype=float)
-        plan_only = plan_reference.Reference(self.plan_segments, self.time_scale)
-        self.plan_peaks = plan_only.peak_speeds(plan_rate_hz=200.0)
-        self.get_logger().info(
-            f'Loaded {plan_path}: mode {mode}, time_scale {self.time_scale}, plan '
-            f'{plan_only.duration:.1f} s wall clock; peak speeds rail '
-            f'{self.plan_peaks[0]:.4f} m/s, arm '
-            f'{np.round(self.plan_peaks[1:], 3).tolist()} rad/s; home_rail {self.home_rail}')
-        if self.over_limit(self.plan_peaks) is not None:
-            self.get_logger().warn(f'{self.over_limit(self.plan_peaks)}; ~/start will refuse')
+        warmup = plan_reference.Reference(self.warmup_segments, self.time_scale)
+        task = plan_reference.Reference(self.task_segments, self.task_time_scale)
+        self.warmup_peaks = warmup.peak_speeds(plan_rate_hz=200.0)
+        self.task_peaks = task.peak_speeds(plan_rate_hz=200.0)
+        self.get_logger().info(f'Loaded {plan_path}: mode {mode}, home_rail {self.home_rail}')
+        stages = [('warmup', warmup, self.time_scale, self.warmup_peaks)]
+        if mode == 'full':
+            stages.append(('task', task, self.task_time_scale, self.task_peaks))
+        for name, reference, scale, peaks in stages:
+            self.get_logger().info(
+                f'{name}: time_scale {scale}, {reference.duration:.1f} s wall clock; peak '
+                f'speeds rail {peaks[0]:.4f} m/s, arm {np.round(peaks[1:], 3).tolist()} rad/s')
+            if self.over_limit(peaks) is not None:
+                self.get_logger().warn(f'{name}: {self.over_limit(peaks)}; ~/start will refuse '
+                                       f'to run it')
 
-        self.measured = None
-        self.measured_velocity = None
-        self.measured_at = 0.0
+        self.validator = self.load_collision_model(urdf) if self.check_moves else None
+
+        self.measurement = None         # (pose, velocity, monotonic stamp)
         self.rail_homed = None
         self.stage = None
         self.pending = []
@@ -154,24 +177,34 @@ class PlanExecutor(Node):
         self.hold = self.home.copy()
         self.phase = 'idle'
 
-        self.create_subscription(JointState, '/joint_states', self.on_joint_states, 10)
+        # Feedback keeps arriving while a service or the tick is busy (the
+        # collision check takes about a second), so a stage that starts
+        # right after it sees fresh state. Services and the tick share the
+        # node's default group and never run concurrently with each other.
+        sensors = ReentrantCallbackGroup()
+        self.create_subscription(JointState, '/joint_states', self.on_joint_states, 10,
+                                 callback_group=sensors)
         self.device_seen = {'arm (/ur/joint_states)': None, 'rail (/rail/joint_state)': None}
         self.create_subscription(JointState, '/ur/joint_states',
-                                 lambda _: self.saw('arm (/ur/joint_states)'), 10)
+                                 lambda _: self.saw('arm (/ur/joint_states)'), 10,
+                                 callback_group=sensors)
         self.create_subscription(JointState, '/rail/joint_state',
-                                 lambda _: self.saw('rail (/rail/joint_state)'), 10)
-        self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED)
+                                 lambda _: self.saw('rail (/rail/joint_state)'), 10,
+                                 callback_group=sensors)
+        self.create_subscription(Bool, '/rail/homed', self.on_rail_homed, LATCHED,
+                                 callback_group=sensors)
         # Each bridge says 'ready', or why its device would not follow.
         self.device_status = {'arm': None, 'rail': None}
         for device in self.device_status:
             self.create_subscription(
                 String, f'/{"ur" if device == "arm" else "rail"}/status',
                 lambda message, device=device: self.device_status.__setitem__(
-                    device, message.data), LATCHED)
+                    device, message.data), LATCHED, callback_group=sensors)
         # Published by ur_bridge only while a UR program is playing; readings
         # older than a second mean no program is playing and are ignored.
         self.speed_scaling, self.speed_scaling_at = None, 0.0
-        self.create_subscription(Float64, '/ur/speed_scaling', self.on_speed_scaling, 10)
+        self.create_subscription(Float64, '/ur/speed_scaling', self.on_speed_scaling, 10,
+                                 callback_group=sensors)
         self.last_tracking_log = 0.0
         self.reference_pub = self.create_publisher(JointState, '/plan/joint_reference', 10)
         self.arm_pub = self.create_publisher(Float64MultiArray, '/ur/joint_velocity_command', 10)
@@ -189,9 +222,11 @@ class PlanExecutor(Node):
         positions = dict(zip(message.name, message.position))
         velocities = dict(zip(message.name, message.velocity))
         if all(name in positions for name in JOINT_NAMES):
-            self.measured = np.array([positions[name] for name in JOINT_NAMES])
-            self.measured_velocity = np.array([velocities.get(name, 0.0) for name in JOINT_NAMES])
-            self.measured_at = time.monotonic()
+            measured = np.array([positions[name] for name in JOINT_NAMES])
+            velocity = np.array([velocities.get(name, 0.0) for name in JOINT_NAMES])
+            # One assignment, so another thread never pairs a new pose with
+            # an old stamp (see fresh_measurement).
+            self.measurement = (measured, velocity, time.monotonic())
 
     def on_speed_scaling(self, message):
         self.speed_scaling, self.speed_scaling_at = message.data, time.monotonic()
@@ -228,9 +263,10 @@ class PlanExecutor(Node):
         return '; '.join(problems) or None
 
     def fresh_measurement(self):
-        if self.measured is None or time.monotonic() - self.measured_at > self.feedback_timeout:
+        measurement = self.measurement
+        if measurement is None or time.monotonic() - measurement[2] > self.feedback_timeout:
             return None
-        return self.measured.copy()
+        return measurement[0].copy()
 
     # --- sequence construction ----------------------------------------------
 
@@ -240,11 +276,70 @@ class PlanExecutor(Node):
             return None
         names = [JOINT_NAMES[i] for i in np.flatnonzero(over)]
         return (f'speed limits exceeded on {names} (peaks {np.round(peaks, 4).tolist()}); '
-                f'lower time_scale')
+                f'lower its time scale')
 
-    def approach_speed(self):
+    def load_collision_model(self, urdf):
+        """The planner's validator (walls, floor, self), or None if unavailable."""
+        started = time.monotonic()
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            from ur10e_trajectory_pkg import planning_runtime
+            validator = planning_runtime.make_validator(
+                urdf, get_package_share_directory('ur_description'))
+        except Exception as error:  # a missing model must not stop execution
+            self.get_logger().warn(
+                f'collision model unavailable ({error!r}): an arm more than '
+                f'{self.auto_home_arm_limit} rad from home must be moved from the pendant')
+            return None
+        self.get_logger().info(f'collision model loaded from {urdf} in '
+                               f'{time.monotonic() - started:.1f} s: arm moves to the home '
+                               'posture from any pose are checked before they run')
+        return validator
+
+    def arm_far_from_home(self, measured):
+        return bool(np.any(np.abs(measured[1:] - self.home[1:]) > self.auto_home_arm_limit))
+
+    def check_return(self, measured):
+        """None if the straight arm move to the home posture is clear, else why not.
+
+        The move checked is the one straighten/approach will play: the arm
+        joints to plan home, rail held. Its shape does not depend on timing,
+        so checking it at the planner's own speed covers any slower playback.
+        An unreferenced rail reads meaningless positions; the modelled wall
+        and floor are uniform along the rail, so it is checked at plan home.
+        """
+        if self.validator is None:
+            return 'no collision model loaded'
+        from ur10e_trajectory_pkg import warmup
+        start = measured.copy()
+        if self.rail_homed is not True:
+            start[RAIL_INDEX] = self.home[RAIL_INDEX]
+        goal = start.copy()
+        goal[1:] = self.home[1:]
+        started = time.monotonic()
+        result = warmup.plan_warmup(self.validator, start, goal)
+        if result['status'] != warmup.OK:
+            return f"{result['status']}: {result.get('reason')}"
+        self.get_logger().info(
+            f'checked the arm move to the home posture in {time.monotonic() - started:.1f} s: '
+            f"clear of the modelled wall and floor, self-clearance "
+            f"{result['min_self_clearance_m'] * 1000:.0f} mm")
+        return None
+
+    def far_refusal(self, measured, problem):
+        offset = np.abs(measured[1:] - self.home[1:])
+        worst = int(np.argmax(offset))
+        return (f'arm is {offset[worst]:.3f} rad from plan home on joint {worst + 1} and the '
+                f'move there was not run ({problem}); move it to plan home from the pendant '
+                f'(degrees {np.round(np.degrees(self.home[1:]), 2).tolist()})')
+
+    def approach_speed(self, time_scale=None):
         """Wall-clock approach speed limits expressed in plan time."""
-        return self.approach_speed_fraction * self.speed_limit / self.time_scale
+        return self.approach_speed_fraction * self.speed_limit / (time_scale or self.time_scale)
+
+    def task_stage(self, label='task'):
+        return ReferenceStage(
+            plan_reference.Reference(self.task_segments, self.task_time_scale), label)
 
     def straighten_arm(self, measured):
         goal = measured.copy()
@@ -259,23 +354,34 @@ class PlanExecutor(Node):
                 plan_reference.at_task_start(self.plan, measured, self.start_tolerance)):
             # The warmup has already been run (e.g. mode:=warmup, then
             # mode:=full): start the task from here instead of going home.
-            segments = []
-            if np.any(np.abs(measured - self.task_start) > self.start_tolerance):
-                segments.append(plan_reference.move_segment(
-                    measured, self.task_start, self.approach_speed(), minimum_duration=1.0,
-                    name='align to task start'))
-            return ReferenceStage(
-                plan_reference.Reference(segments + self.task_segments, self.time_scale),
-                'at the task start, warmup already done: running the task')
+            label = 'at the task start, warmup already done: running the task'
+            if np.all(np.abs(measured - self.task_start) <= self.start_tolerance):
+                return self.task_stage(label)
+            align = plan_reference.move_segment(
+                measured, self.task_start, self.approach_speed(self.task_time_scale),
+                minimum_duration=1.0, name='align to task start')
+            return ReferenceStage(plan_reference.Reference(
+                [align] + self.task_segments, self.task_time_scale), label)
+        arm_limit = self.auto_home_arm_limit
+        if (self.arm_far_from_home(measured)
+                and not plan_reference.at_task_start(self.plan, measured, self.start_tolerance)):
+            problem = self.check_return(measured)
+            if problem:
+                raise ValueError(self.far_refusal(measured, problem))
+            arm_limit = np.inf
         segments, description = plan_reference.approach_segments(
-            self.plan, measured, self.start_tolerance, self.auto_home_arm_limit,
+            self.plan, measured, self.start_tolerance, arm_limit,
             self.approach_speed(), self.settle_s)
         if include_plan:
-            segments = segments + self.plan_segments
-            description = f'{description}, then the plan'
-        if not segments:
-            return None
-        return ReferenceStage(plan_reference.Reference(segments, self.time_scale), description)
+            segments = segments + self.warmup_segments
+            description = f'{description}, then the warmup'
+        stages = []
+        if segments:
+            stages.append(ReferenceStage(
+                plan_reference.Reference(segments, self.time_scale), description))
+        if include_plan and self.mode == 'full':
+            stages.append(self.task_stage())
+        return stages or None
 
     def build_sequence(self, include_plan):
         """Stage builders from the current state, or a refusal message."""
@@ -284,8 +390,16 @@ class PlanExecutor(Node):
             return None, self.stale_report()
         if self.not_ready():
             return None, self.not_ready()
-        if include_plan and self.over_limit(self.plan_peaks):
-            return None, self.over_limit(self.plan_peaks)
+        if include_plan:
+            # Only the stages that will run: from the task start, the task.
+            skip_warmup = self.mode == 'full' and plan_reference.at_task_start(
+                self.plan, measured, self.start_tolerance)
+            checks = [] if skip_warmup else [('warmup', self.warmup_peaks)]
+            if self.mode == 'full':
+                checks.append(('task', self.task_peaks))
+            for name, peaks in checks:
+                if self.over_limit(peaks):
+                    return None, f'{name}: {self.over_limit(peaks)}'
         if self.rail_homed is None and self.home_rail != 'never':
             return None, ("rail home-found flag unknown; if you homed it manually, "
                           "relaunch with home_rail:=never")
@@ -296,21 +410,29 @@ class PlanExecutor(Node):
                         (self.home_rail == 'if_needed' and self.rail_homed is False))
         if needs_homing:
             arm_offset = np.abs(measured[1:] - self.home[1:])
-            if np.any(arm_offset > self.auto_home_arm_limit):
-                worst = int(np.argmax(arm_offset))
-                return None, (f'arm is {arm_offset[worst]:.3f} rad from plan home on joint '
-                              f'{worst + 1}; move it to plan home from the pendant (degrees '
-                              f'{np.round(np.degrees(self.home[1:]), 2).tolist()})')
+            if self.arm_far_from_home(measured):
+                problem = self.check_return(measured)
+                if problem:
+                    return None, self.far_refusal(measured, problem)
             if np.any(arm_offset > self.start_tolerance[1:]):
                 builders.append(self.straighten_arm)
             builders.append(lambda _: HomeRailStage())
         builders.append(lambda q: self.approach(q, include_plan))
         # Build the first stage now, so its refusal reaches the caller.
         try:
-            first = builders[0](measured)
+            first, rest = self.split(builders[0](measured))
         except ValueError as error:
             return None, str(error)
-        return [first] + builders[1:], None
+        return [first] + rest + builders[1:], None
+
+    @staticmethod
+    def split(built):
+        """A builder's result (None, a stage, or a list of stages) as the stage
+        to run next and builders that hand over the rest, in order."""
+        stages = built if isinstance(built, list) else [] if built is None else [built]
+        if not stages:
+            return None, []
+        return stages[0], [lambda _, stage=stage: stage for stage in stages[1:]]
 
     def launch(self, include_plan, label, response):
         if self.stage is not None or self.pending:
@@ -390,12 +512,13 @@ class PlanExecutor(Node):
                 self.halt(self.stale_report())
                 return
             try:
-                stage = builder(measured)
+                stage, rest = self.split(builder(measured))
             except ValueError as error:
                 self.halt(str(error))
                 return
             if stage is None:
                 continue
+            self.pending = rest + self.pending
             problem = self.activate(stage)
             if problem:
                 self.halt(problem)
@@ -520,8 +643,9 @@ class PlanExecutor(Node):
         text = (f'tracking: rail {error[RAIL_INDEX] * 1000:+.1f} mm, worst arm '
                 f'{error[arm]:+.4f} rad ({JOINT_NAMES[arm]})')
         reference = qd_ref[1:]
-        if self.measured_velocity is not None and np.dot(reference, reference) > 1e-6:
-            ratio = np.dot(self.measured_velocity[1:], reference) / np.dot(reference, reference)
+        measurement = self.measurement
+        if measurement is not None and np.dot(reference, reference) > 1e-6:
+            ratio = np.dot(measurement[1][1:], reference) / np.dot(reference, reference)
             text += f', arm speed {ratio * 100:.0f}% of reference'
         self.get_logger().info(text)
 
@@ -529,8 +653,10 @@ class PlanExecutor(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = PlanExecutor()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except Exception:

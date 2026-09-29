@@ -36,7 +36,8 @@ ARGUMENTS = (
     ('hardware', 'fake', 'fake or real'),
     ('enable_commands', 'false', 'real hardware only: actually send commands'),
     ('mode', 'warmup', "warmup (home -> task start) or full (warmup + task)"),
-    ('time_scale', '0.1', 'uniform slow-down of the plan, in (0, 1]'),
+    ('time_scale', '0.1', 'slow-down of the approach and warmup, in (0, 1]'),
+    ('task_time_scale', '0.0', 'slow-down of the task, in (0, 1]; 0 = same as time_scale'),
     ('kp', '0.0', 'position correction gain, 1/s; 0 = feed-forward only'),
     ('rate_hz', '20.0', 'command rate, as in the Simulink model'),
     ('arm_speed_limit', '0.5', 'rad/s, executor and ur_bridge'),
@@ -97,6 +98,8 @@ def generate_launch_description():
              parameters=[{
                  'plan': config['plan'], 'csv': config['csv'], 'mode': config['mode'],
                  'time_scale': config['time_scale'], 'kp': config['kp'],
+                 'task_time_scale': config['task_time_scale'],
+                 'urdf': config['urdf'],
                  'rate_hz': config['rate_hz'],
                  'arm_speed_limit': config['arm_speed_limit'],
                  'rail_speed_limit': config['rail_speed_limit'],

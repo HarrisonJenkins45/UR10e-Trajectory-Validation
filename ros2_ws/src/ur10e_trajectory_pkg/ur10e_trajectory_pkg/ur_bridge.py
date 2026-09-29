@@ -264,7 +264,7 @@ class URBridge(Node):
                             logged_length = True
                             self.get_logger().info(
                                 f'UR realtime packet: {length} bytes, '
-                                f'{(length - 4) // 8} values (the rig documented 1116)')
+                                f'{(length - 4) // 8} values')
                         with self.lock:
                             self.latest, self.latest_at = state, now
                         if not self.running:
