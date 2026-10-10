@@ -1,87 +1,55 @@
+"""RViz display for live service playback or a saved certified plan.
+
+Without plan/csv, the existing validation service may publish /joint_states.
+With both arguments, the certified-plan player publishes /joint_states and the
+Target frame instead. Do not run both motion sources at once.
+"""
+
 import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
- 
-def generate_launch_description():
-    # Path to your URDF (rail + arm, same file used everywhere else)
-    urdf_file_path = os.path.expanduser('~/ros2_ws/ur10e.urdf')
 
-    rviz_config_path = os.path.expanduser('~/ros2_ws/src/ur10e_trajectory_pkg/rviz/trajectory_view.rviz')
 
-    with open(urdf_file_path, 'r') as f:
-        robot_desc = f.read()
- 
-    return LaunchDescription([
-        # Publishes TF from whatever /joint_states says -- no physics,
-        # no gravity, no controller lag. Purely kinematic.
-        Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            name='robot_state_publisher',
-            output='screen',
-            parameters=[{'robot_description': robot_desc}]
-        ),
- 
-        # No joint_state_publisher_gui this time -- Validate_trajServer.py
-        # itself publishes /joint_states once a trajectory request succeeds,
-        # so RViz will animate exactly what it streams, with no manual input.
-
-        Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
+def plan_player(context):
+    """Add playback only when both required plan inputs are supplied."""
+    plan = LaunchConfiguration('plan').perform(context)
+    csv = LaunchConfiguration('csv').perform(context)
+    if bool(plan) != bool(csv):
+        raise ValueError('plan and csv must be supplied together')
+    if not plan:
+        return []
+    return [Node(
+        package='ur10e_trajectory_pkg',
+        executable='preview_certified_plan_rviz',
+        arguments=['--plan', plan, '--csv', csv, '--loop-full'],
         output='screen',
-        arguments=['-d', rviz_config_path]
-        ),
+    )]
 
- 
-        # RViz only draws what's explicitly published to it -- this shows
-        # the wall/floor obstacles that Gazebo would otherwise render for
-        # free from the SDF world.
-        Node(
-            package='ur10e_trajectory_pkg',
-            executable='obstacle_markers',
-            name='obstacle_marker_publisher',
-            output='screen'
-        )
+
+def generate_launch_description():
+    urdf_path = os.path.expanduser('~/ros2_ws/ur10e.urdf')
+    with open(urdf_path, encoding='utf-8') as handle:
+        robot_description = handle.read()
+    rviz_config = os.path.join(
+        get_package_share_directory('ur10e_trajectory_pkg'),
+        'rviz', 'target_preview.rviz',
+    )
+    return LaunchDescription([
+        DeclareLaunchArgument('plan', default_value='',
+                              description='Optional certified best_plan.json'),
+        DeclareLaunchArgument('csv', default_value='',
+                              description='Recording used to certify the plan'),
+        Node(package='robot_state_publisher',
+             executable='robot_state_publisher',
+             parameters=[{'robot_description': robot_description}],
+             output='screen'),
+        Node(package='rviz2', executable='rviz2',
+             arguments=['-d', rviz_config], output='screen'),
+        Node(package='ur10e_trajectory_pkg', executable='obstacle_markers',
+             output='screen'),
+        OpaqueFunction(function=plan_player),
     ])
- 
-
-# import os
-# from launch import LaunchDescription
-# from launch_ros.actions import Node
-
-# def generate_launch_description():
-#     urdf_file_path = os.path.expanduser('~/ros2_ws/ur10e.urdf')
-#     rviz_config_path = os.path.expanduser('~/ros2_ws/src/ur10e_trajectory_pkg/rviz/trajectory_view.rviz')
-
-#     with open(urdf_file_path, 'r') as f:
-#         robot_desc = f.read()
-
-#     return LaunchDescription([
-#         Node(
-#             package='robot_state_publisher',
-#             executable='robot_state_publisher',
-#             name='robot_state_publisher',
-#             output='screen',
-#             parameters=[{'robot_description': robot_desc}]
-#         ),
-
-#         # Single rviz2 node, loading your saved config (Fixed Frame='world',
-#         # RobotModel + TF + MarkerArray displays already set up).
-#         Node(
-#             package='rviz2',
-#             executable='rviz2',
-#             name='rviz2',
-#             output='screen',
-#             arguments=['-d', rviz_config_path]
-#         ),
-
-#         # Wall/floor obstacle markers
-#         Node(
-#             package='ur10e_trajectory_pkg',
-#             executable='obstacle_markers',
-#             name='obstacle_marker_publisher',
-#             output='screen'
-#         )
-#     ])

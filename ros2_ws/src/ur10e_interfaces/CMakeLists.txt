@@ -12,6 +12,7 @@ find_package(rosidl_default_generators REQUIRED)
 # Declare your service files relative to the package root
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ValidateTrajectory.srv"
+  "srv/ExecuteWarmup.srv"
 )
 
 ament_package()

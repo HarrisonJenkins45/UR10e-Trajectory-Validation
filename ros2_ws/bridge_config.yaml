@@ -1,0 +1,51 @@
+# bridge_config.yaml
+# Run with: ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=/root/ros2_ws/bridge_config.yaml
+# (or referenced automatically by VisualizeTraj.py)
+
+- ros_topic_name: "camera"
+  gz_topic_name: "camera"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "ignition.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/cmd/linear_rail_joint"
+  gz_topic_name: "/model/ur10e/joint/linear_rail_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/shoulder_pan_joint"
+  gz_topic_name: "/model/ur10e/joint/shoulder_pan_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/shoulder_lift_joint"
+  gz_topic_name: "/model/ur10e/joint/shoulder_lift_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/elbow_joint"
+  gz_topic_name: "/model/ur10e/joint/elbow_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/wrist_1_joint"
+  gz_topic_name: "/model/ur10e/joint/wrist_1_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/wrist_2_joint"
+  gz_topic_name: "/model/ur10e/joint/wrist_2_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/cmd/wrist_3_joint"
+  gz_topic_name: "/model/ur10e/joint/wrist_3_joint/cmd_pos"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "ignition.msgs.Double"
+  direction: ROS_TO_GZ
