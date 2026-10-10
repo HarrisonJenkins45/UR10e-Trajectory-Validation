@@ -13,7 +13,8 @@ infeasibility, or finding the longest possible section.
   inertial frame I. Required CSV columns are `timestamp`, `q_I_G_x`,
   `q_I_G_y`, `q_I_G_z`, and `q_I_G_w`. SISIFOS translation is ignored. The
   target is placed at `[1.0, 0.5, 0.5]` metres in `rail_base_link`. Placement
-  optimization and camera-relative motion are not part of this branch.
+  optimization and camera-relative motion are not implemented; camera-relative
+  work is on the `future/camera-relative-translation` branch.
 - `trajectory_input.py` is the single CSV reader and input validator. Search,
   target construction and RViz use its timestamps, orientations,
   slices and source digest. Separate planning processes may reopen the file
@@ -79,7 +80,6 @@ Clone the repository with the pinned Universal Robots description package:
 git clone --recurse-submodules \
     git@github.com:HarrisonJenkins45/UR10e-Trajectory-Validation.git
 cd UR10e-Trajectory-Validation
-git switch revision/ik_foundations
 git submodule update --init --recursive
 ```
 
@@ -576,8 +576,8 @@ ready`. A failure latches `fault: preflight failed: <reason>`, including the
 controller's raw reply where one was unreadable.
 
 For troubleshooting, or to inspect the controller by hand with no bridge
-running, use the interactive helper in `TERMINAL_SOCKET.md` (branch
-`revision/hardware_movement`), for example:
+running, use the interactive helper in [TERMINAL_SOCKET.md](TERMINAL_SOCKET.md),
+for example:
 
 ```python
 command("PRINT P12350")        # jog deceleration: expect 10
@@ -971,17 +971,16 @@ The prior frame conventions and translation experiments remain in Git history
 and on their own branches; they are not implemented by the current
 orientation-only planner.
 
-
-
-## Commanding the arm from a ros node (wrist package)
-
-These two one-off tests predate the plan executor. To run a plan on the
-hardware, use [Executing a plan on hardware through ROS](#executing-a-plan-on-hardware-through-ros-demo).
-
-ros2 run wrist_motion_pkg wrist server
-ros2 service call /trigger_wrist_motion std_srvs/srv/Trigger "{}"
-
 ## Commanding the rail from python
-python3 railTest_modified.py ros2_ws/plans/wallmount_20260929/best_plan.json
 
+This one-off test predates the plan executor. It moves the rail through the
+first 100 rail waypoints of a plan, with no arm and none of the executor's
+checks. To run a plan on the hardware, use
+[Executing a plan on hardware through ROS](#executing-a-plan-on-hardware-through-ros-demo).
 
+From the repository root:
+
+```bash
+python3 ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/railTest_modified.py \
+    ros2_ws/plans/wallmount_20260929/best_plan.json
+```
