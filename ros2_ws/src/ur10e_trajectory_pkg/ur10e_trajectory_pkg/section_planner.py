@@ -17,7 +17,7 @@ supplies start samples, section lengths or precomputed candidates or graphs.
              search that finds nothing reports exactly that, never that the
              trajectory is infeasible
 
-Scope: orientation only, nominal placement, the provisional identity T_EG.
+Scope: orientation only, nominal placement, the provisional T_EG.
 Translation, scaling, camera-relative motion and mount optimisation are out
 of scope. Acceleration, jerk and rail limits include provisional and assumed
 values, so nothing here certifies hardware.

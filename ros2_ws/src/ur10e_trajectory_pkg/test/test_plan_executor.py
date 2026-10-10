@@ -1,6 +1,6 @@
 """plan_executor stage construction: warmup and task at their own time scales.
 
-Uses the rig's committed plan (plans/wallmount_20260929) and the packaged
+Uses the committed payload plan (plans/payload_20261010) and the packaged
 recording it was certified on.
 """
 
@@ -16,7 +16,7 @@ rclpy = pytest.importorskip('rclpy')
 from ur10e_trajectory_pkg import plan_executor  # noqa: E402
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-PLAN = WORKSPACE / 'plans' / 'wallmount_20260929' / 'best_plan.json'
+PLAN = WORKSPACE / 'plans' / 'payload_20261010' / 'best_plan.json'
 CSV = WORKSPACE / 'src' / 'ur10e_trajectory_pkg' / 'ur10e_trajectory_pkg' / 'camera_traj.csv'
 URDF = WORKSPACE / 'ur10e.urdf'
 
@@ -32,7 +32,13 @@ def executor_at(where, **params):
     for name, value in params.items():
         args += ['-p', f'{name}:={value}']
     rclpy.init(args=args)
-    node = plan_executor.PlanExecutor()
+    try:
+        node = plan_executor.PlanExecutor()
+    except BaseException:
+        # A node that fails to construct must not leave the context up: every
+        # later rclpy.init in this process would fail on it instead.
+        rclpy.shutdown()
+        raise
     try:
         pose = {'home': node.home, 'task start': node.task_start,
                 'task end': np.asarray(node.plan['q_path'][-1], dtype=float)}[where]

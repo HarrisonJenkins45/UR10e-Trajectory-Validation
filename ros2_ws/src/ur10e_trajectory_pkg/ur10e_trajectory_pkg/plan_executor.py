@@ -45,9 +45,11 @@ unmodelled lab obstacles. check_moves:=false (or a model that fails to load)
 restores the plain limit: beyond it, move the arm from the pendant.
 
 Steps 1 and 3's rail move are not certified motions, but the rail move keeps
-the arm at the screened home posture, and the modelled wall and floor are
-uniform along the rail, so it keeps the clearance that posture was screened
-with. Rail homing is done in the same posture.
+the arm at the home posture, and the planner screens that posture carried over
+the rail's 0-3 m travel (home_pose.recheck_home's rail sweep), so it stays
+clear of the mounting wall, the floor and both end walls anywhere in it. Rail
+homing is done in the same posture; it parks the carriage at the switch, which
+on the rig (rail_offset_m -0.05) lies just outside the swept range.
 
 Command = reference velocity + kp * (reference - measured), the correction
 clipped per joint. kp = 0 reproduces the Simulink model's pure feed-forward.
@@ -305,8 +307,11 @@ class PlanExecutor(Node):
         The move checked is the one straighten/approach will play: the arm
         joints to plan home, rail held. Its shape does not depend on timing,
         so checking it at the planner's own speed covers any slower playback.
-        An unreferenced rail reads meaningless positions; the modelled wall
-        and floor are uniform along the rail, so it is checked at plan home.
+        An unreferenced rail reads meaningless positions, so it is checked at
+        plan home. That covers the mounting wall and floor, which run parallel
+        to the rail, but not the end walls: with the rail unhomed and the
+        carriage near either end, the move is checked against the wrong
+        carriage position, and only the pendant view covers it.
         """
         if self.validator is None:
             return 'no collision model loaded'
@@ -322,7 +327,7 @@ class PlanExecutor(Node):
             return f"{result['status']}: {result.get('reason')}"
         self.get_logger().info(
             f'checked the arm move to the home posture in {time.monotonic() - started:.1f} s: '
-            f"clear of the modelled wall and floor, self-clearance "
+            f"clear of the modelled walls and floor, self-clearance "
             f"{result['min_self_clearance_m'] * 1000:.0f} mm")
         return None
 

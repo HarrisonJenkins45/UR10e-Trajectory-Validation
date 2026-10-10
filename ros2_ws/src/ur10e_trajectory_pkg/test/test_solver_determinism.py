@@ -27,7 +27,7 @@ from ur10e_trajectory_pkg.pose_metrics import (
     IK_POSITION_TOL_M,
 )
 
-from test_geometry_invariants import _urdf_path
+from test_geometry_invariants import _urdf_path, bare_flange_urdf
 
 REPEATS = 5
 
@@ -38,9 +38,11 @@ UNREACHABLE_X = 8.00
 
 
 @pytest.fixture(scope='module')
-def validator():
+def validator(tmp_path_factory):
+    # Recorded on a bare flange: the payload would collide first and mask
+    # the solver-branch behaviour these regressions pin.
     return TrajectoryValidator(
-        _urdf_path(),
+        bare_flange_urdf(tmp_path_factory.mktemp('bare')),
         mesh_base_path=get_package_share_directory('ur_description'),
     )
 

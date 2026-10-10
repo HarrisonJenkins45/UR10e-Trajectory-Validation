@@ -22,16 +22,20 @@ from ament_index_python.packages import get_package_share_directory
 from ur10e_trajectory_pkg import continuous_validator as cv
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
-from test_geometry_invariants import _urdf_path
+from test_geometry_invariants import bare_flange_urdf
 
 DT = 0.1
 LIMITS = np.array([1.0] + [2.0] * 6)
 
 
 @pytest.fixture(scope='module')
-def validator():
+def validator(tmp_path_factory):
+    # Synthetic paths around (0, -135, 90, -90, 45, 0), where the payload
+    # meets the floor: these test the algorithms, so they run on the bare
+    # flange. The payload's own collisions are tested in geometry_invariants.
     return TrajectoryValidator(
-        _urdf_path(), mesh_base_path=get_package_share_directory('ur_description')
+        bare_flange_urdf(tmp_path_factory.mktemp('bare')),
+        mesh_base_path=get_package_share_directory('ur_description')
     )
 
 
@@ -497,7 +501,7 @@ def test_a_task_that_starts_moving_reports_a_large_entry_state(validator, smooth
 
 def _warmup(validator):
     from ur10e_trajectory_pkg import warmup
-    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
     start = home + np.concatenate(([0.3], np.deg2rad([15.0, -10.0, 10.0, 5.0, 20.0, 30.0])))
     return warmup.plan_warmup(validator, home, start, rate_hz=200.0)
 

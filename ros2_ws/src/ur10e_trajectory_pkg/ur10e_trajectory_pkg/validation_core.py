@@ -38,6 +38,17 @@ from ur10e_trajectory_pkg.pose_metrics import (
 from scipy.interpolate import PchipInterpolator
 import matplotlib.pyplot as plt
 
+# The rig's end walls stand 2 ft (0.6096 m) beyond each end of the 3 m rail,
+# square to it. Their inner faces sit exactly on these planes; each wall's
+# thickness lies outside the room, so the gap is never overstated.
+RAIL_END_WALL_GAP_M = 0.6096
+SWITCH_END_WALL_X = 0.0 - RAIL_END_WALL_GAP_M
+FAR_END_WALL_X = 3.0 + RAIL_END_WALL_GAP_M
+# The switch-end wall is only 2 ft (0.6096 m) high, measured up from the
+# floor (Y = -1.0), so its top is 0.390 m below the rail. The arm can reach
+# over it; the far-end wall is full height.
+SWITCH_END_WALL_HEIGHT_M = 0.6096
+
 EE_LINK = "tool0"
 
 # RAIL_VEL_SAFETY_CAP is defined in motion_limits: a deliberate derate, and
@@ -394,6 +405,13 @@ class TrajectoryValidator:
         #   from the floor up to 1.5 m above the rail.
         # Floor: thin in Y, 1 m below the rail at Y = -1.0, 3 m out from the
         #   wall. Within the arm's 1.3 m reach, so it is a real constraint.
+        # End walls: thin in X, 2 ft beyond each rail end (SWITCH_END_WALL_X,
+        #   FAR_END_WALL_X), from the mounting wall's centre plane (Z = -0.05)
+        #   out to the floor's edge. The far-end wall is as tall as the
+        #   mounting wall; the switch-end wall is SWITCH_END_WALL_HEIGHT_M
+        #   high from the floor, and the arm can pass over it. The arm
+        #   overhangs each rail end by up to its 1.3 m reach, so both are
+        #   within reach from the outer ~0.7 m of travel.
         # The earlier model read this frame as a floor-mounted rail: its
         # "floor" at Z = -0.05 was really this wall, and its "wall" at
         # Y = +1.0 was a ceiling 1 m above the rail that the rig does not have.
@@ -420,6 +438,32 @@ class TrajectoryValidator:
             baseCollisionShapeIndex=floor_shape,
             basePosition=[1.5, -1.0, 1.5],
             physicsClientId=self._pb_client,
+        )
+        switch_end_half_height = SWITCH_END_WALL_HEIGHT_M / 2.0
+        switch_end_shape = pb.createCollisionShape(
+            pb.GEOM_BOX, halfExtents=[0.025, switch_end_half_height, 1.525],
+            physicsClientId=self._pb_client
+        )
+        far_end_shape = pb.createCollisionShape(
+            pb.GEOM_BOX, halfExtents=[0.025, 1.25, 1.525], physicsClientId=self._pb_client
+        )
+        self.switch_end_wall_id = pb.createMultiBody(
+            baseCollisionShapeIndex=switch_end_shape,
+            basePosition=[SWITCH_END_WALL_X - 0.025, -1.0 + switch_end_half_height, 1.475],
+            physicsClientId=self._pb_client,
+        )
+        self.far_end_wall_id = pb.createMultiBody(
+            baseCollisionShapeIndex=far_end_shape,
+            basePosition=[FAR_END_WALL_X + 0.025, 0.25, 1.475],
+            physicsClientId=self._pb_client,
+        )
+        # Every environment body, labelled. Collision and clearance checks
+        # iterate this, so a body added here is checked everywhere.
+        self.env_bodies = (
+            (self.floor_id, 'floor'),
+            (self.wall_id, 'wall'),
+            (self.switch_end_wall_id, 'switch-end wall'),
+            (self.far_end_wall_id, 'far-end wall'),
         )
 
         self._rail_link_names = {'rail_base_link', 'rail_carriage_link'}
@@ -875,7 +919,7 @@ class TrajectoryValidator:
         """q_full: full joint vector in the same [rail, arm...] order as
         everywhere else in this file. Drives the pybullet model to this
         configuration and reports True on the first collision found --
-        self-collision between non-adjacent links, or robot-vs-floor/wall,
+        self-collision between non-adjacent links, or robot-vs-env_bodies,
         excluding the rail (which is expected to sit at/through the floor
         plane)."""
         q_full = np.asarray(q_full, dtype=np.float64)
@@ -902,8 +946,8 @@ class TrajectoryValidator:
                 print(f"Self-collision: '{name_a}' vs '{name_b}'")
             return True
 
-        # 2. Environment collisions (floor + wall), excluding the rail links.
-        for env_id, env_label in ((self.floor_id, 'floor'), (self.wall_id, 'wall')):
+        # 2. Environment collisions (floor and walls), excluding the rail links.
+        for env_id, env_label in self.env_bodies:
             env_contacts = pb.getContactPoints(
                 bodyA=self.robot_id, bodyB=env_id, physicsClientId=self._pb_client
             )

@@ -113,7 +113,7 @@ def collision_distance(validator, configuration, max_distance=0.5):
                            physicsClientId=validator._pb_client)
     arm_links = arm_link_indices(validator)
     closest = max_distance
-    for body in (validator.floor_id, validator.wall_id):
+    for body, _ in validator.env_bodies:
         for contact in pb.getClosestPoints(
                 bodyA=validator.robot_id, bodyB=body, distance=max_distance,
                 physicsClientId=validator._pb_client):
@@ -121,6 +121,38 @@ def collision_distance(validator, configuration, max_distance=0.5):
                 continue
             closest = min(closest, float(contact[8]))
     return closest
+
+
+# Rail spacing when a posture is carried along the rail. Clearance to a fixed
+# body changes no faster than the carriage moves, so the true minimum is
+# within half a step of the sampled one.
+RAIL_SWEEP_STEP_M = 0.01
+
+
+def rail_sweep_clearance(validator, configuration, step_m=RAIL_SWEEP_STEP_M):
+    """Least environment clearance of an arm posture carried over the whole rail.
+
+    The executor homes the rail, and moves it to plan home, with the arm held
+    at the home posture. The mounting wall and floor run parallel to the rail,
+    so they see the same clearance anywhere; the end walls do not, so the
+    posture's clearance at its own rail position says nothing about the ends
+    of travel. Returns the least clearance, the rail position where it
+    occurs, and every sampled rail position in collision.
+    """
+    lower, upper = validator._rail_limits
+    rails = np.linspace(lower, upper, int(np.ceil((upper - lower) / step_m)) + 1)
+    posture = np.array(configuration, dtype=float)
+    worst, worst_rail, colliding = np.inf, None, []
+    for rail in rails:
+        posture[0] = rail
+        clearance = collision_distance(validator, posture)
+        if clearance < worst:
+            worst, worst_rail = clearance, float(rail)
+        if validator.check_all_collisions(posture):
+            colliding.append(float(rail))
+    return {'min_clearance_m': float(worst), 'at_rail_m': worst_rail,
+            'colliding_rails_m': colliding, 'step_m': float(rails[1] - rails[0]),
+            'samples': len(rails)}
 
 
 # Singularity robustness: the arm must stay within the task's conditioning gate
