@@ -6,6 +6,7 @@ planner and display consumer uses the same targets.
 """
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from ur10e_trajectory_pkg import frames, trajectory_input
 
@@ -28,12 +29,21 @@ DEFAULT_NUM_WAYPOINTS = 500
 # which keeps the target's motion what the recording says whatever the mount.
 # (The robot-side frames module calls the tool pose T_RG; that G is tool0.)
 #
-# PROVISIONAL identity. The flange-to-mock-up interface is not specified, and
-# the absence of a transform in this repository does not make the rotation a
-# free variable: it is pinned here, not optimised, and recorded as provisional
-# in every artifact until the hardware interface fixes it. Not named T_GA:
-# SISIFOS uses A for the target's centre of mass.
-PROVISIONAL_T_EG = np.eye(4)
+# G's origin is the centre of rotation: the point held at the placement while
+# the target tumbles about it. It is the geometric centre of the payload's
+# main 6 x 6 x 18 in body, which runs from 12 in (the end of the 1 ft boom)
+# to 30 in out along tool0's +z: MOUNT_OFFSET_M, 21 in. The flange orbits it
+# at that radius. G's axes are tool0's: no rotation. The geometric centre,
+# not a measured centre of mass: the wings at the body's top move the real
+# one toward them.
+#
+# PROVISIONAL. The flange-to-mock-up interface is not specified, and the
+# absence of a measured transform does not make the rotation a free variable:
+# it is pinned here, not optimised, and recorded as provisional in every
+# artifact until the hardware interface fixes it. Not named T_GA: SISIFOS
+# uses A for the target's centre of mass.
+MOUNT_OFFSET_M = 21 * 0.0254
+PROVISIONAL_T_EG = frames.make_transform(translation=[0.0, 0.0, MOUNT_OFFSET_M])
 MOUNT_TRANSFORM_NAME = 'T_EG'
 MOUNT_TRANSFORM_DIRECTION = ('pose of the target body frame G in the robot tool '
                              'frame E (tool0): p^E = T_EG p^G; the tool is '
@@ -150,14 +160,76 @@ def apply_spin_up(motion, recorded_times, duration):
     return warped, output_times, record
 
 
-def nominal_placement(first_quaternion):
-    """The fixed placement the old pipeline implied, stated outright.
+# The recording's attitude is relative to its inertial frame I, and nothing
+# ties I to the lab: a fixed rotation of the whole recording reproduces the
+# same tumble facing another way. The legacy placement laid I's axes on the
+# rail frame's, which pointed the payload at the mounting wall for a third of
+# the packaged recording. Instead the boom, G's +z, is turned to stay as
+# close to straight out of the wall (+z of the rail frame) as the tumble
+# allows: the axis of the narrowest cone holding every recorded boom
+# direction becomes the wall's outward normal.
+OUTWARD_AXIS_R = np.array([0.0, 0.0, 1.0])
+# Candidate cone axes: a Fibonacci sphere, so the choice is deterministic.
+CONE_AXIS_CANDIDATES = 20000
 
-    Rotation is taken from the trajectory's first sample so that
-    T_RG(0) @ dT(t) reproduces the original absolute orientations, which the
-    old code passed through unchanged under an identity calibration.
+_lab_orientations = {}
+
+
+def _fibonacci_sphere(count):
+    k = np.arange(count) + 0.5
+    polar = np.arccos(1.0 - 2.0 * k / count)
+    azimuth = np.pi * (1.0 + 5.0 ** 0.5) * k
+    return np.column_stack((np.cos(azimuth) * np.sin(polar),
+                            np.sin(azimuth) * np.sin(polar), np.cos(polar)))
+
+
+def _rotation_onto(source, target):
+    """The smallest rotation taking unit vector source onto unit vector target."""
+    axis = np.cross(source, target)
+    sine, cosine = np.linalg.norm(axis), float(np.dot(source, target))
+    if sine < 1e-12:
+        if cosine > 0:
+            return np.eye(3)
+        # Opposite: half a turn about any axis perpendicular to source.
+        helper = np.eye(3)[int(np.argmin(np.abs(source)))]
+        axis = np.cross(source, helper)
+        return Rotation.from_rotvec(np.pi * axis / np.linalg.norm(axis)).as_matrix()
+    return Rotation.from_rotvec(axis / sine * np.arctan2(sine, cosine)).as_matrix()
+
+
+def lab_orientation(trajectory):
+    """R_RI: the rail-frame orientation of the recording's inertial frame.
+
+    From the WHOLE recording, never a slice, so every slice of one recording
+    shares it and a slice's targets stay exactly the full recording's targets
+    over the same samples. The cone axis d maximises the least d . z_G over
+    every recorded boom direction z_G (in I); R_RI is the smallest rotation
+    taking d onto the wall's outward normal. Cached per recording digest.
     """
-    return frames.make_transform(rotation=first_quaternion,
+    key = trajectory.sha256
+    if key not in _lab_orientations:
+        booms = Rotation.from_quat(trajectory.orientations_xyzw).as_matrix()[:, :, 2]
+        candidates = _fibonacci_sphere(CONE_AXIS_CANDIDATES)
+        least = np.full(len(candidates), np.inf)
+        for chunk in np.array_split(booms, max(1, len(booms) // 500)):
+            least = np.minimum(least, (candidates @ chunk.T).min(axis=1))
+        axis = candidates[int(np.argmax(least))]
+        _lab_orientations[key] = _rotation_onto(axis, OUTWARD_AXIS_R)
+    return _lab_orientations[key].copy()
+
+
+def nominal_placement(first_quaternion, lab_from_inertial=None):
+    """The start pose T_RG(t0): the fixed position, and the recording turned.
+
+    The rotation is R_RI @ R_IG(t0), so T_RG(0) @ dT(t) gives
+    R_RG(t) = R_RI @ R_IG(t): the recorded attitudes, turned by the fixed
+    lab orientation R_RI (lab_orientation). With R_RI the identity, the
+    default, this is the legacy placement that laid I's axes on the rail's.
+    """
+    rotation = Rotation.from_quat(first_quaternion).as_matrix()
+    if lab_from_inertial is not None:
+        rotation = np.asarray(lab_from_inertial, dtype=float) @ rotation
+    return frames.make_transform(rotation=rotation,
                                  translation=LEGACY_PLACEMENT_POSITION_RG)
 
 
@@ -207,7 +279,8 @@ def build_targets(trajectory, num_waypoints=DEFAULT_NUM_WAYPOINTS,
     if spin_up_s is not None:
         motion, sim_time, spin_up = apply_spin_up(motion, sim_time, spin_up_s)
 
-    placement_RG = nominal_placement(quaternions_I[0])
+    lab_from_inertial = lab_orientation(trajectory)
+    placement_RG = nominal_placement(quaternions_I[0], lab_from_inertial)
     # Orientation-only contract: position is fixed and no SISIFOS translation
     # or spatial scaling participates in the commanded motion.
     poses_RG = frames.place_relative_motion(motion, placement_RG)
@@ -233,6 +306,7 @@ def build_targets(trajectory, num_waypoints=DEFAULT_NUM_WAYPOINTS,
         'recorded_duration_s': float(recorded_time[-1] - recorded_time[0]),
         'mount': mount_record(),
         'placement_RG': np.asarray(placement_RG).tolist(),
+        'lab_orientation_RI': lab_from_inertial.tolist(),
         'target_frame': frames.TARGET_FRAME,
         'spin_up': spin_up,
         'num_samples': int(len(sim_time)),

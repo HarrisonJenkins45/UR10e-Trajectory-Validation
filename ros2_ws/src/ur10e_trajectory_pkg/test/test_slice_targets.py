@@ -83,8 +83,33 @@ def test_the_slice_and_its_mount_are_recorded(packaged):
     assert metadata['recorded_duration_s'] == pytest.approx(60.0)
     mount = metadata['mount']
     assert mount['name'] == 'T_EG' and mount['provisional'] is True
-    assert mount['transform'] == np.eye(4).tolist()
+    assert mount['transform'] == targets.PROVISIONAL_T_EG.tolist()
     assert 'tool frame E' in mount['direction'] and 'target body frame G' in mount['direction']
+
+
+def test_the_centre_of_rotation_is_the_body_centre_along_tool_z():
+    """T_EG is a pure 21 in (0.5334 m) translation along tool0's +z: the
+    centre of the 18 in body that starts at the end of the 1 ft boom."""
+    expected = np.eye(4)
+    expected[2, 3] = 0.5334
+    assert targets.MOUNT_OFFSET_M == pytest.approx(0.5334, abs=1e-12)
+    np.testing.assert_allclose(targets.PROVISIONAL_T_EG, expected, atol=1e-12)
+
+
+def test_the_centre_of_rotation_holds_still_while_the_flange_orbits_it(packaged):
+    """The placement point is the centre of rotation, not the flange.
+
+    Each tool target, carried 21 in out along its own z, lands on the
+    placement exactly; the flange itself sweeps a sphere of that radius
+    about it as the target tumbles.
+    """
+    x, y, z, quaternions, _ = targets.build_trajectory_targets(packaged, 200,
+                                                               start_index=300)
+    tool = np.column_stack((x, y, z))
+    centre = tool + targets.MOUNT_OFFSET_M * _rotations(quaternions)[:, :, 2]
+    assert np.allclose(centre, targets.LEGACY_PLACEMENT_POSITION_RG, atol=1e-9)
+    assert np.allclose(np.linalg.norm(tool - centre, axis=1), 0.5334, atol=1e-9)
+    assert np.ptp(tool, axis=0).max() > 0.05, 'the flange no longer moves'
 
 
 def test_a_slice_past_the_end_of_the_recording_is_refused(packaged):
@@ -149,3 +174,35 @@ def test_a_complete_graph_returns_its_shortest_path_as_the_best_partial_one():
 def test_no_start_state_has_no_partial_path():
     assert graph_planner.best_partial_path([{}]) is None
     assert graph_planner.best_partial_path(None) is None
+
+
+def test_the_recording_is_turned_so_the_boom_points_out_of_the_wall(packaged):
+    """The lab orientation keeps the boom (G's +z) on the room side throughout.
+
+    The legacy placement laid the recording's inertial axes on the rail's,
+    and the boom pointed into the mounting wall for a third of the packaged
+    recording. Turned by R_RI, every recorded boom direction has a positive
+    component out of the wall: the tumble cones about the outward normal.
+    """
+    source = trajectory_input.load(packaged)
+    lab = targets.lab_orientation(source)
+    np.testing.assert_allclose(lab @ lab.T, np.eye(3), atol=1e-12)
+    assert np.linalg.det(lab) == pytest.approx(1.0, abs=1e-12)
+    booms = lab @ _rotations(source.orientations_xyzw)[:, :, 2].T
+    assert booms[2].min() > 0.4, 'a recorded boom direction points at the wall'
+
+
+def test_each_target_is_the_recorded_attitude_turned_by_the_lab_orientation(packaged):
+    source = trajectory_input.load(packaged)
+    lab = targets.lab_orientation(source)
+    _, _, _, quaternions, _ = targets.build_targets(source, 50, start_index=700)
+    turned = lab @ _rotations(source.orientations_xyzw[700:750])
+    tool = _rotations(quaternions)                # T_EG has no rotation: tool = G
+    np.testing.assert_allclose(tool, turned, atol=1e-9)
+
+
+def test_the_lab_orientation_is_deterministic(packaged):
+    source = trajectory_input.load(packaged)
+    first = targets.lab_orientation(source)
+    targets._lab_orientations.clear()
+    assert np.array_equal(targets.lab_orientation(source), first)

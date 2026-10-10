@@ -165,14 +165,16 @@ def approach_segments(plan, measured, tolerance, arm_limit, max_speed, settle_s=
                      backwards (e.g. after a warmup-only run), so
                      demonstrations repeat. The rail tracks open-loop in
                      0.1 mm/s steps and can end a few cm off; correcting it
-                     with the arm held keeps the arm's clearance, because the
-                     mounting wall and floor both run parallel to the rail.
+                     with the arm held keeps the arm's clearance to the
+                     mounting wall and floor, which run parallel to the rail.
+                     The end walls do not: the correction is uncertified
+                     against them, bounded by rail_realign_limit.
       arm near home  (every arm joint within arm_limit): first straighten
                      the arm with the rail held, then move the rail with the
-                     arm held at home. The modelled wall and floor are uniform
-                     along the rail's travel, so translating the home posture
-                     keeps the clearance it was screened with; the small arm
-                     move is uncertified and should be watched.
+                     arm held at home. The home posture is screened carried
+                     over the whole rail travel, end walls included
+                     (home_pose's rail sweep), so translating it stays clear;
+                     the small arm move is uncertified and should be watched.
       otherwise      refuse: a large uncertified arm sweep is the operator's
                      call, made from the pendant.
 

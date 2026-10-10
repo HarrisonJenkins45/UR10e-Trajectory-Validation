@@ -12,9 +12,14 @@ infeasibility, or finding the longest possible section.
 - Input motion is `q_I_G` only: the attitude of target body frame G in the
   inertial frame I. Required CSV columns are `timestamp`, `q_I_G_x`,
   `q_I_G_y`, `q_I_G_z`, and `q_I_G_w`. SISIFOS translation is ignored. The
-  target is placed at `[1.0, 0.5, 0.5]` metres in `rail_base_link`. Placement
-  optimization and camera-relative motion are not implemented; camera-relative
-  work is on the `future/camera-relative-translation` branch.
+  target's centre of rotation is placed at `[1.0, 0.5, 0.5]` metres in
+  `rail_base_link`. The recording is turned as a whole so the payload's boom
+  stays as close to straight out of the mounting wall as the tumble allows
+  (`target_builder.lab_orientation`): the tumble is unchanged, only the
+  direction it faces in the lab. For the packaged recording the boom stays
+  within 62° of the wall's outward normal. Placement optimization and
+  camera-relative motion are not implemented; camera-relative work is on the
+  `future/camera-relative-translation` branch.
 - `trajectory_input.py` is the single CSV reader and input validator. Search,
   target construction and RViz use its timestamps, orientations,
   slices and source digest. Separate planning processes may reopen the file
@@ -33,9 +38,14 @@ infeasibility, or finding the longest possible section.
   RViz displays at 30 Hz. Collision, clearance and tracking checks also use
   finite sampling. Certification is relative to these numerical checks,
   not an analytic proof at every instant.
-- The mount transform `T_EG` (target body G in robot tool frame E) is a
-  **provisional identity**. Every exported plan records it. It must be
-  established for the real mock-up before hardware use.
+- The mount transform `T_EG` (target body G in robot tool frame E) puts the
+  **centre of rotation at the geometric centre of the payload's 6 × 6 × 18 in
+  body, 21 in (0.5334 m) out from `tool0` along its +z**, with G's axes
+  parallel to `tool0`'s (`target_builder.MOUNT_OFFSET_M`). The placement point
+  is that centre: the body tumbles about it while the flange orbits it at
+  21 in. It is the geometric centre, not a measured centre of mass. `T_EG` is **provisional**. Every exported plan
+  records it, and a plan built with a different `T_EG` is refused. It must
+  be established for the real mock-up before hardware use.
 - A passing plan includes a home-to-start warmup, spin-up from rest, a lifted
   seven-joint task path, refinement, and continuous command validation for
   tracking, joint limits, velocity, collision and self-clearance. The rail
@@ -101,7 +111,11 @@ cp ros2_ws/examples/home_choice.json ros2_ws/input/home_choice.json
 ```
 
 The example home is rail = 1.5 m and arm angles =
-`[0, -75, 100, -115, -80, 0]` degrees, stored in radians in the JSON.
+`[0, -75, 100, -115, 100, 90]` degrees, stored in radians in the JSON. Wrist
+2 is at +100 so the payload points out of the mounting wall; the earlier
+home, wrist 2 at -80, drives it 0.25 m into the wall. Wrist 3 is at 90 so the
+wings lie across the rail; along it, homing toward rail 0 swings a wing into
+the switch-end wall.
 It is a simulation input, re-screened by the planner on each solve.
 For another dataset or robot setup, replace the two input files with your own
 recording and configured home; no home-selection tool is required for this demo.
@@ -414,8 +428,18 @@ The rail is bolted to a wall. The model uses the wall's frame:
 - **Arm mounting:** the arm stands on the carriage **turned 180° about its
   base axis** (`base_joint` in `ur10e.urdf`). At home posture it reaches
   toward the switch end.
-- **Collision model:** the mounting wall, just behind the rail, and the
-  floor, 1 m below it.
+- **Payload:** a 1 ft, 1 in boom out along `tool0` +z, then a 6 × 6 × 18 in
+  prism whose 6 × 6 bottom face is
+  centred on the boom tip, its long axis continuing along `tool0` z. At the
+  prism's top, two flat 6 × 12 × 0.125 in wings extend from its `tool0` ±x
+  faces, flush with the top face: a 30 in span. It is the `payload` link in
+  `ur10e.urdf`, so collision, clearance and RViz all see it. Collision boxes
+  are padded: the boom to 1.5 in square, the prism and wings by 2 cm on every
+  side.
+- **Collision model:** the mounting wall, just behind the rail; the floor,
+  1 m below it; and an end wall 2 ft (0.61 m) beyond each end of the rail.
+  The switch-end wall is only 2 ft high, so its top is 0.39 m below the rail
+  and the arm can reach over it. The far-end wall is full height.
 - **RViz** draws this frame with +z up, so the rail appears to lie on a
   surface that is really the wall.
 
@@ -424,10 +448,13 @@ carriage: with the arm turned the wrong way, the flange moves twice the rail
 travel. Replay a plan through the model (FK of `tool0` along `q_path`) to
 check.
 
-### Running the wall-mount plan
+### Running the payload plan
 
-The committed plan is `ros2_ws/plans/wallmount_20260929/best_plan.json`; see
-the README beside it for its provenance. It uses the packaged recording, so
+The committed plan is `ros2_ws/plans/payload_20261010/best_plan.json`; see
+the README beside it for its provenance. It is for the rig **with the payload
+mounted** (boom, prism and wings; centre of rotation at the prism's centre). The earlier
+`plans/wallmount_20260929` plan was for a bare flange; the executor now
+refuses it. It uses the packaged recording, so
 nothing needs copying.
 
 1. **Pendant:** power on, release the brakes, switch to **Remote** mode (R3).
@@ -437,7 +464,7 @@ nothing needs copying.
 
    ```bash
    PYTHONUNBUFFERED=1 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
-       plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+       plan:=/root/ros2_ws/plans/payload_20261010/best_plan.json \
        csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
        hardware:=real enable_commands:=true \
        rail_offset_m:=-0.05 rail_sign:=1 \
@@ -471,7 +498,7 @@ command as on the rig, with fake hardware:
 
 ```bash
 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
-    plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+    plan:=/root/ros2_ws/plans/payload_20261010/best_plan.json \
     csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
     hardware:=fake mode:=full time_scale:=0.1 task_time_scale:=1.0 kp:=1.0
 ```
@@ -492,9 +519,11 @@ ros2 service call /plan_executor/stop std_srvs/srv/Trigger       # any time
 1. **Return the arm** to the plan-home posture, with the rail held still.
    Within `auto_home_arm_limit` (0.2 rad) per joint, the executor moves it
    directly. Beyond that, the straight joint move is first checked against
-   the planner's collision model (wall, floor, self-clearance, joint limits)
-   and runs only if clear. Otherwise `start` refuses, gives the reason, and
-   prints the pendant joint values to use. `check_moves:=false` disables the
+   the planner's collision model (walls, floor, self-clearance, joint
+   limits) and runs only if clear. Otherwise `start` refuses, gives the
+   reason, and prints the pendant joint values to use. With the rail not yet
+   homed, the check uses plan home's rail position, so near either end of
+   travel it does not cover the end walls. `check_moves:=false` disables the
    check and restores the plain 0.2 rad limit. Unmodelled obstacles in the
    lab are not covered.
 2. **Home the rail**: `AXIS0 JOG VEL <rail_homing_speed>:AXIS0 JOG HOME -1`.
@@ -510,10 +539,14 @@ ros2 service call /plan_executor/stop std_srvs/srv/Trigger       # any time
 
 `~/move_to_home` runs steps 1 to 3 only.
 
-Stage 3's rail move and the rail homing keep the arm at the screened home
-posture. The modelled wall and floor are uniform along the rail, so the
-clearance stays as screened. Obstacles in the lab that are not in the model
-are not covered.
+Stage 3's rail move and the rail homing keep the arm at the home posture.
+The planner screens that posture carried over the rail's 0–3 m travel, so it
+clears the mounting wall, floor and both end walls anywhere in it. Homing
+parks the carriage at the switch, which on the rig is rail −0.05 m
+(`rail_offset_m`), just outside the swept range. This plan's home posture
+keeps at least 148 mm from every modelled surface from −0.05 m to 3 m, and at
+least 163 mm from the end walls.
+Obstacles in the lab that are not in the model are not covered.
 
 `time_scale` slows the approach moves and the warmup, and `task_time_scale`
 slows the task (0 means the same as `time_scale`). Velocities scale by the
@@ -526,12 +559,12 @@ homes to `rail_offset_m`.
 
 ### On the rig: full runbook
 
-Plan used below: `plans/wallmount_20260929/best_plan.json`. Its home is rail
-1.5 m and arm `[0, -75, 100, -115, -80, 0]` degrees. For another plan, print
+Plan used below: `plans/payload_20261010/best_plan.json`. Its home is rail
+1.5 m and arm `[0, -75, 100, -115, 100, 90]` degrees. For another plan, print
 its home with:
 
 ```bash
-python3 -c "import json,math;h=json.load(open('ros2_ws/plans/wallmount_20260929/best_plan.json'))['home'];print('rail m',h[0],'arm deg',[round(math.degrees(a),3) for a in h[1:]])"
+python3 -c "import json,math;h=json.load(open('ros2_ws/plans/payload_20261010/best_plan.json'))['home'];print('rail m',h[0],'arm deg',[round(math.degrees(a),3) for a in h[1:]])"
 ```
 
 Controllers: UR10e at `192.168.7.8` (TCP 30003), Parker rail at `192.168.7.6`
@@ -600,9 +633,9 @@ Close it before launching: one command client at a time.
 3. Check that RTDE is enabled: Settings → Security → Services → RTDE. It is
    on by default. `ur_bridge` writes the arm velocities through it.
 4. The arm can start from any pose. `~/start` returns it to plan home
-   (`[0, -75, 100, -115, -80, 0]` degrees for this plan): within 0.2 rad
+   (`[0, -75, 100, -115, 100, 90]` degrees for this plan): within 0.2 rad
    (11°) per joint directly, and beyond that only after the straight move
-   has been checked against the collision model (wall, floor,
+   has been checked against the collision model (walls, floor,
    self-clearance). If the check fails, `start` refuses with the reason and
    the arm must be moved from the pendant. The model knows nothing of
    unmodelled obstacles in the lab: watch the return sweep.
@@ -629,9 +662,9 @@ where "plan home" is on the real rail, so check it in R6.
 
 #### R5. Plan, recording and container (host shell)
 
-The wall-mount plan is committed under `ros2_ws/plans/` and certified on the
+The payload plan is committed under `ros2_ws/plans/` and certified on the
 packaged recording, so it needs no copying: pass the paths shown in "Running
-the wall-mount plan". The steps below are for a plan produced elsewhere.
+the payload plan". The steps below are for a plan produced elsewhere.
 `ros2_ws/runs/` and `ros2_ws/input/` are not in Git, so such a plan, and the
 recording it was certified on, must be copied onto this PC. The executor
 refuses a recording whose SHA-256 differs from the one stored in the plan.
@@ -662,7 +695,7 @@ The pinned container is the tested route.
 
 ```bash
 PYTHONUNBUFFERED=1 ros2 launch ur10e_trajectory_pkg hardware_demo.launch.py \
-    plan:=/root/ros2_ws/plans/wallmount_20260929/best_plan.json \
+    plan:=/root/ros2_ws/plans/payload_20261010/best_plan.json \
     csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv \
     hardware:=real enable_commands:=false \
     rail_offset_m:=-0.05 rail_sign:=1 \
@@ -982,5 +1015,5 @@ From the repository root:
 
 ```bash
 python3 ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/railTest_modified.py \
-    ros2_ws/plans/wallmount_20260929/best_plan.json
+    ros2_ws/plans/payload_20261010/best_plan.json
 ```

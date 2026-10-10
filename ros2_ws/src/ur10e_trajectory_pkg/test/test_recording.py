@@ -10,6 +10,7 @@ import shutil
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.spatial.transform import Rotation
 
 from ur10e_trajectory_pkg import target_builder as targets
 from ur10e_trajectory_pkg import plan_artifact, trajectory_input
@@ -102,9 +103,13 @@ def test_targets_use_only_q_I_G_and_hold_position_fixed(tmp_path, packaged):
     for actual, expected in zip(second, first):
         np.testing.assert_allclose(actual, expected, atol=1e-12)
 
-    positions = np.column_stack(first[:3])
+    # What is held fixed is the centre of rotation, G's origin, which the
+    # mount puts 21 in out along each tool target's z; the flange orbits it.
+    tool = np.column_stack(first[:3])
+    out_along_z = Rotation.from_quat(first[3]).as_matrix()[:, :, 2]
+    centres = tool + targets.MOUNT_OFFSET_M * out_along_z
     np.testing.assert_allclose(
-        positions, np.tile(positions[0], (len(positions), 1)), atol=1e-12)
+        centres, np.tile(centres[0], (len(centres), 1)), atol=1e-12)
     assert 'bound_m' not in metadata
     assert 'translation_scale_factor' not in metadata
 

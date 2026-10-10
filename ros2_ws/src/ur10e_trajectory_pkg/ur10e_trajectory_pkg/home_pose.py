@@ -23,8 +23,10 @@ HOME_CRITERIA = (
     'Configured home must pass environment clearance >= 0.02 m, '
     'self-clearance >= 0.01 m, joint-limit fraction >= 0.05, '
     'posture margin >= 0.02, no collision, and arm condition <= 50 '
-    'through a +/-5 deg neighbourhood. Every chosen task start must have '
-    'a validated warmup from this home.'
+    'through a +/-5 deg neighbourhood. Its arm posture must keep '
+    'environment clearance >= 0.02 m carried over the whole rail travel, '
+    'where rail homing and rail-only moves take it. Every chosen task start '
+    'must have a validated warmup from this home.'
 )
 
 
@@ -161,12 +163,22 @@ def _gate_thresholds():
     return values
 
 
-def _screen_failures(gates, robustness):
+def _screen_failures(gates, robustness, rail_sweep):
     """Which criterion the pose fails, and by how much."""
     failures = []
+    thresholds = _gate_thresholds()
     if gates['in_collision']:
         failures.append('the pose is in collision')
-    for field, threshold in _gate_thresholds().items():
+    if rail_sweep['colliding_rails_m']:
+        hits = rail_sweep['colliding_rails_m']
+        failures.append(f'the arm posture collides carried along the rail, at '
+                        f'{len(hits)} rail positions from {hits[0]:.2f} to {hits[-1]:.2f} m')
+    floor = thresholds['collision_distance_m']
+    if rail_sweep['min_clearance_m'] < floor:
+        failures.append(f"environment clearance {rail_sweep['min_clearance_m']:.4f} m "
+                        f"carried along the rail, at rail {rail_sweep['at_rail_m']:.2f} m, "
+                        f'below the {floor:.4f} m floor')
+    for field, threshold in thresholds.items():
         measured = gates.get(field)
         if measured is not None and measured < threshold:
             _, label, unit = GATE_THRESHOLDS[field]
@@ -199,10 +211,13 @@ def _recorded_drift(record, gates, robustness):
 def recheck_home(validator, choice, workspace=None):
     """Re-screen the chosen home against its own criteria, the pose alone.
 
-    Static gates (the self-clearance floor included) and the +/-5 deg
-    condition test, recomputed, plus a comparison with what the artifact
-    recorded. No placements and no planning: this is what catches a stale or
-    hand-edited home_choice.json, and it costs a second.
+    Static gates (the self-clearance floor included), the +/-5 deg
+    condition test and the rail sweep, recomputed, plus a comparison with
+    what the artifact recorded. The rail sweep carries the arm posture over
+    the whole rail travel: the executor homes the rail and moves it to plan
+    home in this posture, and the end walls make clearance depend on where
+    the carriage is. No placements and no planning: this is what catches a
+    stale or hand-edited home_choice.json, and it costs a few seconds.
     """
     from ur10e_trajectory_pkg.planning_runtime import repository_revision
 
@@ -210,13 +225,14 @@ def recheck_home(validator, choice, workspace=None):
     configuration = np.asarray(record['configuration'], dtype=float)
     gates = checks.static_gates(validator, configuration)
     robustness = checks.singularity_robustness(validator, configuration)
-    failures = _screen_failures(gates, robustness)
+    rail_sweep = checks.rail_sweep_clearance(validator, configuration)
+    failures = _screen_failures(gates, robustness, rail_sweep)
     drift = _recorded_drift(record, gates, robustness)
     if workspace is None:
         workspace = os.path.dirname(os.path.abspath(__file__))
     return {'configuration': configuration.tolist(), 'criteria': HOME_CRITERIA,
             'static_gates': gates, 'singularity': robustness,
-            'failures': failures, 'recorded_drift': drift,
+            'rail_sweep': rail_sweep, 'failures': failures, 'recorded_drift': drift,
             'passed': not failures and not drift,
             'repository_revision': repository_revision(workspace)}
 

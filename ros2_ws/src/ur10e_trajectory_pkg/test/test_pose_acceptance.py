@@ -27,13 +27,17 @@ from ur10e_trajectory_pkg.validation_core import (
     format_failure,
 )
 
-from test_geometry_invariants import _urdf_path
+from test_geometry_invariants import bare_flange_urdf
 
 
 @pytest.fixture(scope='module')
-def validator():
+def validator(tmp_path_factory):
+    # Synthetic paths around (0, -135, 90, -90, 45, 0), where the payload
+    # meets the floor: these test the algorithms, so they run on the bare
+    # flange. The payload's own collisions are tested in geometry_invariants.
     return TrajectoryValidator(
-        _urdf_path(), mesh_base_path=get_package_share_directory('ur_description')
+        bare_flange_urdf(tmp_path_factory.mktemp('bare')),
+        mesh_base_path=get_package_share_directory('ur_description')
     )
 
 

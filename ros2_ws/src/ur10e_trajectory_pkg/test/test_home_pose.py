@@ -22,7 +22,7 @@ def validator():
 
 @pytest.fixture(scope='module')
 def compact():
-    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
 
 
 # --------------------------------------------------------------------------
@@ -46,6 +46,57 @@ def test_clearance_changes_with_the_arm_posture(validator, compact):
     down = sweep.collision_distance(validator, lowered)
     assert raised != pytest.approx(0.049, abs=1e-3)
     assert down < raised
+
+
+# --------------------------------------------------------------------------
+# The home posture carried along the rail
+# --------------------------------------------------------------------------
+
+def test_the_example_home_clears_every_wall_over_the_whole_rail(validator, compact):
+    """Rail homing and rail-only moves carry this posture to either end.
+
+    Near rail 0 the arm passes over the 2 ft switch-end wall with about
+    0.16 m to spare; that wall's height is what makes homing in this posture
+    possible.
+    """
+    result = sweep.rail_sweep_clearance(validator, compact)
+    assert result['colliding_rails_m'] == []
+    assert result['min_clearance_m'] >= home_pose._gate_thresholds()['collision_distance_m']
+    assert result['samples'] == 301 and result['step_m'] == pytest.approx(0.01)
+
+
+def test_wings_along_the_rail_hit_the_switch_end_wall_on_the_way_home(validator, compact):
+    """Why the example home has wrist_3 at 90.
+
+    At wrist_3 0 the payload's 30 in wings lie along the rail. The posture is
+    clear where it stands, but carried toward rail 0, as homing does, a wing
+    meets the switch-end wall in the outer ~0.3 m of travel.
+    """
+    along = compact.copy()
+    along[6] = 0.0
+    assert validator.check_all_collisions(along) is False
+    result = sweep.rail_sweep_clearance(validator, along)
+    assert result['colliding_rails_m'] and max(result['colliding_rails_m']) < 0.5
+    across = sweep.rail_sweep_clearance(validator, compact)
+    assert across['colliding_rails_m'] == []
+
+
+def test_a_home_that_hits_an_end_wall_along_the_rail_fails_the_recheck(validator, compact):
+    """Clear where it stands, but the carriage would take it into a wall.
+
+    Panned 25 deg down, the posture is clear at rail 1.5 and the static gates
+    see no collision there. Carried toward rail 0, as homing does, the arm
+    meets the switch-end wall below its top: the rail sweep names it.
+    """
+    lowered = compact.copy()
+    lowered[1] = np.deg2rad(25.0)
+    assert validator.check_all_collisions(lowered) is False
+
+    recheck = home_pose.recheck_home(validator, _choice(validator, lowered))
+    assert recheck['passed'] is False
+    assert recheck['static_gates']['in_collision'] is False
+    assert recheck['rail_sweep']['colliding_rails_m'][0] == pytest.approx(0.0)
+    assert any('carried along the rail' in line for line in recheck['failures'])
 
 
 # --------------------------------------------------------------------------

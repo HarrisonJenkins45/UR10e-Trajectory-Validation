@@ -1,0 +1,908 @@
+{
+ "schema_version": 1,
+ "command": [
+  "fast_section",
+  "--csv",
+  "/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv",
+  "--home-json",
+  "/root/ros2_ws/examples/home_choice.json",
+  "--work-dir",
+  "/root/ros2_ws/runs/payload_cor_centre_900",
+  "--target-s",
+  "60",
+  "--time-budget-s",
+  "900",
+  "--workers",
+  "12"
+ ],
+ "started_at": "2026-10-10T09:47:12+0000",
+ "target_s": 60.0,
+ "time_budget_s": 900.0,
+ "budget_clock": "wall clock from process start, imports and setup included",
+ "contract": {
+  "promise": "a certified section of at least target_s within time_budget_s when this search finds one, with its plan published as soon as it passes",
+  "otherwise": "inconclusive: neither status reports that the recording has no such section. The fast search is a beam, not exhaustive",
+  "to_decide_infeasibility": "run the exhaustive engine (section_planner --engine pipeline) whose graph disconnect bounds a start; it costs tens of minutes per slice",
+  "longer_sections": "not this mode: section_planner reads this run's journal and extends the certificate"
+ },
+ "inputs": {
+  "recording": {
+   "csv_path": "/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv",
+   "sha256": "2dea1586d3bb6e193256d1f27643fd94aa154bb72bc9d17c901ab7434b1a1d5b",
+   "samples": 5000,
+   "duration_s": 499.9,
+   "step_range_s": [
+    0.09999999999990905,
+    0.10000000000007958
+   ],
+   "columns_used": [
+    "timestamp",
+    "q_I_G_x",
+    "q_I_G_y",
+    "q_I_G_z",
+    "q_I_G_w"
+   ],
+   "problems": [],
+   "passed": true,
+   "first_timestamp_s": 0.0,
+   "last_timestamp_s": 499.9
+  },
+  "home": {
+   "path": "/root/ros2_ws/examples/home_choice.json",
+   "sha256": "b8c393249e4e1a3f818b9274ba5308c7ec7b99e3d593d3b008be3f2d0c5f2237",
+   "configuration": [
+    1.5,
+    0.0,
+    -1.3089969389957472,
+    1.7453292519943295,
+    -2.007128639793479,
+    1.7453292519943295,
+    1.5707963267948966
+   ]
+  },
+  "via_poses": null,
+  "urdf": "/root/ros2_ws/ur10e.urdf",
+  "urdf_sha256": "9964fddf793083dbfbb4cff266cd2c5926f62e9b59a24a28909ce961e7af5891",
+  "placement": "nominal"
+ },
+ "limits": {
+  "statuses": {
+   "velocity": [
+    "provisional",
+    "certified",
+    "certified",
+    "certified",
+    "certified",
+    "certified",
+    "certified"
+   ],
+   "acceleration": [
+    "assumed",
+    "provisional",
+    "provisional",
+    "provisional",
+    "provisional",
+    "provisional",
+    "provisional"
+   ],
+   "jerk": [
+    "assumed",
+    "assumed",
+    "assumed",
+    "assumed",
+    "assumed",
+    "assumed",
+    "assumed"
+   ]
+  },
+  "may_certify_for_hardware": false
+ },
+ "limitations": [
+  "Orientation only: q_I_G drives the motion and the end-effector position is held at the first sample; no translation, scaling or camera-relative motion.",
+  "Nominal placement only: a fixed position, and the recording turned by a fixed rule so the boom faces out of the wall; no placement or mount-alignment optimisation.",
+  "T_EG, the mount transform, is provisional (the centre of rotation at the payload body's geometric centre, 21 in out along tool0 z, no rotation) until the hardware interface fixes it; every plan carries it.",
+  "Arm acceleration is provisional and arm jerk and every rail limit are assumed (motion_limits); a certified section is planner-certified, not hardware-certified.",
+  "The longest section is the longest this finite search certified under its budget; unprobed starts and lengths are listed, and nothing here shows that an uncertified section is infeasible.",
+  "The fast search is a beam over on-demand candidates, not the exhaustive graph: an attempt that finds no certificate is evidence of nothing."
+ ],
+ "provenance": {
+  "code_revision": "4b23968f1efbadc634de60659cf155a2e05d9901",
+  "image_id": "sha256:b0935ec83c4bc431b3d354ff6e85c68ac6d7940d4484777d6471ff0bc1578bf2",
+  "workers": 12,
+  "levels": [
+   {
+    "beam": 16,
+    "bank_seeds": 2,
+    "rails": [
+     "tracking"
+    ],
+    "start_admit": 16,
+    "start_eval": 64
+   },
+   {
+    "beam": 48,
+    "bank_seeds": 8,
+    "rails": [
+     "tracking"
+    ],
+    "start_admit": 48,
+    "start_eval": 256
+   },
+   {
+    "beam": 128,
+    "bank_seeds": 8,
+    "rails": [
+     "tracking",
+     0.5,
+     1.5,
+     2.5
+    ],
+    "start_admit": 128,
+    "start_eval": 1024
+   },
+   {
+    "beam": 384,
+    "bank_seeds": 8,
+    "rails": [
+     "tracking",
+     0.0,
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "start_admit": null,
+    "start_eval": null
+   }
+  ]
+ },
+ "mount": {
+  "name": "T_EG",
+  "direction": "pose of the target body frame G in the robot tool frame E (tool0): p^E = T_EG p^G; the tool is commanded to T_RE = T_RG @ inv(T_EG)",
+  "transform": [
+   [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.5334
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  ],
+  "provisional": true
+ },
+ "schedule": {
+  "rounds": 5,
+  "attempts_planned": 50,
+  "grid_starts": 33,
+  "stride_samples": 100
+ },
+ "attempts": [
+  {
+   "round": 0,
+   "start": 0,
+   "samples": 601,
+   "max_search_level": 0,
+   "status": "no complete path under the fast search: first disconnected layer 228",
+   "failed_stage": "graph",
+   "seconds": 25.54118452395778,
+   "finished_at_elapsed_s": 26.96160973981023,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_000000_samples_000601_level_0",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 0.9573640620219521
+    },
+    {
+     "stage": "search",
+     "seconds": 24.572751817991957
+    }
+   ],
+   "search": {
+    "escalations": [],
+    "stats": {
+     "layers_expanded": 228,
+     "searches": 1,
+     "max_beam": 16
+    },
+    "final_levels": [
+     0
+    ],
+    "timings": {
+     "starts_s": 7.404685363988392,
+     "candidates_s": 13.878116728621535,
+     "edges_s": 3.1504833275685087
+    },
+    "cache": {
+     "solve_hits": 0,
+     "solve_misses": 2712,
+     "edge_queries": 13419,
+     "start_hits": 0,
+     "start_misses": 64
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 0,
+   "start": 4399,
+   "samples": 601,
+   "max_search_level": 0,
+   "status": "no complete path under the fast search: first disconnected layer 325",
+   "failed_stage": "graph",
+   "seconds": 22.12011973798508,
+   "finished_at_elapsed_s": 49.09713972179452,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_004399_samples_000601_level_0",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 0.8163360040052794
+    },
+    {
+     "stage": "search",
+     "seconds": 21.2861316310009
+    }
+   ],
+   "search": {
+    "escalations": [],
+    "stats": {
+     "layers_expanded": 325,
+     "searches": 1,
+     "max_beam": 16
+    },
+    "final_levels": [
+     0
+    ],
+    "timings": {
+     "starts_s": 3.246423414966557,
+     "candidates_s": 12.14768462558277,
+     "edges_s": 5.654050690820441
+    },
+    "cache": {
+     "solve_hits": 0,
+     "solve_misses": 8269,
+     "edge_queries": 38770,
+     "start_hits": 0,
+     "start_misses": 88
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 0,
+   "start": 2199,
+   "samples": 601,
+   "max_search_level": 0,
+   "status": "no complete path under the fast search: first disconnected layer 521",
+   "failed_stage": "graph",
+   "seconds": 39.41408454300836,
+   "finished_at_elapsed_s": 88.52343758882489,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_002199_samples_000601_level_0",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 4.408389300049748
+    },
+    {
+     "stage": "search",
+     "seconds": 34.99019809102174
+    }
+   ],
+   "search": {
+    "escalations": [],
+    "stats": {
+     "layers_expanded": 521,
+     "searches": 1,
+     "max_beam": 16
+    },
+    "final_levels": [
+     0
+    ],
+    "timings": {
+     "starts_s": 4.442064715956803,
+     "candidates_s": 27.109720747976098,
+     "edges_s": 3.315886177297216
+    },
+    "cache": {
+     "solve_hits": 0,
+     "solve_misses": 13765,
+     "edge_queries": 47353,
+     "start_hits": 0,
+     "start_misses": 136
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 1,
+   "start": 0,
+   "samples": 601,
+   "max_search_level": 1,
+   "status": "no complete path under the fast search: first disconnected layer 476",
+   "failed_stage": "graph",
+   "seconds": 81.44642056699377,
+   "finished_at_elapsed_s": 169.9825025757891,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_000000_samples_000601_level_1",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 0.7206486940267496
+    },
+    {
+     "stage": "search",
+     "seconds": 80.70616621000227
+    }
+   ],
+   "search": {
+    "escalations": [
+     {
+      "failed_layer": 228,
+      "window_start": 212,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 228,
+      "window_start": 164,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 253,
+      "window_start": 237,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 253,
+      "window_start": 189,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 253,
+      "window_start": 0,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 476,
+      "window_start": 460,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 476,
+      "window_start": 412,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 476,
+      "window_start": 220,
+      "levels": [
+       1
+      ]
+     }
+    ],
+    "stats": {
+     "layers_expanded": 1225,
+     "searches": 1,
+     "max_beam": 48
+    },
+    "final_levels": [
+     0,
+     1
+    ],
+    "timings": {
+     "starts_s": 9.902762559067924,
+     "candidates_s": 50.10468126827618,
+     "edges_s": 19.29402870242484
+    },
+    "cache": {
+     "solve_hits": 12476,
+     "solve_misses": 24877,
+     "edge_queries": 240422,
+     "start_hits": 128,
+     "start_misses": 328
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 1,
+   "start": 4399,
+   "samples": 601,
+   "max_search_level": 1,
+   "status": "no complete path under the fast search: first disconnected layer 330",
+   "failed_stage": "graph",
+   "seconds": 62.89105576695874,
+   "finished_at_elapsed_s": 232.88687872578157,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_004399_samples_000601_level_1",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 0.5897398890228942
+    },
+    {
+     "stage": "search",
+     "seconds": 62.28587105398765
+    }
+   ],
+   "search": {
+    "escalations": [
+     {
+      "failed_layer": 325,
+      "window_start": 309,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 325,
+      "window_start": 261,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 325,
+      "window_start": 69,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 318,
+      "window_start": 62,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 322,
+      "window_start": 0,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 330,
+      "window_start": 314,
+      "levels": [
+       1
+      ]
+     }
+    ],
+    "stats": {
+     "layers_expanded": 1260,
+     "searches": 1,
+     "max_beam": 48
+    },
+    "final_levels": [
+     0,
+     1
+    ],
+    "timings": {
+     "starts_s": 4.787574913993012,
+     "candidates_s": 33.5303740518284,
+     "edges_s": 22.380670728627592
+    },
+    "cache": {
+     "solve_hits": 33799,
+     "solve_misses": 38305,
+     "edge_queries": 483407,
+     "start_hits": 176,
+     "start_misses": 376
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 1,
+   "start": 2199,
+   "samples": 601,
+   "max_search_level": 1,
+   "status": "no complete path under the fast search: first disconnected layer 579",
+   "failed_stage": "graph",
+   "seconds": 78.23641656001564,
+   "finished_at_elapsed_s": 311.13526588183595,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_002199_samples_000601_level_1",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 4.481810174998827
+    },
+    {
+     "stage": "search",
+     "seconds": 73.73887441499392
+    }
+   ],
+   "search": {
+    "escalations": [
+     {
+      "failed_layer": 521,
+      "window_start": 505,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 533,
+      "window_start": 517,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 533,
+      "window_start": 469,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 567,
+      "window_start": 551,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 579,
+      "window_start": 563,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 579,
+      "window_start": 515,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 579,
+      "window_start": 323,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 579,
+      "window_start": 0,
+      "levels": [
+       1
+      ]
+     }
+    ],
+    "stats": {
+     "layers_expanded": 1606,
+     "searches": 1,
+     "max_beam": 48
+    },
+    "final_levels": [
+     0,
+     1
+    ],
+    "timings": {
+     "starts_s": 9.383922145992983,
+     "candidates_s": 47.604450365237426,
+     "edges_s": 15.87274098128546
+    },
+    "cache": {
+     "solve_hits": 50308,
+     "solve_misses": 49119,
+     "edge_queries": 592900,
+     "start_hits": 272,
+     "start_misses": 584
+    },
+    "validation_attempts": []
+   }
+  },
+  {
+   "round": 1,
+   "start": 1099,
+   "samples": 601,
+   "max_search_level": 1,
+   "status": "ok",
+   "failed_stage": null,
+   "seconds": 103.00695051701041,
+   "finished_at_elapsed_s": 414.1544354428188,
+   "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1",
+   "stages": [
+    {
+     "stage": "targets_and_tracking",
+     "seconds": 0.6577840190147981
+    },
+    {
+     "stage": "search",
+     "seconds": 89.14437181100948
+    },
+    {
+     "stage": "certify",
+     "seconds": 13.15518894098932,
+     "timings": {
+      "home_gate_s": 0.03565884003182873,
+      "refinement_s": 9.589502224989701,
+      "winding_and_warmup_s": 3.525165962986648,
+      "task_validation_s": 2.745998790487647e-05
+     }
+    }
+   ],
+   "search": {
+    "escalations": [
+     {
+      "failed_layer": 329,
+      "window_start": 313,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 329,
+      "window_start": 265,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 329,
+      "window_start": 73,
+      "levels": [
+       1
+      ]
+     },
+     {
+      "failed_layer": 329,
+      "window_start": 0,
+      "levels": [
+       1
+      ]
+     }
+    ],
+    "stats": {
+     "layers_expanded": 1267,
+     "searches": 1,
+     "max_beam": 48
+    },
+    "final_levels": [
+     0,
+     1
+    ],
+    "timings": {
+     "starts_s": 14.420336050970946,
+     "candidates_s": 54.016296815651,
+     "edges_s": 19.689719818357844
+    },
+    "cache": {
+     "solve_hits": 58266,
+     "solve_misses": 62046,
+     "edge_queries": 734515,
+     "start_hits": 320,
+     "start_misses": 728
+    },
+    "validation_attempts": [
+     {
+      "status": "ok",
+      "both_commands_pass": true
+     }
+    ]
+   }
+  }
+ ],
+ "setup_s": 1.409151182800997,
+ "status": "certified_section_found",
+ "elapsed_s": 414.1883797888295,
+ "within_budget": true,
+ "result": {
+  "best_section": {
+   "start_index": 1099,
+   "end_index": 1700,
+   "samples": 601,
+   "half_open": true,
+   "start_time_s": 109.9,
+   "last_sample_time_s": 169.9,
+   "recorded_duration_s": 60.0,
+   "duration_tolerance_s": 1e-09,
+   "boundary": {
+    "kind": "not_examined",
+    "next_sample_fails": null,
+    "statement": "the fast mode stops at the first certificate; section_planner extends it"
+   },
+   "classification": {
+    "class": "pass",
+    "detail": null
+   },
+   "spin_up_s": 0.39999999999997726,
+   "spin_up": {
+    "duration_s": 0.39999999999997726,
+    "requested_duration_s": 0.39999999999997726,
+    "profile": "smoothstep playback rate: tau(t) = t^3/T^2 - t^4/(2 T^3)",
+    "recorded_time_consumed_s": 0.19999999999998863,
+    "samples_added": 2,
+    "recorded_start_rate_rad_s": 0.0770189252606468,
+    "peak_spin_up_angular_acceleration_rad_s2": 0.2888209697274419,
+    "task_starts_at_rest": true
+   },
+   "mount": {
+    "name": "T_EG",
+    "direction": "pose of the target body frame G in the robot tool frame E (tool0): p^E = T_EG p^G; the tool is commanded to T_RE = T_RG @ inv(T_EG)",
+    "transform": [
+     [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.5334
+     ],
+     [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "provisional": true
+   },
+   "placement": "nominal",
+   "start_winding": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "start_route": {
+    "candidate": 12,
+    "winding": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "route_kind": "direct"
+   },
+   "warmup": {
+    "route_kind": "direct",
+    "rest_points": [
+     [
+      1.5,
+      0.0,
+      -1.3089969389957472,
+      1.7453292519943295,
+      -2.007128639793479,
+      1.7453292519943295,
+      1.5707963267948966
+     ],
+     [
+      1.5134661639557523,
+      -0.6517419480702772,
+      -0.07561714458232956,
+      0.36521148799289443,
+      -2.886239778583943,
+      1.982699113564795,
+      -2.8470270036760814
+     ]
+    ],
+    "dwell_s": 0.5,
+    "segment_durations_s": [
+     2.636694077816835
+    ],
+    "total_duration_s": 2.636694077816835
+   },
+   "refinement": {
+    "status": "refined",
+    "level_m": 0.005
+   },
+   "margins": {
+    "worst_condition": 23.874499136602267,
+    "min_alpha_star": 20.51891688765914,
+    "min_self_clearance_m": 0.016399687467957884,
+    "velocity_budget_used": 0.06583487689614727,
+    "joint_limits": {
+     "rail": {
+      "to_lower": 1.5134661639557523,
+      "to_upper": 0.41274821334747713
+     },
+     "shoulder_pan": {
+      "to_lower": 5.47917102381039,
+      "to_upper": 6.371041899187001
+     },
+     "shoulder_lift": {
+      "to_lower": 5.697386360955671,
+      "to_upper": 6.358802451761916
+     },
+     "elbow": {
+      "to_lower": 3.5068041415826876,
+      "to_upper": 2.0662555946577275
+     },
+     "wrist_1": {
+      "to_lower": 3.351021416616729,
+      "to_upper": 7.296864073215209
+     },
+     "wrist_2": {
+      "to_lower": 6.866704268248077,
+      "to_upper": 3.6496624538289097
+     },
+     "wrist_3": {
+      "to_lower": 3.436158303503505,
+      "to_upper": 3.7778108610412975
+     }
+    },
+    "joints_near_a_limit_at_section_end": []
+   },
+   "evidence": {
+    "probe": {
+     "start": 1099,
+     "samples": 601
+    },
+    "work_dir": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1",
+    "artifacts": {
+     "pipeline": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1/pipeline.json",
+     "candidates": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1/candidates.json",
+     "graph": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1/graph.json",
+     "commands": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1/commands.json",
+     "task_plan": "/root/ros2_ws/runs/payload_cor_centre_900/attempts/start_001099_samples_000601_level_1/task_plan.json"
+    },
+    "seconds": 103.00695051701041,
+    "peak_memory_gb": null
+   },
+   "plan": {
+    "path": "/root/ros2_ws/runs/payload_cor_centre_900/best_plan.json",
+    "sha256": "64b42cb3eab2bd7a9ad0105fa314a6557d289ec0123e0ec24901275381ca05b3",
+    "q_path_states": 603,
+    "published_at_elapsed_s": 414.19969328079605
+   }
+  },
+  "target_met": true
+ },
+ "length_mode": "python3 -m ur10e_trajectory_pkg.section_planner with the same --csv, --home-json, --via-poses and --work-dir replays this certificate from probes.jsonl and extends it",
+ "resources": {
+  "peak_tree_pss_gb": 1.7507505416870117,
+  "samples": 184,
+  "peak_rss_self_gb": 0.32321929931640625,
+  "peak_rss_children_gb": 0.2972869873046875,
+  "workers": 12
+ }
+}

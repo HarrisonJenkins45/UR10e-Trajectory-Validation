@@ -117,7 +117,7 @@ def test_the_service_validates_continuously_at_the_offline_rate():
 
 @pytest.fixture(scope='module')
 def home():
-    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
 
 
 def test_a_valid_warmup_is_framed_at_the_playback_rate(validator, home):

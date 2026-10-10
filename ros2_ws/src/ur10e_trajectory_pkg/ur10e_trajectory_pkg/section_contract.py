@@ -25,9 +25,11 @@ JOINTS = ('rail', 'shoulder_pan', 'shoulder_lift', 'elbow', 'wrist_1', 'wrist_2'
 LIMITATIONS = (
     'Orientation only: q_I_G drives the motion and the end-effector position is held at '
     'the first sample; no translation, scaling or camera-relative motion.',
-    'Nominal placement only; no placement or mount-alignment optimisation.',
-    'T_EG, the mount transform, is a provisional identity until the hardware interface '
-    'fixes it; every plan carries it.',
+    'Nominal placement only: a fixed position, and the recording turned by a fixed rule '
+    'so the boom faces out of the wall; no placement or mount-alignment optimisation.',
+    'T_EG, the mount transform, is provisional (the centre of rotation at the payload '
+    "body's geometric centre, 21 in out along tool0 z, no rotation) until the hardware "
+    'interface fixes it; every plan carries it.',
     'Arm acceleration is provisional and arm jerk and every rail limit are assumed '
     '(motion_limits); a certified section is planner-certified, not hardware-certified.',
     'The longest section is the longest this finite search certified under its budget; '

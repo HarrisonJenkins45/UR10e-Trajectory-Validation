@@ -20,7 +20,7 @@ from ur10e_trajectory_pkg.configurations import (
 from ur10e_trajectory_pkg.joint_coordinates import TWO_PI
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
-from test_geometry_invariants import _urdf_path
+from test_geometry_invariants import bare_flange_urdf
 
 LAYERS = 8
 
@@ -30,9 +30,13 @@ def _oracle_layers(path):
 
 
 @pytest.fixture(scope='module')
-def validator():
+def validator(tmp_path_factory):
+    # Synthetic paths around (0, -135, 90, -90, 45, 0), where the payload
+    # meets the floor: these test the algorithms, so they run on the bare
+    # flange. The payload's own collisions are tested in geometry_invariants.
     return TrajectoryValidator(
-        _urdf_path(), mesh_base_path=get_package_share_directory('ur_description')
+        bare_flange_urdf(tmp_path_factory.mktemp('bare')),
+        mesh_base_path=get_package_share_directory('ur_description')
     )
 
 
@@ -497,7 +501,7 @@ def test_the_seed_is_the_lifted_state_the_home_reaches_not_its_canonical_row(
     carries it the whole way. Admitting the canonical row because some lift of
     it was reachable started a 5000-waypoint trial in windings that
     disconnected at layer 762; home-validated lifts reached 1709."""
-    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
     canonical = np.concatenate(([1.0], np.deg2rad([20.0, -60.0, 90.0, -100.0, -70.0, 10.0])))
     # Taken from the enumeration rather than shifted by hand: a 2*pi step on
     # an arbitrary joint can leave its travel, in which case that winding does
@@ -525,7 +529,7 @@ def test_the_seed_is_the_lifted_state_the_home_reaches_not_its_canonical_row(
 def test_every_legal_winding_of_every_start_is_validated(validator, monkeypatch):
     """Not the first that works: two windings of one start are different
     long-horizon branches, so every one the home reaches seeds the graph."""
-    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
     canonical = np.concatenate(([1.0], np.deg2rad([20.0, -60.0, 90.0, -100.0, -70.0, 10.0])))
     options = graph_planner.start_winding_options(validator, canonical, home)
     assert len(options) > 1
@@ -555,7 +559,7 @@ def test_a_winding_without_a_direct_route_is_tried_by_via_even_if_another_has_on
         validator, monkeypatch):
     """A via-reachable winding is not dropped because a sibling winding has a
     straight move: it may lead somewhere the sibling cannot."""
-    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    home = np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
     canonical = np.concatenate(([1.0], np.deg2rad([20.0, -60.0, 90.0, -100.0, -70.0, 10.0])))
     options = graph_planner.start_winding_options(validator, canonical, home)
     assert len(options) > 1

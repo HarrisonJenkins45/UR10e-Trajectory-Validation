@@ -1,5 +1,11 @@
 # Plan: wall-mounted rig, 2026-09-29
 
+> **Superseded, and refused by the current code.** This plan was built for a
+> bare flange with the identity mount `T_EG`. With the payload mounted
+> (2026-10-10) the mount is a 21 in offset, and the executor and RViz refuse
+> a plan whose `T_EG` differs. Its home posture also drives the payload into
+> the mounting wall. Use `plans/payload_20261010`.
+
 `best_plan.json` is the plan run on the rig on 2026-09-29. `fast_section.json`
 is the search report that produced it.
 
@@ -20,6 +26,13 @@ is the search report that produced it.
   below, and the model was corrected to that afterwards. The plan has not
   been re-checked against the 1 m floor. It ran clear of it on the rig, and
   the operator accepted it as safe on that basis.
+- **Re-checked 2026-10-10 against the end walls and the 1 m floor**, not
+  re-certified. Every 200 Hz sample of the warmup and the task was
+  collision-checked against the current model, with the 1 m floor and both
+  end walls: there were no collisions. Least environment clearance, sampled
+  at 20 Hz, was 148 mm. The end walls are at least 1.27 m away throughout.
+  The home posture, carried over the whole rail, clears both end walls by
+  at least 0.15 m.
 - **Rig run:** a checked return from the previous pose, then the warmup at
   0.1×, then the task at 1.0× (60.2 s). Worst tracking error was 0.6 mm on
   the rail and 0.0044 rad on the arm, and the flange held its position.

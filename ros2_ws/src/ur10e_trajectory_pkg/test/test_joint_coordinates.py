@@ -31,16 +31,19 @@ from ur10e_trajectory_pkg.joint_coordinates import (
 )
 from ur10e_trajectory_pkg.validation_core import TrajectoryValidator
 
-from test_geometry_invariants import _urdf_path
+from test_geometry_invariants import bare_flange_urdf
 
 ELBOW = JOINT_NAMES.index('elbow_joint')
 WRIST_1 = JOINT_NAMES.index('wrist_1_joint')
 
 
 @pytest.fixture(scope='module')
-def validator():
+def validator(tmp_path_factory):
+    # Recorded on a bare flange: the payload would collide first and mask
+    # the lifting and tracking behaviour these regressions pin.
     return TrajectoryValidator(
-        _urdf_path(), mesh_base_path=get_package_share_directory('ur_description')
+        bare_flange_urdf(tmp_path_factory.mktemp('bare')),
+        mesh_base_path=get_package_share_directory('ur_description')
     )
 
 
@@ -222,11 +225,18 @@ def test_collision_is_invariant_under_a_legal_lift(validator):
 @pytest.fixture(scope='module')
 def tracked(validator):
     pytest.importorskip('pandas')
+    from ur10e_trajectory_pkg import target_builder
     from ur10e_trajectory_pkg.planning_runtime import load_trajectory, run_tracking
-    try:
-        targets, quaternions, dt = load_trajectory(None, 500)
-    except FileNotFoundError:
-        pytest.skip('packaged trajectory CSV not present')
+    # The legacy run held the flange itself at the placement, with the
+    # recording's inertial axes laid on the rail's: build its targets with
+    # the identity mount and lab orientation it was defined for.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(target_builder, 'PROVISIONAL_T_EG', np.eye(4))
+        patch.setattr(target_builder, 'lab_orientation', lambda trajectory: np.eye(3))
+        try:
+            targets, quaternions, dt = load_trajectory(None, 500)
+        except FileNotFoundError:
+            pytest.skip('packaged trajectory CSV not present')
     # The legacy start was defined for an arm mounted facing the other way;
     # shoulder_pan + 180 deg is the same pose in the world on the rig's mount.
     start = LEGACY_MATLAB_START_Q.copy()

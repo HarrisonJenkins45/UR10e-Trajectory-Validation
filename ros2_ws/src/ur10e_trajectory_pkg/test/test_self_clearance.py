@@ -23,7 +23,7 @@ def validator():
 
 @pytest.fixture(scope='module')
 def compact():
-    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, -80.0, 0.0])))
+    return np.concatenate(([1.5], np.deg2rad([0.0, -75.0, 100.0, -115.0, 100.0, 90.0])))
 
 
 def test_the_floor_is_declared_once():

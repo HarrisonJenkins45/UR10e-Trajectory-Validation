@@ -7,9 +7,11 @@ Cuboid env exactly.
 The rig's rail is bolted to a wall, so the model's frame is the wall's:
 +x along the rail, +y up, +z out of the wall. The wall is the plane thin in
 Z just behind the rail, at Z = -0.05; the floor is the plane thin in Y,
-1 m below the rail at Y = -1.0, within the arm's reach. (An earlier model read this frame as a
-floor-mounted rail: a "floor" at Z = -0.05, which was really this wall, and a
-"wall" at Y = +1.0, which was a ceiling the rig does not have.)
+1 m below the rail at Y = -1.0, within the arm's reach. The end walls are
+thin in X, 2 ft beyond each end of the rail; the switch-end one is only 2 ft
+high. (An earlier model read this frame as a floor-mounted rail: a "floor" at
+Z = -0.05, which was really this wall, and a "wall" at Y = +1.0, which was a
+ceiling the rig does not have.)
 """
 import rclpy
 from rclpy.node import Node
@@ -54,7 +56,15 @@ class ObstacleMarkerPublisher(Node):
         # The floor 1 m below the rail: thin in Y at Y = -1.0, 3 m out from
         # the wall, within the arm's reach. Gold.
         floor = self._make_cube(1, 1.5, -1.0, 1.5, 6.0, 0.05, 3.0, 0.85, 0.65, 0.0)
-        self.pub.publish(MarkerArray(markers=[wall, floor]))
+        # The end walls, 2 ft (0.6096 m) beyond each end of the 0 -> 3 m rail:
+        # thin in X, inner faces at X = -0.6096 and X = 3.6096, from the
+        # mounting wall's centre plane (Z = -0.05) out to the floor's edge.
+        # The switch-end wall is 2 ft (0.6096 m) high from the floor, top at
+        # Y = -0.3904; the far-end wall is as tall as the mounting wall. Slate.
+        switch_end = self._make_cube(2, -0.6346, -0.6952, 1.475, 0.05, 0.6096, 3.05,
+                                     0.3, 0.35, 0.45)
+        far_end = self._make_cube(3, 3.6346, 0.25, 1.475, 0.05, 2.5, 3.05, 0.3, 0.35, 0.45)
+        self.pub.publish(MarkerArray(markers=[wall, floor, switch_end, far_end]))
 
 
 def main(args=None):

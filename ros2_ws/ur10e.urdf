@@ -711,6 +711,50 @@
     <parent link="flange"/>
     <child link="tool0"/>
   </joint>
+  <!-- The payload: a 1 ft, 1 in boom out along tool0 +z, and a 6 x 6 x 18 in
+       prism whose 6 x 6 bottom face is centred on the boom tip, long axis
+       along tool0 z. The prism's geometric centre, 21 in out, is the centre
+       of rotation (target_builder.MOUNT_OFFSET_M).
+       At the prism's top, two flat 6 x 12 x 0.125 in wings extend 12 in out
+       of its +x and -x faces, flush with the top face: one 30 x 6 x 0.125 in
+       span along tool0 x. Its frame is tool0's (same origin as flange-tool0),
+       attached to flange so tool0 stays the bare all-zeros tool frame.
+       Visuals are the true size; collisions are padded: the boom to 1.5 in
+       square, the prism and wings by 2 cm on every side. -->
+  <link name="payload">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0.1524"/>
+      <geometry><box size="0.0254 0.0254 0.3048"/></geometry>
+      <material name="payload_boom_grey"><color rgba="0.6 0.6 0.6 1"/></material>
+    </visual>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0.5334"/>
+      <geometry><box size="0.1524 0.1524 0.4572"/></geometry>
+      <material name="payload_prism_gold"><color rgba="0.85 0.65 0.15 1"/></material>
+    </visual>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0.7604125"/>
+      <geometry><box size="0.762 0.1524 0.003175"/></geometry>
+      <material name="payload_wing_blue"><color rgba="0.2 0.3 0.6 1"/></material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.1524"/>
+      <geometry><box size="0.0381 0.0381 0.3048"/></geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.5334"/>
+      <geometry><box size="0.1924 0.1924 0.4972"/></geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.7604125"/>
+      <geometry><box size="0.802 0.1924 0.043175"/></geometry>
+    </collision>
+  </link>
+  <joint name="flange-payload" type="fixed">
+    <origin rpy="1.5707963267948966 0 1.5707963267948966" xyz="0 0 0"/>
+    <parent link="flange"/>
+    <child link="payload"/>
+  </joint>
  <!-- Gazebo / Ignition Plugins -->
   <gazebo>
     <!-- Joint State Publisher for Gazebo -->
