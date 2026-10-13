@@ -39,4 +39,5 @@ is the search report that produced it.
 
 ## Run
 
-See the README section "Running the wall-mount plan".
+No longer runnable: the executor refuses this plan at start-up (see the
+README section "Running the payload plan").

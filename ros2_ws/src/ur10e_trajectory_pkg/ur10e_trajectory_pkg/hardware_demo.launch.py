@@ -15,13 +15,19 @@ Operate the executor with (see plan_executor for the full ~/start sequence):
       straighten arm -> home rail (if needed) -> rail to plan home -> plan
   ros2 service call /plan_executor/move_to_home std_srvs/srv/Trigger
   ros2 service call /plan_executor/stop std_srvs/srv/Trigger
+
+The executor checks the plan at start-up and exits if it refuses it (for
+example a plan certified for a different mount T_EG). Its services never
+appear then, so the launch shuts down with the reason rather than leaving
+the bridges running with nothing to command them.
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription, LogInfo,
+                            Shutdown)
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -71,6 +77,18 @@ ARGUMENTS = (
 )
 
 
+def executor_exited(event, _context):
+    """Shut the launch down with the executor; say why when it failed."""
+    actions = [Shutdown(reason='plan_executor exited')]
+    if event.returncode > 0:
+        actions.insert(0, LogInfo(msg=(
+            f'plan_executor failed (exit code {event.returncode}), so /plan_executor/start '
+            'will not appear; shutting the launch down. Its traceback above gives the '
+            'reason: usually a plan refused at start-up (a different T_EG, recording '
+            'digest or path).')))
+    return actions
+
+
 def generate_launch_description():
     config = {name: LaunchConfiguration(name) for name, _, _ in ARGUMENTS}
     fake = LaunchConfigurationEquals('hardware', 'fake')
@@ -107,7 +125,8 @@ def generate_launch_description():
                  'arm_abort_tolerance': config['arm_abort_tolerance'],
                  'rail_abort_tolerance': config['rail_abort_tolerance'],
                  'speed_scaling_check': config['speed_scaling_check'],
-             }]),
+             }],
+             on_exit=executor_exited),
         Node(package='ur10e_trajectory_pkg', executable='joint_state_merger', output='screen'),
 
         Node(package='ur10e_trajectory_pkg', executable='fake_hardware', output='screen',

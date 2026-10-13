@@ -80,7 +80,9 @@ Prerequisites: a Linux host with Docker, Git, and an X11/XWayland display
 (`DISPLAY` must be set and `xhost` available) for the interactive RViz window.
 Planning and tests do not need a display. The commands below use 12 workers;
 reduce `--workers` on smaller machines. A shorter compute budget or fewer
-workers may finish without a certificate.
+workers may finish without a certificate. With the payload mounted, the
+five-minute budget in step 5 is often not enough: the committed payload plan
+took 414 s, so use `--time-budget-s 900` to reproduce it.
 
 ### 1. Clone and prepare the inputs
 
@@ -98,6 +100,11 @@ For an existing checkout:
 ```bash
 git submodule update --init --recursive
 ```
+
+The payload plan (`plans/payload_20261010`) and the model it was certified
+against are on the `feature/rail-end-walls` branch until it is merged. To run
+it, clone with `-b feature/rail-end-walls`, or check that branch out and
+update the submodule as above.
 
 For a self-contained simulation, use the bundled 5,000-sample recording
 (0.1 s spacing, 499.9 s total) and example home pose. Run on the **host** from
@@ -275,9 +282,13 @@ ros2 launch ur10e_trajectory_pkg VisualizeTraj_RvizPlayback.py \
     csv:=/root/ros2_ws/input/camera_traj.csv
 ```
 
+To preview the committed payload plan instead, pass
+`plan:=/root/ros2_ws/plans/payload_20261010/best_plan.json` and
+`csv:=/root/ros2_ws/src/ur10e_trajectory_pkg/ur10e_trajectory_pkg/camera_traj.csv`.
+
 The player verifies the source-recording digest before publishing anything. It
-shows the rail, arm, floor, wall and Target frame and loops this display
-sequence:
+shows the rail, the arm with its payload, the floor, the mounting wall, both
+end walls and the Target frame, and loops this display sequence:
 
 ```text
 home -> certified warmup -> spin-up -> certified task -> display-only return
@@ -456,6 +467,14 @@ mounted** (boom, prism and wings; centre of rotation at the prism's centre). The
 `plans/wallmount_20260929` plan was for a bare flange; the executor now
 refuses it. It uses the packaged recording, so
 nothing needs copying.
+
+Given the wall-mount plan, as in a launch command left over from it,
+`plan_executor` refuses the plan (`ValueError: plan T_EG differs from the
+current target builder`) and exits before creating its services. The launch
+then shuts down with `plan_executor failed`, the traceback just above it.
+(Before, the rest of the launch kept running and `ros2 service call
+/plan_executor/start` waited forever with `waiting for service to become
+available...`.) Pass the payload plan's path.
 
 1. **Pendant:** power on, release the brakes, switch to **Remote** mode (R3).
 2. **Container:** start it from the repository root (step 3), then build and
